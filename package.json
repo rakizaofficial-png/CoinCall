@@ -1,0 +1,27 @@
+{
+  "name": "coincall",
+  "license": "0BSD",
+  "main": "index.ts",
+  "dependencies": {
+    "@expo/vector-icons": "^15.1.1",
+    "@react-navigation/bottom-tabs": "^7.18.11",
+    "@react-navigation/native": "^7.3.11",
+    "@react-navigation/native-stack": "^7.18.3",
+    "expo": "~57.0.7",
+    "expo-status-bar": "~57.0.1",
+    "react": "19.2.3",
+    "react-native": "0.86.0",
+    "react-native-safe-area-context": "^5.8.0",
+    "react-native-screens": "^4.26.2"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.2",
+    "typescript": "~6.0.3"
+  },
+  "scripts": {
+    "start": "__UNSAFE_EXPO_HOME_DIRECTORY=$PWD/.expo-home expo start",
+    "android": "__UNSAFE_EXPO_HOME_DIRECTORY=$PWD/.expo-home expo start --android",
+    "ios": "__UNSAFE_EXPO_HOME_DIRECTORY=$PWD/.expo-home expo start --ios",
+    "web": "__UNSAFE_EXPO_HOME_DIRECTORY=$PWD/.expo-home expo start --web"
+  }
+}
