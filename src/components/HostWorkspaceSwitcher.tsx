@@ -1,8 +1,9 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useApp } from '../context/AppContext';
 import type { HostWorkspaceMode } from '../types/hostWorkspace';
-import { colors } from '../theme/colors';
+import { radii } from '../theme/colors';
+import { useTheme } from '../theme/ThemeContext';
 
 const MODES: { key: HostWorkspaceMode; label: string }[] = [
   { key: 'waiting_1v1', label: '1v1 Wait' },
@@ -12,6 +13,7 @@ const MODES: { key: HostWorkspaceMode; label: string }[] = [
 ];
 
 export function HostWorkspaceSwitcher() {
+  const { colors } = useTheme();
   const {
     workspaceMode,
     setWorkspaceMode,
@@ -41,13 +43,13 @@ export function HostWorkspaceSwitcher() {
   return (
     <View style={styles.wrap}>
       <View style={styles.statusRow}>
-        <Text style={styles.statusLabel}>HOST STATUS</Text>
+        <Text style={[styles.statusLabel, { color: colors.accent }]}>HOST STATUS</Text>
         <LinearGradient
-          colors={['rgba(255,42,122,0.3)', 'rgba(255,184,0,0.2)']}
-          style={styles.statusPill}
+          colors={[`${colors.primary}4D`, `${colors.accent}33`]}
+          style={[styles.statusPill, { borderColor: `${colors.primary}73` }]}
         >
-          <View style={styles.statusDot} />
-          <Text style={styles.statusValue}>
+          <View style={[styles.statusDot, { backgroundColor: colors.online }]} />
+          <Text style={[styles.statusValue, { color: colors.text }]}>
             {hostPresenceStatus.replace('_', ' ').toUpperCase()}
           </Text>
         </LinearGradient>
@@ -61,17 +63,27 @@ export function HostWorkspaceSwitcher() {
               key={m.key}
               disabled={disabled}
               onPress={() => onSelect(m.key)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active, disabled }}
               style={[
                 styles.chip,
-                active && styles.chipOn,
+                {
+                  backgroundColor: colors.bgCard,
+                  borderColor: colors.border,
+                },
+                active && {
+                  backgroundColor: `${colors.primary}33`,
+                  borderColor: colors.primary,
+                },
                 disabled && styles.chipDisabled,
               ]}
             >
               <Text
                 style={[
                   styles.chipText,
-                  active && styles.chipTextOn,
-                  disabled && styles.chipTextDisabled,
+                  { color: colors.textSecondary },
+                  active && { color: colors.text },
+                  disabled && { color: colors.textMuted },
                 ]}
               >
                 {m.label}
@@ -93,7 +105,6 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   statusLabel: {
-    color: colors.accent,
     fontWeight: '800',
     fontSize: 10,
     letterSpacing: 1.1,
@@ -106,41 +117,25 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255,42,122,0.45)',
-    shadowColor: '#ff2a7a',
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
   },
   statusDot: {
     width: 7,
     height: 7,
     borderRadius: 4,
-    backgroundColor: colors.online,
   },
-  statusValue: { color: colors.text, fontWeight: '800', fontSize: 11 },
+  statusValue: { fontWeight: '800', fontSize: 11 },
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
     paddingHorizontal: 12,
     paddingVertical: 10,
-    borderRadius: 14,
-    backgroundColor: '#151026',
+    borderRadius: radii.md,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-  },
-  chipOn: {
-    backgroundColor: 'rgba(255,42,122,0.25)',
-    borderColor: colors.primary,
-    shadowColor: '#ff2a7a',
-    shadowOpacity: 0.55,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 0 },
+    minHeight: 44,
+    justifyContent: 'center',
   },
   chipDisabled: { opacity: 0.4 },
   chipText: {
-    color: colors.textSecondary,
     fontWeight: '800',
     fontSize: 12,
   },
-  chipTextOn: { color: '#fff' },
-  chipTextDisabled: { color: colors.textMuted },
 });

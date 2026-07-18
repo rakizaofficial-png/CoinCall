@@ -1,6 +1,7 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { Pressable, StyleSheet, Text } from 'react-native';
-import { colors } from '../theme/colors';
+import { radii } from '../theme/colors';
+import { useTheme } from '../theme/ThemeContext';
 
 type Props = {
   label: string;
@@ -8,11 +9,18 @@ type Props = {
   disabled?: boolean;
 };
 
+/** Legacy wrapper — keeps existing call sites working */
 export function GradientButton({ label, onPress, disabled }: Props) {
+  const { colors } = useTheme();
   return (
-    <Pressable onPress={onPress} disabled={disabled} style={disabled && styles.disabled}>
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      disabled={disabled}
+      style={disabled && styles.disabled}
+    >
       <LinearGradient
-        colors={[colors.gradientStart, colors.gradientEnd]}
+        colors={[colors.gradientStart, colors.gradientMid, colors.gradientEnd]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={styles.btn}
@@ -25,10 +33,11 @@ export function GradientButton({ label, onPress, disabled }: Props) {
 
 const styles = StyleSheet.create({
   btn: {
-    borderRadius: 18,
+    borderRadius: radii.lg,
     paddingVertical: 16,
     alignItems: 'center',
     justifyContent: 'center',
+    minHeight: 52,
   },
   label: {
     color: '#fff',

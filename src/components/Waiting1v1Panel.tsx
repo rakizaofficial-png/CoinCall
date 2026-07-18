@@ -1,11 +1,12 @@
-import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Phone, Users, Zap } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useApp } from '../context/AppContext';
-import { colors } from '../theme/colors';
+import { useTheme } from '../theme/ThemeContext';
 
 export function Waiting1v1Panel() {
+  const { colors } = useTheme();
   const {
     hostOnline,
     setHostOnline,
@@ -28,10 +29,13 @@ export function Waiting1v1Panel() {
   const ringScale = pulse % 2 === 0 ? 1 : 1.06;
 
   return (
-    <LinearGradient colors={['#0b0813', '#151026']} style={styles.root}>
-      <Text style={styles.eyebrow}>1V1 WAITING SCREEN</Text>
-      <Text style={styles.title}>Ready for private calls</Text>
-      <Text style={styles.sub}>
+    <LinearGradient
+      colors={[colors.bg, colors.bgElevated, colors.bgSoft]}
+      style={[styles.root, { borderColor: `${colors.accent}55` }]}
+    >
+      <Text style={[styles.eyebrow, { color: colors.accent }]}>1V1 WAITING SCREEN</Text>
+      <Text style={[styles.title, { color: colors.text }]}>Ready for private calls</Text>
+      <Text style={[styles.sub, { color: colors.textSecondary }]}>
         Presence: {hostPresenceStatus.replace('_', ' ').toUpperCase()} ·{' '}
         {callsToday} calls · {myTodayMinutes}m today
       </Text>
@@ -76,13 +80,13 @@ export function Waiting1v1Panel() {
           colors={['rgba(255,42,122,0.35)', 'rgba(255,184,0,0.15)']}
           style={styles.incomingBanner}
         >
-          <Ionicons name="call" size={18} color={colors.accent} />
-          <Text style={styles.incomingText}>
+          <Phone size={18} color={colors.accent} />
+          <Text style={[styles.incomingText, { color: colors.text }]}>
             Incoming 1v1 from {incomingBridgeCall.userName} — Attend popup open
           </Text>
         </LinearGradient>
       ) : (
-        <Text style={styles.idleHint}>
+        <Text style={[styles.idleHint, { color: colors.textMuted }]}>
           No 1v1 pending — jump into Party Room or PK to stay engaged
         </Text>
       )}
@@ -96,12 +100,14 @@ export function Waiting1v1Panel() {
           }}
         >
           <LinearGradient
-            colors={['rgba(255,42,122,0.25)', 'rgba(21,16,38,0.95)']}
+            colors={[`${colors.primary}40`, colors.bgElevated]}
             style={styles.quickGrad}
           >
-            <Ionicons name="flash" size={22} color={colors.primary} />
-            <Text style={styles.quickTitle}>PK Battle</Text>
-            <Text style={styles.quickSub}>Split-screen duel</Text>
+            <Zap size={22} color={colors.primary} />
+            <Text style={[styles.quickTitle, { color: colors.text }]}>PK Battle</Text>
+            <Text style={[styles.quickSub, { color: colors.textSecondary }]}>
+              Split-screen duel
+            </Text>
           </LinearGradient>
         </Pressable>
 
@@ -113,12 +119,14 @@ export function Waiting1v1Panel() {
           }}
         >
           <LinearGradient
-            colors={['rgba(255,184,0,0.22)', 'rgba(21,16,38,0.95)']}
+            colors={[`${colors.accent}38`, colors.bgElevated]}
             style={styles.quickGrad}
           >
-            <Ionicons name="people" size={22} color={colors.accent} />
-            <Text style={styles.quickTitle}>Party Room</Text>
-            <Text style={styles.quickSub}>4–6 host seats</Text>
+            <Users size={22} color={colors.accent} />
+            <Text style={[styles.quickTitle, { color: colors.text }]}>Party Room</Text>
+            <Text style={[styles.quickSub, { color: colors.textSecondary }]}>
+              4–6 host seats
+            </Text>
           </LinearGradient>
         </Pressable>
       </View>
@@ -131,28 +139,23 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     padding: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255,184,0,0.35)',
-    shadowColor: '#ffb800',
-    shadowOpacity: 0.4,
+    shadowOpacity: 0.35,
     shadowRadius: 16,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 10,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 8,
     marginBottom: 14,
   },
   eyebrow: {
-    color: colors.accent,
     fontWeight: '800',
     fontSize: 10,
     letterSpacing: 1.2,
   },
   title: {
-    color: colors.text,
     fontWeight: '900',
     fontSize: 22,
     marginTop: 4,
   },
   sub: {
-    color: colors.textSecondary,
     fontSize: 12,
     marginTop: 6,
     marginBottom: 16,
@@ -164,13 +167,11 @@ const styles = StyleSheet.create({
     padding: 6,
   },
   orbOn: {
-    shadowColor: colors.online,
     shadowOpacity: 0.65,
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 0 },
   },
   orbOff: {
-    shadowColor: colors.danger,
     shadowOpacity: 0.45,
     shadowRadius: 14,
   },
@@ -194,16 +195,14 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255,42,122,0.5)',
+    borderColor: 'rgba(108,124,255,0.45)',
   },
   incomingText: {
     flex: 1,
-    color: colors.text,
     fontWeight: '700',
     fontSize: 12,
   },
   idleHint: {
-    color: colors.textMuted,
     fontSize: 12,
     textAlign: 'center',
     marginBottom: 14,
@@ -214,10 +213,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(255,42,122,0.35)',
-    shadowColor: '#ff2a7a',
-    shadowOpacity: 0.35,
-    shadowRadius: 10,
+    borderColor: 'rgba(108,124,255,0.35)',
   },
   quickGrad: {
     padding: 14,
@@ -225,10 +221,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   quickTitle: {
-    color: colors.text,
     fontWeight: '900',
     fontSize: 15,
     marginTop: 8,
   },
-  quickSub: { color: colors.textSecondary, fontSize: 11, marginTop: 2 },
+  quickSub: { fontSize: 11, marginTop: 2 },
 });

@@ -1,25 +1,28 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { Check } from 'lucide-react-native';
 import { useState } from 'react';
 import {
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
+import { AppTextInput, SegmentedControl } from '../../components/ui/AppTextInput';
+import { PrimaryButton } from '../../components/ui/PrimaryButton';
+import { Screen } from '../../components/ui/Screen';
 import { useAuth } from '../../context/AuthContext';
 import type { AuthStackParamList } from '../../navigation/types';
-import { colors } from '../../theme/colors';
+import { radii, typography } from '../../theme/colors';
+import { useTheme } from '../../theme/ThemeContext';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Signup'>;
 type AuthMethod = 'email' | 'phone';
 
 export function SignupScreen({ navigation }: Props) {
   const { signUp, usingFirebase } = useAuth();
+  const { colors } = useTheme();
   const [method, setMethod] = useState<AuthMethod>('email');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -58,212 +61,131 @@ export function SignupScreen({ navigation }: Props) {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <ScrollView
-        contentContainerStyle={styles.container}
-        keyboardShouldPersistTaps="handled"
-      >
-        <Text style={styles.brand}>Join as Beauty Host</Text>
-        <Text style={styles.subtitle}>
-          Create account → submit photo & video → wait for Host ID approval
+    <Screen scroll>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <Text style={[styles.brand, { color: colors.text }]}>Join CoinCall</Text>
+        <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+          Create account → submit photos → get Host ID approval
         </Text>
-        <Text style={styles.mode}>
-          {usingFirebase ? 'Real Firebase signup ON' : 'Demo mode'}
+        <Text style={[styles.mode, { color: colors.primarySoft }]}>
+          {usingFirebase ? 'Secure cloud signup' : 'Demo mode'}
         </Text>
 
-        <View style={styles.methodRow}>
-          {(['email', 'phone'] as const).map((m) => (
-            <Pressable
-              key={m}
-              style={[styles.methodChip, method === m && styles.methodChipActive]}
-              onPress={() => {
-                setMethod(m);
-                setError(null);
-              }}
-            >
-              <Text style={[styles.methodText, method === m && styles.methodTextActive]}>
-                {m === 'email' ? 'Email' : 'Phone OTP'}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
+        <SegmentedControl
+          value={method}
+          onChange={(m) => {
+            setMethod(m);
+            setError(null);
+          }}
+          options={[
+            { key: 'email', label: 'Email' },
+            { key: 'phone', label: 'Phone' },
+          ]}
+        />
 
         <View style={styles.form}>
-          <Text style={styles.label}>Name</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Your name"
-            placeholderTextColor={colors.textMuted}
-            value={name}
-            onChangeText={setName}
-          />
+          <Text style={[styles.label, { color: colors.text }]}>Name</Text>
+          <AppTextInput value={name} onChangeText={setName} placeholder="Your host name" />
 
           {method === 'email' ? (
             <>
-              <Text style={styles.label}>Email</Text>
-              <TextInput
-                style={styles.input}
+              <Text style={[styles.label, { color: colors.text }]}>Email</Text>
+              <AppTextInput
                 autoCapitalize="none"
                 keyboardType="email-address"
-                placeholder="you@example.com"
-                placeholderTextColor={colors.textMuted}
                 value={email}
                 onChangeText={setEmail}
+                placeholder="you@email.com"
               />
-              <Text style={styles.label}>Password</Text>
-              <TextInput
-                style={styles.input}
+              <Text style={[styles.label, { color: colors.text }]}>Password</Text>
+              <AppTextInput
                 secureTextEntry
-                placeholder="At least 6 characters"
-                placeholderTextColor={colors.textMuted}
                 value={password}
                 onChangeText={setPassword}
+                placeholder="At least 6 characters"
               />
             </>
           ) : (
             <>
-              <Text style={styles.label}>Phone</Text>
-              <TextInput
-                style={styles.input}
+              <Text style={[styles.label, { color: colors.text }]}>Phone</Text>
+              <AppTextInput
                 keyboardType="phone-pad"
-                placeholder="+92 300 1234567"
-                placeholderTextColor={colors.textMuted}
                 value={phone}
                 onChangeText={setPhone}
+                placeholder="+971…"
               />
             </>
           )}
         </View>
 
         <Pressable
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: isAgeVerified }}
           style={styles.checkboxRow}
           onPress={() => setIsAgeVerified((prev) => !prev)}
         >
-          <View style={[styles.checkbox, isAgeVerified && styles.checkboxChecked]}>
-            {isAgeVerified ? <Text style={styles.checkmark}>✓</Text> : null}
+          <View
+            style={[
+              styles.checkbox,
+              {
+                borderColor: colors.border,
+                backgroundColor: isAgeVerified ? colors.primary : colors.bgCard,
+              },
+            ]}
+          >
+            {isAgeVerified ? <Check size={14} color="#fff" strokeWidth={3} /> : null}
           </View>
-          <Text style={styles.checkboxLabel}>
+          <Text style={[styles.checkboxLabel, { color: colors.text }]}>
             I confirm that I am 18 years of age or older
           </Text>
         </Pressable>
 
-        {error ? <Text style={styles.error}>{error}</Text> : null}
+        {error ? <Text style={{ color: colors.danger, marginTop: 12 }}>{error}</Text> : null}
+
+        <PrimaryButton
+          label="Create host account"
+          onPress={handleSignup}
+          loading={loading}
+          style={{ marginTop: 22 }}
+        />
 
         <Pressable
-          style={[styles.primaryButton, loading && styles.buttonDisabled]}
-          onPress={handleSignup}
-          disabled={loading}
+          onPress={() => navigation.navigate('Login')}
+          style={styles.footer}
+          accessibilityRole="link"
         >
-          {loading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.primaryButtonText}>Join as Host</Text>
-          )}
-        </Pressable>
-
-        <Pressable onPress={() => navigation.navigate('Login')} style={styles.footerLink}>
-          <Text style={styles.footerText}>
-            Already have an account? <Text style={styles.footerTextBold}>Log in</Text>
+          <Text style={{ color: colors.textSecondary }}>
+            Already have an account?{' '}
+            <Text style={{ color: colors.primarySoft, fontWeight: '800' }}>Log in</Text>
           </Text>
         </Pressable>
-      </ScrollView>
-    </KeyboardAvoidingView>
+      </KeyboardAvoidingView>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1, backgroundColor: colors.bg },
-  container: {
-    paddingHorizontal: 24,
-    paddingTop: 72,
-    paddingBottom: 40,
-  },
-  brand: { fontSize: 36, fontWeight: '800', color: colors.text },
-  subtitle: {
-    marginTop: 8,
-    fontSize: 16,
-    color: colors.textSecondary,
-    marginBottom: 8,
-  },
-  mode: {
-    color: colors.primarySoft,
-    fontSize: 12,
-    fontWeight: '700',
-    marginBottom: 20,
-  },
-  methodRow: { flexDirection: 'row', gap: 10, marginBottom: 24 },
-  methodChip: {
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 16,
-    backgroundColor: colors.bgCard,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  methodChipActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  methodText: { color: colors.textSecondary, fontWeight: '700' },
-  methodTextActive: { color: colors.text },
-  form: { gap: 8 },
-  label: {
-    marginTop: 8,
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  input: {
-    backgroundColor: colors.bgCard,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    fontSize: 16,
-    color: colors.text,
-  },
+  brand: { ...typography.hero, marginTop: 8 },
+  subtitle: { marginTop: 8, marginBottom: 10, lineHeight: 22 },
+  mode: { fontWeight: '700', fontSize: 12, marginBottom: 18 },
+  form: { marginTop: 18, gap: 8 },
+  label: { fontWeight: '700', marginTop: 8, fontSize: 13 },
   checkboxRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 12,
-    marginTop: 24,
+    marginTop: 22,
+    minHeight: 44,
   },
   checkbox: {
     width: 24,
     height: 24,
-    borderRadius: 6,
+    borderRadius: 8,
     borderWidth: 1.5,
-    borderColor: colors.border,
-    backgroundColor: colors.bgCard,
     alignItems: 'center',
     justifyContent: 'center',
+    marginTop: 2,
   },
-  checkboxChecked: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  checkmark: { color: '#fff', fontSize: 14, fontWeight: '800' },
-  checkboxLabel: {
-    flex: 1,
-    fontSize: 14,
-    lineHeight: 20,
-    color: colors.text,
-  },
-  error: { marginTop: 16, color: colors.danger, fontSize: 14 },
-  primaryButton: {
-    marginTop: 24,
-    backgroundColor: colors.primary,
-    borderRadius: 16,
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
-  buttonDisabled: { opacity: 0.7 },
-  primaryButtonText: { color: '#fff', fontSize: 16, fontWeight: '800' },
-  footerLink: { marginTop: 24, alignItems: 'center' },
-  footerText: { color: colors.textSecondary, fontSize: 15 },
-  footerTextBold: { color: colors.primarySoft, fontWeight: '800' },
+  checkboxLabel: { flex: 1, lineHeight: 20, fontSize: 14 },
+  footer: { marginTop: 22, alignItems: 'center', minHeight: 44, justifyContent: 'center' },
 });

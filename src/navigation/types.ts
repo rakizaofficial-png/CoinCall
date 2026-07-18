@@ -25,4 +25,5 @@ export type RootStackParamList = {
     role?: 'host' | 'user';
   };
   Chat: { hostId: string };
+  Notifications: undefined;
 };

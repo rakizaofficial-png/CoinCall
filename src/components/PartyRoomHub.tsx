@@ -1,4 +1,5 @@
 import { LinearGradient } from 'expo-linear-gradient';
+import { LogOut, Plus, Users } from 'lucide-react-native';
 import { useEffect, useMemo, useState } from 'react';
 import {
   Image,
@@ -7,13 +8,14 @@ import {
   Text,
   View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { useApp } from '../context/AppContext';
 import { colors } from '../theme/colors';
+import { useTheme } from '../theme/ThemeContext';
 
 const SEAT_COUNT = 6;
 
 export function PartyRoomHub() {
+  const { colors } = useTheme();
   const {
     user,
     partySeats,
@@ -68,8 +70,8 @@ export function PartyRoomHub() {
           style={styles.exitBtn}
           onPress={() => setWorkspaceMode('waiting_1v1')}
         >
-          <Ionicons name="exit-outline" size={18} color={colors.text} />
-          <Text style={styles.exitText}>Exit</Text>
+          <LogOut size={18} color={colors.text} />
+          <Text style={[styles.exitText, { color: colors.text }]}>Exit</Text>
         </Pressable>
       </View>
 
@@ -141,7 +143,7 @@ export function PartyRoomHub() {
               ) : (
                 <>
                   <View style={styles.emptyOrb}>
-                    <Ionicons name="add" size={28} color={colors.accent} />
+                    <Plus size={28} color={colors.accent} />
                   </View>
                   <Text style={styles.seatName}>Seat {seat.index + 1}</Text>
                   <Text style={styles.seatHint}>Tap to join</Text>
@@ -164,7 +166,7 @@ export function PartyRoomHub() {
             colors={[colors.primary, '#c41858']}
             style={styles.primaryGrad}
           >
-            <Ionicons name="people" size={18} color="#fff" />
+            <Users size={18} color="#fff" />
             <Text style={styles.primaryText}>Join Active Group Stream</Text>
           </LinearGradient>
         </Pressable>

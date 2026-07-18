@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+import { PhoneOff, Video } from 'lucide-react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useEffect, useState } from 'react';
@@ -17,6 +17,7 @@ import type { BridgeCall } from '../services/callBridge';
 import { acceptBridgeCall, rejectBridgeCall } from '../services/callBridge';
 import type { RootStackParamList } from '../navigation/types';
 import { colors } from '../theme/colors';
+import { useTheme } from '../theme/ThemeContext';
 import { notify } from '../utils/notify';
 import { startIncomingRingtone, stopIncomingRingtone } from '../utils/ringtone';
 
@@ -34,6 +35,7 @@ function safeAvatar(call: BridgeCall) {
 }
 
 export function IncomingCallModal({ call, onClear }: Props) {
+  const { colors } = useTheme();
   const navigation =
     useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [busy, setBusy] = useState(false);
@@ -145,20 +147,18 @@ export function IncomingCallModal({ call, onClear }: Props) {
             onPress={reject}
             disabled={busy}
           >
-            <View style={{ transform: [{ rotate: '135deg' }] }}>
-              <Ionicons name="call" size={28} color="#fff" />
-            </View>
+            <PhoneOff size={28} color="#fff" />
             <Text style={styles.btnLabel}>Decline</Text>
           </Pressable>
           <Pressable
-            style={[styles.btn, styles.accept]}
+            style={[styles.btn, styles.accept, { backgroundColor: colors.online }]}
             onPress={accept}
             disabled={busy}
           >
             {busy ? (
               <ActivityIndicator color="#fff" />
             ) : (
-              <Ionicons name="videocam" size={28} color="#fff" />
+              <Video size={28} color="#fff" />
             )}
             <Text style={styles.btnLabel}>Attend</Text>
           </Pressable>

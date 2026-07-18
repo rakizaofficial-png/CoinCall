@@ -1,12 +1,13 @@
-import { Ionicons } from '@expo/vector-icons';
+import { ArrowDownCircle } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Screen } from '../../components/ui/Screen';
 import { useApp } from '../../context/AppContext';
-import { colors } from '../../theme/colors';
+import { radii } from '../../theme/colors';
+import { useTheme } from '../../theme/ThemeContext';
 
 export function EarningsScreen() {
-  const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
   const { user, hostEarnings, requestPayout, transactions, callsToday } = useApp();
 
   const pending =
@@ -19,55 +20,84 @@ export function EarningsScreen() {
   const history = transactions.filter((t) => t.type === 'earn' || t.type === 'payout').slice(0, 12);
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={{ paddingTop: insets.top + 12, paddingBottom: 40, paddingHorizontal: 16 }}
-    >
-      <Text style={styles.title}>My Earnings</Text>
-      <Text style={styles.subtitle}>Withdraw your coins anytime 💖</Text>
+    <Screen scroll contentContainerStyle={{ paddingBottom: 110 }}>
+      <Text style={[styles.title, { color: colors.text }]}>My Earnings</Text>
+      <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+        Withdraw your coins anytime
+      </Text>
 
-      <LinearGradient colors={['#E85A8C', '#F5A3C7']} style={styles.hero}>
+      <LinearGradient
+        colors={[colors.gradientStart, colors.gradientMid, colors.gradientEnd]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.hero}
+      >
         <Text style={styles.heroLabel}>Available balance</Text>
         <Text style={styles.heroValue}>{user.coinBalance}</Text>
         <Text style={styles.heroSub}>coins in your wallet</Text>
 
-        <Pressable style={styles.withdrawBtn} onPress={requestPayout}>
-          <Ionicons name="arrow-down-circle" size={22} color={colors.primary} />
-          <Text style={styles.withdrawText}>Cash-Out · EasyPaisa</Text>
+        <Pressable
+          style={styles.withdrawBtn}
+          onPress={requestPayout}
+          accessibilityRole="button"
+          accessibilityLabel="Cash out via EasyPaisa"
+        >
+          <ArrowDownCircle size={22} color={colors.primary} />
+          <Text style={[styles.withdrawText, { color: colors.primary }]}>
+            Cash-Out · EasyPaisa
+          </Text>
         </Pressable>
       </LinearGradient>
 
       {pending > 0 ? (
-        <View style={styles.pendingCard}>
-          <Text style={styles.pendingLabel}>Ready to withdraw today</Text>
-          <Text style={styles.pendingValue}>{pending} coins</Text>
+        <View
+          style={[
+            styles.pendingCard,
+            { backgroundColor: colors.bgCard, borderColor: colors.border },
+          ]}
+        >
+          <Text style={{ color: colors.textSecondary }}>Ready to withdraw today</Text>
+          <Text style={[styles.pendingValue, { color: colors.accent }]}>
+            {pending} coins
+          </Text>
         </View>
       ) : null}
 
       <View style={styles.row}>
-        <View style={styles.mini}>
-          <Text style={styles.miniValue}>{callsToday}</Text>
-          <Text style={styles.miniLabel}>Calls today</Text>
-        </View>
-        <View style={styles.mini}>
-          <Text style={styles.miniValue}>{hostEarnings.call}</Text>
-          <Text style={styles.miniLabel}>Call coins</Text>
-        </View>
-        <View style={styles.mini}>
-          <Text style={styles.miniValue}>{hostEarnings.gift}</Text>
-          <Text style={styles.miniLabel}>Gift coins</Text>
-        </View>
+        {[
+          { v: callsToday, l: 'Calls today' },
+          { v: hostEarnings.call, l: 'Call coins' },
+          { v: hostEarnings.gift, l: 'Gift coins' },
+        ].map((m) => (
+          <View
+            key={m.l}
+            style={[
+              styles.mini,
+              { backgroundColor: colors.bgCard, borderColor: colors.border },
+            ]}
+          >
+            <Text style={[styles.miniValue, { color: colors.blush }]}>{m.v}</Text>
+            <Text style={[styles.miniLabel, { color: colors.textMuted }]}>{m.l}</Text>
+          </View>
+        ))}
       </View>
 
-      <Text style={styles.section}>History</Text>
+      <Text style={[styles.section, { color: colors.text }]}>History</Text>
       {history.length === 0 ? (
-        <Text style={styles.empty}>No earnings yet. Go Online and take a call ✨</Text>
+        <Text style={{ color: colors.textSecondary, lineHeight: 20 }}>
+          No earnings yet. Go Online and take a call.
+        </Text>
       ) : (
         history.map((tx) => (
-          <View key={tx.id} style={styles.tx}>
+          <View
+            key={tx.id}
+            style={[styles.tx, { borderBottomColor: colors.border }]}
+          >
             <View style={{ flex: 1 }}>
-              <Text style={styles.txLabel}>{tx.label}</Text>
-              <Text style={styles.txTime}>{new Date(tx.timestamp).toLocaleString()}</Text>
+              <Text style={[styles.txLabel, { color: colors.text }]}>{tx.label}</Text>
+              <Text style={[styles.txTime, { color: colors.textMuted }]}>
+                {new Date(tx.timestamp).toLocaleString()}
+              </Text>
             </View>
             <Text
               style={[
@@ -81,16 +111,15 @@ export function EarningsScreen() {
           </View>
         ))
       )}
-    </ScrollView>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
-  title: { color: colors.text, fontSize: 30, fontWeight: '800' },
-  subtitle: { color: colors.textSecondary, marginTop: 6, marginBottom: 18 },
+  title: { fontSize: 30, fontWeight: '800' },
+  subtitle: { marginTop: 6, marginBottom: 18 },
   hero: {
-    borderRadius: 28,
+    borderRadius: radii.xl,
     padding: 22,
     alignItems: 'center',
   },
@@ -111,49 +140,43 @@ const styles = StyleSheet.create({
     paddingHorizontal: 28,
     paddingVertical: 14,
     borderRadius: 18,
+    minHeight: 52,
   },
-  withdrawText: { color: colors.primary, fontWeight: '800', fontSize: 16 },
+  withdrawText: { fontWeight: '800', fontSize: 16 },
   pendingCard: {
     marginTop: 12,
-    backgroundColor: colors.bgCard,
-    borderRadius: 16,
+    borderRadius: radii.md,
     padding: 14,
     borderWidth: 1,
-    borderColor: colors.border,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  pendingLabel: { color: colors.textSecondary },
-  pendingValue: { color: colors.accent, fontWeight: '800', fontSize: 18 },
+  pendingValue: { fontWeight: '800', fontSize: 18 },
   row: { flexDirection: 'row', gap: 10, marginTop: 14 },
   mini: {
     flex: 1,
-    backgroundColor: colors.bgCard,
-    borderRadius: 16,
+    borderRadius: radii.md,
     padding: 14,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: colors.border,
   },
-  miniValue: { color: colors.blush, fontWeight: '800', fontSize: 20 },
-  miniLabel: { color: colors.textMuted, marginTop: 4, fontSize: 11 },
+  miniValue: { fontWeight: '800', fontSize: 20 },
+  miniLabel: { marginTop: 4, fontSize: 11 },
   section: {
-    color: colors.text,
     fontWeight: '800',
     fontSize: 18,
     marginTop: 24,
     marginBottom: 10,
   },
-  empty: { color: colors.textSecondary, lineHeight: 20 },
   tx: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    minHeight: 52,
   },
-  txLabel: { color: colors.text, fontWeight: '600' },
-  txTime: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
+  txLabel: { fontWeight: '600' },
+  txTime: { fontSize: 11, marginTop: 2 },
   txAmount: { fontWeight: '800', fontSize: 16 },
 });

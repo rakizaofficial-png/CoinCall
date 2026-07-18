@@ -1,37 +1,66 @@
-import { Ionicons } from '@expo/vector-icons';
-import { Image, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import {
+  Bell,
+  ChevronRight,
+  LogOut,
+  Moon,
+  Sparkles,
+  Sun,
+  Wallet,
+  Wifi,
+} from 'lucide-react-native';
+import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { Avatar } from '../../components/ui/Avatar';
+import { GlassCard } from '../../components/ui/GlassCard';
+import { Screen } from '../../components/ui/Screen';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
-import { colors } from '../../theme/colors';
+import { radii } from '../../theme/colors';
+import { useTheme } from '../../theme/ThemeContext';
 
 export function ProfileScreen({ navigation }: { navigation: any }) {
-  const insets = useSafeAreaInsets();
-  const { user, beautyOn, runHostTool, hostOnline, setHostOnline, callsToday, myRank, myTodayMinutes } = useApp();
+  const {
+    user,
+    beautyOn,
+    runHostTool,
+    hostOnline,
+    setHostOnline,
+    callsToday,
+    myRank,
+    myTodayMinutes,
+  } = useApp();
   const { signOut, usingFirebase } = useAuth();
+  const { colors, isDark, setScheme, preference } = useTheme();
+
+  const cycleTheme = () => {
+    if (preference === 'system') setScheme('dark');
+    else if (preference === 'dark') setScheme('light');
+    else setScheme('system');
+  };
+
+  const themeLabel =
+    preference === 'system' ? 'System' : preference === 'dark' ? 'Dark' : 'Light';
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={{ paddingTop: insets.top + 12, paddingBottom: 40, paddingHorizontal: 16 }}
-    >
+    <Screen scroll contentContainerStyle={{ paddingBottom: 100 }}>
       <View style={styles.header}>
-        <Image source={{ uri: user.avatarUrl }} style={styles.avatar} />
-        <Text style={styles.name}>{user.name}</Text>
-        <Text style={styles.badge}>HOST · Beauty Creator · Rank #{myRank}</Text>
-        <Text style={styles.meta}>
-          ID {user.hostId || '—'} · Level {user.level} · {myTodayMinutes}m today
+        <Avatar uri={user.avatarUrl} size={104} ring online={hostOnline} />
+        <Text style={[styles.name, { color: colors.text }]}>{user.name}</Text>
+        <Text style={[styles.badge, { color: colors.primarySoft }]}>
+          HOST · Rank #{myRank}
         </Text>
-        <Text style={styles.meta}>
-          {user.country || 'Country'} · {usingFirebase ? 'Cloud account' : 'Demo account'}
+        <Text style={[styles.meta, { color: colors.textSecondary }]}>
+          ID {user.hostId || '—'} · Lv {user.level} · {myTodayMinutes}m today
+        </Text>
+        <Text style={[styles.meta, { color: colors.textMuted }]}>
+          {user.country || 'Country'} · {usingFirebase ? 'Cloud' : 'Demo'}
         </Text>
       </View>
 
-      <View style={styles.card}>
+      <GlassCard style={{ paddingHorizontal: 4, paddingVertical: 4 }}>
         <View style={styles.row}>
           <View style={styles.rowLeft}>
-            <Ionicons name="radio" size={20} color={colors.online} />
-            <Text style={styles.rowTitle}>Available for calls</Text>
+            <Wifi size={20} color={colors.online} />
+            <Text style={[styles.rowTitle, { color: colors.text }]}>Available for calls</Text>
           </View>
           <Switch
             value={hostOnline}
@@ -41,120 +70,163 @@ export function ProfileScreen({ navigation }: { navigation: any }) {
           />
         </View>
 
-        <View style={styles.divider} />
+        <View style={[styles.divider, { backgroundColor: colors.border }]} />
 
         <Pressable style={styles.row} onPress={() => runHostTool('beauty')}>
           <View style={styles.rowLeft}>
-            <Ionicons name="sparkles" size={20} color={colors.accent} />
+            <Sparkles size={20} color={colors.accent} />
             <View>
-              <Text style={styles.rowTitle}>Beauty filter</Text>
-              <Text style={styles.rowSub}>{beautyOn ? 'Looking glam ✨' : 'Tap to turn on'}</Text>
+              <Text style={[styles.rowTitle, { color: colors.text }]}>Beauty filter</Text>
+              <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
+                {beautyOn ? 'Glam on' : 'Tap to enable'}
+              </Text>
             </View>
           </View>
-          <Text style={[styles.pill, beautyOn && styles.pillOn]}>{beautyOn ? 'ON' : 'OFF'}</Text>
+          <Text
+            style={[
+              styles.pill,
+              {
+                color: beautyOn ? colors.online : colors.textMuted,
+                backgroundColor: beautyOn ? `${colors.online}22` : colors.bgElevated,
+              },
+            ]}
+          >
+            {beautyOn ? 'ON' : 'OFF'}
+          </Text>
         </Pressable>
 
-        <View style={styles.divider} />
+        <View style={[styles.divider, { backgroundColor: colors.border }]} />
 
         <Pressable style={styles.row} onPress={() => navigation.navigate('Earnings')}>
           <View style={styles.rowLeft}>
-            <Ionicons name="wallet" size={20} color={colors.primarySoft} />
+            <Wallet size={20} color={colors.primarySoft} />
             <View>
-              <Text style={styles.rowTitle}>Withdraw earnings</Text>
-              <Text style={styles.rowSub}>{user.coinBalance} coins ready</Text>
+              <Text style={[styles.rowTitle, { color: colors.text }]}>Withdraw</Text>
+              <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
+                {user.coinBalance} coins ready
+              </Text>
             </View>
           </View>
-          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+          <ChevronRight size={18} color={colors.textMuted} />
         </Pressable>
-      </View>
+      </GlassCard>
+
+      <Text style={[styles.section, { color: colors.text }]}>Settings</Text>
+      <GlassCard style={{ paddingHorizontal: 4, paddingVertical: 4 }}>
+        <Pressable style={styles.row} onPress={cycleTheme}>
+          <View style={styles.rowLeft}>
+            {isDark ? (
+              <Moon size={20} color={colors.primarySoft} />
+            ) : (
+              <Sun size={20} color={colors.accent} />
+            )}
+            <View>
+              <Text style={[styles.rowTitle, { color: colors.text }]}>Appearance</Text>
+              <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
+                {themeLabel} mode
+              </Text>
+            </View>
+          </View>
+          <ChevronRight size={18} color={colors.textMuted} />
+        </Pressable>
+
+        <View style={[styles.divider, { backgroundColor: colors.border }]} />
+
+        <Pressable
+          style={styles.row}
+          onPress={() => navigation.navigate('Notifications')}
+          accessibilityRole="button"
+        >
+          <View style={styles.rowLeft}>
+            <Bell size={20} color={colors.accent} />
+            <View>
+              <Text style={[styles.rowTitle, { color: colors.text }]}>Notifications</Text>
+              <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
+                Call alerts & tips
+              </Text>
+            </View>
+          </View>
+          <ChevronRight size={18} color={colors.textMuted} />
+        </Pressable>
+      </GlassCard>
 
       <View style={styles.stats}>
-        <View style={styles.stat}>
-          <Text style={styles.statValue}>{callsToday}</Text>
-          <Text style={styles.statLabel}>Calls</Text>
-        </View>
-        <View style={styles.stat}>
-          <Text style={styles.statValue}>{user.coinBalance}</Text>
-          <Text style={styles.statLabel}>Coins</Text>
-        </View>
-        <View style={styles.stat}>
-          <Text style={styles.statValue}>{user.gems}</Text>
-          <Text style={styles.statLabel}>Gems</Text>
-        </View>
+        {[
+          { v: callsToday, l: 'Calls' },
+          { v: user.coinBalance, l: 'Coins' },
+          { v: user.gems, l: 'Gems' },
+        ].map((s) => (
+          <View
+            key={s.l}
+            style={[
+              styles.stat,
+              { backgroundColor: colors.bgCard, borderColor: colors.border },
+            ]}
+          >
+            <Text style={[styles.statValue, { color: colors.blush }]}>{s.v}</Text>
+            <Text style={[styles.statLabel, { color: colors.textMuted }]}>{s.l}</Text>
+          </View>
+        ))}
       </View>
 
-      <Pressable style={styles.signOut} onPress={signOut}>
-        <Text style={styles.signOutText}>Sign Out</Text>
+      <Pressable
+        style={[styles.signOut, { borderColor: colors.danger }]}
+        onPress={signOut}
+        accessibilityRole="button"
+      >
+        <LogOut size={18} color={colors.danger} />
+        <Text style={[styles.signOutText, { color: colors.danger }]}>Sign Out</Text>
       </Pressable>
-    </ScrollView>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
-  header: { alignItems: 'center', marginBottom: 18 },
-  avatar: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    borderWidth: 3,
-    borderColor: colors.primarySoft,
-  },
-  name: { color: colors.text, fontSize: 26, fontWeight: '800', marginTop: 12 },
-  badge: {
-    marginTop: 8,
-    color: colors.primarySoft,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-    fontSize: 12,
-  },
-  meta: { color: colors.textSecondary, marginTop: 6 },
-  card: {
-    backgroundColor: colors.bgCard,
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
+  header: { alignItems: 'center', marginBottom: 20 },
+  name: { fontSize: 26, fontWeight: '800', marginTop: 14 },
+  badge: { marginTop: 8, fontWeight: '800', letterSpacing: 0.4, fontSize: 12 },
+  meta: { marginTop: 6, fontSize: 13 },
+  section: { fontWeight: '800', fontSize: 17, marginTop: 22, marginBottom: 10 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: 14,
+    paddingHorizontal: 12,
+    minHeight: 56,
   },
   rowLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
-  rowTitle: { color: colors.text, fontWeight: '700', fontSize: 15 },
-  rowSub: { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
-  divider: { height: 1, backgroundColor: colors.border },
+  rowTitle: { fontWeight: '700', fontSize: 15 },
+  rowSub: { fontSize: 12, marginTop: 2 },
+  divider: { height: StyleSheet.hairlineWidth, marginHorizontal: 12 },
   pill: {
-    color: colors.textMuted,
     fontWeight: '800',
-    backgroundColor: colors.bgElevated,
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 10,
     overflow: 'hidden',
+    fontSize: 12,
   },
-  pillOn: { color: colors.online, backgroundColor: 'rgba(61,214,140,0.15)' },
-  stats: { flexDirection: 'row', gap: 10, marginTop: 14 },
+  stats: { flexDirection: 'row', gap: 10, marginTop: 16 },
   stat: {
     flex: 1,
-    backgroundColor: colors.bgCard,
-    borderRadius: 16,
+    borderRadius: radii.md,
     padding: 14,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: colors.border,
   },
-  statValue: { color: colors.blush, fontWeight: '800', fontSize: 18 },
-  statLabel: { color: colors.textMuted, marginTop: 4, fontSize: 11 },
+  statValue: { fontWeight: '800', fontSize: 18 },
+  statLabel: { marginTop: 4, fontSize: 11 },
   signOut: {
-    marginTop: 24,
-    borderRadius: 16,
+    marginTop: 28,
+    borderRadius: radii.md,
     borderWidth: 1,
-    borderColor: colors.danger,
     paddingVertical: 14,
     alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+    minHeight: 52,
   },
-  signOutText: { color: colors.danger, fontWeight: '800' },
+  signOutText: { fontWeight: '800' },
 });

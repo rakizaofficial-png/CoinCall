@@ -1,5 +1,15 @@
-import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import {
+  Flag,
+  Mic,
+  MicOff,
+  PhoneOff,
+  Settings,
+  Signal,
+  Video,
+  VideoOff,
+  Volume2,
+} from 'lucide-react-native';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Image,
@@ -9,7 +19,15 @@ import {
   Text,
   View,
 } from 'react-native';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Avatar } from '../../components/ui/Avatar';
+import { IconButton } from '../../components/ui/IconButton';
 import { useApp } from '../../context/AppContext';
 import type { RootStackParamList } from '../../navigation/types';
 import {
@@ -25,10 +43,13 @@ import {
   publishActiveCall,
   updateActiveCall,
 } from '../../services/realtimeService';
-import { colors } from '../../theme/colors';
+import { radii } from '../../theme/colors';
+import { useTheme } from '../../theme/ThemeContext';
 import { notify, promptChoices } from '../../utils/notify';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Call'>;
+
+const REACTIONS = ['❤️', '🔥', '👏', '😍', '✨', '🎉'];
 
 function formatTime(totalSeconds: number) {
   const m = Math.floor(totalSeconds / 60)
@@ -61,8 +82,20 @@ function waitForEl(
   });
 }
 
+function MicPulse({ active }: { active: boolean }) {
+  const scale = useSharedValue(1);
+  useEffect(() => {
+    scale.value = active
+      ? withRepeat(withTiming(1.18, { duration: 700 }), -1, true)
+      : withTiming(1, { duration: 200 });
+  }, [active, scale]);
+  const style = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+  return <Animated.View style={[styles.micPulse, style]} />;
+}
+
 export function CallScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
   const { getHost, call, endCall, user, reportUser, blockUser } = useApp();
   const bridgeCallId = route.params.bridgeCallId;
   const isBridge = Boolean(bridgeCallId);
@@ -78,10 +111,13 @@ export function CallScreen({ navigation, route }: Props) {
 
   const [muted, setMuted] = useState(false);
   const [cameraOff, setCameraOff] = useState(false);
+  const [speakerOn, setSpeakerOn] = useState(true);
   const [videoStatus, setVideoStatus] = useState('Starting camera...');
   const [bridgeSeconds, setBridgeSeconds] = useState(0);
   const [bridgeCoins, setBridgeCoins] = useState(rate);
   const [surfacesReady, setSurfacesReady] = useState(false);
+  const [reaction, setReaction] = useState<string | null>(null);
+  const [netQuality] = useState<'Excellent' | 'Good' | 'Fair'>('Good');
   const agoraReady = isAgoraConfigured() && Platform.OS === 'web';
   const activeCallIdRef = useRef<string | null>(null);
   const localRef = useRef<HTMLDivElement | null>(null);
@@ -182,7 +218,7 @@ export function CallScreen({ navigation, route }: Props) {
 
         if (active) {
           setVideoStatus(
-            isBridge ? 'Live with Luma user · video on' : 'Live video connected',
+            isBridge ? 'Live with user · video on' : 'Live video connected',
           );
         }
       } catch (e: unknown) {
@@ -211,6 +247,12 @@ export function CallScreen({ navigation, route }: Props) {
     surfacesReady,
   ]);
 
+  useEffect(() => {
+    if (!reaction) return;
+    const t = setTimeout(() => setReaction(null), 1600);
+    return () => clearTimeout(t);
+  }, [reaction]);
+
   const displaySeconds = isBridge ? bridgeSeconds : call?.seconds ?? 0;
   const displayCoins = isBridge ? bridgeCoins : call?.coinsSpent ?? 0;
 
@@ -219,7 +261,7 @@ export function CallScreen({ navigation, route }: Props) {
   }, [displayCoins, rate]);
 
   if (!isBridge && (!peerHost || !call)) {
-    return <View style={styles.container} />;
+    return <View style={[styles.container, { backgroundColor: colors.bg }]} />;
   }
 
   const hangUp = async () => {
@@ -238,10 +280,16 @@ export function CallScreen({ navigation, route }: Props) {
     navigation.goBack();
   };
 
+  const netColor =
+    netQuality === 'Excellent'
+      ? colors.online
+      : netQuality === 'Good'
+        ? colors.accent
+        : colors.danger;
+
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
+    <View style={[styles.container, { backgroundColor: '#05070F' }]}>
       {agoraReady ? (
-        // @ts-expect-error web video surface
         <div
           ref={(el: HTMLDivElement | null) => {
             remoteRef.current = el;
@@ -253,25 +301,55 @@ export function CallScreen({ navigation, route }: Props) {
       ) : (
         <Image source={{ uri: peerAvatar }} style={styles.remote} />
       )}
-      <View style={styles.overlay} pointerEvents="none" />
 
-      <View style={styles.topBar}>
-        <Text style={styles.timer}>{formatTime(displaySeconds)}</Text>
-        <Text style={styles.coins}>
+      <View style={[styles.overlay, { backgroundColor: colors.overlay }]} pointerEvents="none" />
+
+      <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
+        <View style={[styles.timerPill, { backgroundColor: colors.glass, borderColor: colors.glassBorder }]}>
+          <View style={[styles.liveDot, { backgroundColor: colors.danger }]} />
+          <Text style={styles.timer}>{formatTime(displaySeconds)}</Text>
+        </View>
+
+        <View style={[styles.netPill, { backgroundColor: colors.glass, borderColor: colors.glassBorder }]}>
+          <Signal size={14} color={netColor} />
+          <Text style={[styles.netText, { color: netColor }]}>{netQuality}</Text>
+        </View>
+
+        <Text style={styles.peer}>{peerName}</Text>
+        <Text style={[styles.coins, { color: colors.accent }]}>
           {isBridge ? 'User call' : 'Earned'} {displayCoins} · {rate}/min
           {minutesEarned ? ` · ~${minutesEarned}m` : ''}
         </Text>
-        <Text style={styles.peer}>{peerName}</Text>
-        <Text style={styles.videoStatus}>
-          {agoraReady
-            ? videoStatus
-            : 'Connecting video (open on web / allow camera)'}
+        <Text style={[styles.videoStatus, { color: colors.primarySoft }]}>
+          {agoraReady ? videoStatus : 'Connecting video…'}
         </Text>
       </View>
 
-      <View style={[styles.localPreview, cameraOff && styles.cameraOff]}>
+      {/* Large participant avatars / local preview */}
+      <View style={styles.participants}>
+        <View style={styles.participantCard}>
+          <Avatar uri={peerAvatar} size={72} online />
+          <Text style={styles.participantName} numberOfLines={1}>
+            {peerName}
+          </Text>
+        </View>
+        <View style={styles.participantCard}>
+          <Avatar uri={user.avatarUrl} size={72} online ring />
+          <Text style={styles.participantName} numberOfLines={1}>
+            You
+          </Text>
+          {!muted ? <MicPulse active /> : null}
+        </View>
+      </View>
+
+      <View
+        style={[
+          styles.localPreview,
+          cameraOff && { backgroundColor: '#121826' },
+          { borderColor: colors.glassBorder },
+        ]}
+      >
         {agoraReady ? (
-          // @ts-expect-error web video surface
           <div
             ref={(el: HTMLDivElement | null) => {
               localRef.current = el;
@@ -281,18 +359,50 @@ export function CallScreen({ navigation, route }: Props) {
             style={webLocalStyle}
           />
         ) : cameraOff ? (
-          <Ionicons name="videocam-off" size={28} color={colors.text} />
+          <VideoOff size={28} color="#fff" />
         ) : (
           <Image
             source={{ uri: user.avatarUrl }}
-            style={{ width: '100%', height: '100%', borderRadius: 14 }}
+            style={{ width: '100%', height: '100%', borderRadius: 16 }}
           />
         )}
       </View>
 
-      <View style={[styles.controls, { paddingBottom: insets.bottom + 16 }]}>
-        <Pressable
-          style={styles.controlBtn}
+      {reaction ? (
+        <View style={styles.reactionBurst} pointerEvents="none">
+          <Text style={styles.reactionEmoji}>{reaction}</Text>
+        </View>
+      ) : null}
+
+      <View style={[styles.reactions, { bottom: insets.bottom + 128 }]}>
+        {REACTIONS.map((e) => (
+          <Pressable
+            key={e}
+            accessibilityRole="button"
+            accessibilityLabel={`React ${e}`}
+            hitSlop={6}
+            onPress={() => setReaction(e)}
+            style={[styles.reactionBtn, { backgroundColor: colors.glass, borderColor: colors.glassBorder }]}
+          >
+            <Text style={{ fontSize: 18 }}>{e}</Text>
+          </Pressable>
+        ))}
+      </View>
+
+      <View
+        style={[
+          styles.controlPanel,
+          {
+            paddingBottom: insets.bottom + 16,
+            backgroundColor: colors.glass,
+            borderColor: colors.glassBorder,
+          },
+        ]}
+      >
+        <IconButton
+          icon={muted ? MicOff : Mic}
+          label={muted ? 'Unmute' : 'Mute'}
+          active={!muted}
           onPress={() => {
             setMuted((v) => {
               const next = !v;
@@ -300,11 +410,11 @@ export function CallScreen({ navigation, route }: Props) {
               return next;
             });
           }}
-        >
-          <Ionicons name={muted ? 'mic-off' : 'mic'} size={22} color="#fff" />
-        </Pressable>
-        <Pressable
-          style={styles.controlBtn}
+        />
+        <IconButton
+          icon={cameraOff ? VideoOff : Video}
+          label="Video"
+          active={!cameraOff}
           onPress={() => {
             setCameraOff((v) => {
               const next = !v;
@@ -312,15 +422,16 @@ export function CallScreen({ navigation, route }: Props) {
               return next;
             });
           }}
-        >
-          <Ionicons
-            name={cameraOff ? 'videocam-off' : 'videocam'}
-            size={22}
-            color="#fff"
-          />
-        </Pressable>
-        <Pressable
-          style={styles.controlBtn}
+        />
+        <IconButton
+          icon={Volume2}
+          label="Speaker"
+          active={speakerOn}
+          onPress={() => setSpeakerOn((v) => !v)}
+        />
+        <IconButton
+          icon={Flag}
+          label="Report"
           onPress={() =>
             promptChoices('Report', 'Reason?', [
               {
@@ -333,31 +444,29 @@ export function CallScreen({ navigation, route }: Props) {
               },
             ])
           }
-        >
-          <Ionicons name="flag" size={22} color="#fff" />
-        </Pressable>
-        <Pressable style={[styles.controlBtn, styles.endBtn]} onPress={hangUp}>
-          <Ionicons name="call" size={22} color="#fff" />
-        </Pressable>
-      </View>
-
-      <Text style={styles.spent}>
-        {isBridge
-          ? 'Connected via CoinCall bridge'
-          : `Call earnings: ${displayCoins} coins`}
-      </Text>
-      {!isBridge && (
-        <Pressable
-          style={styles.blockLink}
-          onPress={async () => {
-            blockUser(route.params.hostId);
-            await hangUp();
-            navigation.popToTop();
+        />
+        <IconButton
+          icon={Settings}
+          label="More"
+          onPress={() => {
+            if (!isBridge) {
+              promptChoices('Call settings', 'Choose', [
+                {
+                  label: 'Block user',
+                  onPress: async () => {
+                    blockUser(route.params.hostId);
+                    await hangUp();
+                    navigation.popToTop();
+                  },
+                },
+              ]);
+            } else {
+              notify('Settings', speakerOn ? 'Speaker on' : 'Speaker off');
+            }
           }}
-        >
-          <Text style={styles.blockText}>Block user</Text>
-        </Pressable>
-      )}
+        />
+        <IconButton icon={PhoneOff} label="Leave" danger onPress={hangUp} />
+      </View>
     </View>
   );
 }
@@ -373,77 +482,120 @@ const webRemoteStyle = {
 const webLocalStyle = {
   width: '100%',
   height: '100%',
-  borderRadius: 14,
+  borderRadius: 16,
   overflow: 'hidden' as const,
-  background: '#1a1028',
+  background: '#121826',
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000' },
-  remote: { ...StyleSheet.absoluteFillObject, width: '100%', height: '100%' },
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(8,0,20,0.15)',
+  container: { flex: 1 },
+  remote: { ...StyleSheet.absoluteFill, width: '100%', height: '100%' },
+  overlay: { ...StyleSheet.absoluteFill },
+  topBar: { alignItems: 'center', zIndex: 2, gap: 8 },
+  timerPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: radii.full,
+    borderWidth: 1,
   },
-  topBar: { alignItems: 'center', marginTop: 12, zIndex: 2 },
-  timer: { color: colors.text, fontSize: 34, fontWeight: '800' },
-  coins: { color: colors.accent, marginTop: 6, fontWeight: '700' },
-  peer: { color: colors.text, marginTop: 4, fontWeight: '700', fontSize: 16 },
+  liveDot: { width: 8, height: 8, borderRadius: 4 },
+  timer: { color: '#fff', fontSize: 18, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  netPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: radii.full,
+    borderWidth: 1,
+  },
+  netText: { fontSize: 12, fontWeight: '700' },
+  peer: { color: '#fff', fontWeight: '800', fontSize: 20 },
+  coins: { fontWeight: '700', fontSize: 13 },
   videoStatus: {
-    color: colors.primarySoft,
-    marginTop: 6,
     fontSize: 12,
     fontWeight: '600',
     textAlign: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
+  },
+  participants: {
+    position: 'absolute',
+    top: '28%',
+    left: 20,
+    right: 20,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 28,
+    zIndex: 2,
+  },
+  participantCard: { alignItems: 'center', width: 96 },
+  participantName: {
+    color: '#fff',
+    marginTop: 8,
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  micPulse: {
+    position: 'absolute',
+    bottom: -4,
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    borderWidth: 2,
+    borderColor: 'rgba(108,124,255,0.55)',
   },
   localPreview: {
     position: 'absolute',
     right: 16,
-    top: 120,
-    width: 110,
-    height: 150,
-    borderRadius: 14,
+    top: 150,
+    width: 112,
+    height: 152,
+    borderRadius: radii.md,
     overflow: 'hidden',
-    backgroundColor: colors.bgCard,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: colors.border,
-    zIndex: 2,
+    zIndex: 3,
   },
-  cameraOff: { backgroundColor: '#1a1028' },
-  controls: {
+  reactions: {
     position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 40,
+    left: 12,
+    right: 12,
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: 16,
-    zIndex: 2,
+    gap: 8,
+    zIndex: 4,
   },
-  controlBtn: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    backgroundColor: 'rgba(255,255,255,0.18)',
+  reactionBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
   },
-  endBtn: { backgroundColor: colors.danger, transform: [{ rotate: '135deg' }] },
-  spent: {
+  reactionBurst: {
+    ...StyleSheet.absoluteFill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 5,
+  },
+  reactionEmoji: { fontSize: 72 },
+  controlPanel: {
     position: 'absolute',
-    bottom: 110,
-    alignSelf: 'center',
-    color: colors.textSecondary,
-    zIndex: 2,
+    left: 12,
+    right: 12,
+    bottom: 0,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingTop: 14,
+    paddingHorizontal: 8,
+    borderTopLeftRadius: radii.xl,
+    borderTopRightRadius: radii.xl,
+    borderWidth: 1,
+    zIndex: 4,
   },
-  blockLink: {
-    position: 'absolute',
-    bottom: 86,
-    alignSelf: 'center',
-    zIndex: 2,
-  },
-  blockText: { color: colors.danger, fontWeight: '700' },
 });

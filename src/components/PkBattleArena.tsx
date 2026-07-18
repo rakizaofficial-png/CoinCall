@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+import { Timer } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect } from 'react';
 import {
@@ -10,8 +10,10 @@ import {
 } from 'react-native';
 import { useApp } from '../context/AppContext';
 import { colors } from '../theme/colors';
+import { useTheme } from '../theme/ThemeContext';
 
 export function PkBattleArena() {
+  const { colors } = useTheme();
   const { pkBattle, tickPkBattle, setWorkspaceMode, leavePkBattle } = useApp();
 
   useEffect(() => {
@@ -57,8 +59,8 @@ export function PkBattleArena() {
           <Text style={styles.title}>PK Battle Arena</Text>
         </View>
         <View style={styles.timerChip}>
-          <Ionicons name="timer-outline" size={14} color={colors.accent} />
-          <Text style={styles.timerText}>
+          <Timer size={14} color={colors.accent} />
+          <Text style={[styles.timerText, { color: colors.text }]}>
             {mm}:{ss}
           </Text>
         </View>

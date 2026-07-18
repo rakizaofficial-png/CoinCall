@@ -1,16 +1,9 @@
-import { Ionicons } from '@expo/vector-icons';
+import { Flame, PlusCircle, Radio, Sparkles, StopCircle } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import {
-  Image,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Screen } from '../../components/ui/Screen';
 import { useApp } from '../../context/AppContext';
-import { colors } from '../../theme/colors';
+import { useTheme } from '../../theme/ThemeContext';
 
 function formatLive(seconds: number) {
   const m = Math.floor(seconds / 60).toString().padStart(2, '0');
@@ -19,7 +12,7 @@ function formatLive(seconds: number) {
 }
 
 export function LiveScreen({ navigation }: { navigation?: any }) {
-  const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
   const {
     myRoom,
     createMyRoom,
@@ -41,54 +34,74 @@ export function LiveScreen({ navigation }: { navigation?: any }) {
   const liveRival = competition.find((c) => c.isLive && !c.isMe);
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={{ paddingTop: insets.top + 12, paddingBottom: 36, paddingHorizontal: 16 }}
-    >
-      <Text style={styles.title}>Go Live</Text>
-      <Text style={styles.subtitle}>
-        Hosts see each other live — stay on to climb rank #{myRank}
+    <Screen scroll contentContainerStyle={{ paddingBottom: 110 }}>
+      <Text style={[styles.title, { color: colors.text }]}>Go Live</Text>
+      <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+        Create or join rooms · climb rank #{myRank}
       </Text>
 
       {liveRival ? (
-        <View style={styles.nudge}>
-          <Ionicons name="flame" size={18} color={colors.accent} />
-          <Text style={styles.nudgeText}>
+        <View
+          style={[
+            styles.nudge,
+            {
+              backgroundColor: `${colors.accent}18`,
+              borderColor: `${colors.accent}55`,
+            },
+          ]}
+        >
+          <Flame size={18} color={colors.accent} />
+          <Text style={[styles.nudgeText, { color: colors.accent }]}>
             {liveRival.name} is LIVE · {liveRival.todayMinutes}m today. Go live and beat her!
           </Text>
         </View>
       ) : null}
 
       <LinearGradient
-        colors={myRoom?.isLive ? ['#5A1638', '#2A1020'] : ['#3A2030', '#24151E']}
-        style={styles.card}
+        colors={
+          myRoom?.isLive
+            ? [colors.gradientMid, colors.bgElevated]
+            : [colors.bgCard, colors.bgSoft]
+        }
+        style={[styles.card, { borderColor: colors.border }]}
       >
         {!myRoom ? (
           <>
-            <Image source={{ uri: user.avatarUrl }} style={styles.avatarBig} />
-            <Text style={styles.cardTitle}>Create your beauty room</Text>
-            <Text style={styles.cardSub}>
-              Other hosts will see you when you go live. Compete for gifts and minutes.
+            <Image
+              source={{ uri: user.avatarUrl }}
+              style={[styles.avatarBig, { borderColor: colors.primarySoft }]}
+            />
+            <Text style={[styles.cardTitle, { color: colors.text }]}>Create your room</Text>
+            <Text style={[styles.cardSub, { color: colors.textSecondary }]}>
+              Other hosts will see you when you go live.
             </Text>
-            <Pressable style={styles.primary} onPress={createMyRoom}>
-              <Ionicons name="add-circle" size={20} color="#fff" />
+            <Pressable
+              style={[styles.primary, { backgroundColor: colors.primary }]}
+              onPress={createMyRoom}
+            >
+              <PlusCircle size={20} color="#fff" />
               <Text style={styles.primaryText}>Create Room</Text>
             </Pressable>
           </>
         ) : (
           <>
             <View style={styles.row}>
-              <Image source={{ uri: myRoom.avatarUrl }} style={styles.avatar} />
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.cardTitle, styles.left]}>{myRoom.title}</Text>
-                <Text style={[styles.cardSub, styles.left]}>
+              <Image
+                source={{ uri: myRoom.avatarUrl }}
+              style={[styles.avatar, { borderColor: colors.primarySoft }]}
+            />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.cardTitle, styles.left, { color: colors.text }]}>
+                {myRoom.title}
+              </Text>
+                <Text style={[styles.cardSub, styles.left, { color: colors.textSecondary }]}>
                   {myRoom.isLive
                     ? `LIVE ${formatLive(partyLiveSeconds)} · ${myRoom.viewers} watching`
                     : 'Ready — other hosts are waiting'}
                 </Text>
               </View>
               {myRoom.isLive ? (
-                <View style={styles.livePill}>
+                <View style={[styles.livePill, { backgroundColor: colors.danger }]}>
                   <Text style={styles.livePillText}>LIVE</Text>
                 </View>
               ) : null}
@@ -96,34 +109,51 @@ export function LiveScreen({ navigation }: { navigation?: any }) {
 
             <View style={styles.stats}>
               <View style={styles.stat}>
-                <Text style={styles.statValue}>{myRoom.viewers}</Text>
-                <Text style={styles.statLabel}>Viewers</Text>
+                <Text style={[styles.statValue, { color: colors.blush }]}>{myRoom.viewers}</Text>
+                <Text style={[styles.statLabel, { color: colors.textMuted }]}>Viewers</Text>
               </View>
               <View style={styles.stat}>
-                <Text style={styles.statValue}>{hostEarnings.gift}</Text>
-                <Text style={styles.statLabel}>Gifts</Text>
+                <Text style={[styles.statValue, { color: colors.blush }]}>{hostEarnings.gift}</Text>
+                <Text style={[styles.statLabel, { color: colors.textMuted }]}>Gifts</Text>
               </View>
               <View style={styles.stat}>
-                <Text style={styles.statValue}>{beautyOn ? 'ON' : 'OFF'}</Text>
-                <Text style={styles.statLabel}>Beauty</Text>
+                <Text style={[styles.statValue, { color: colors.blush }]}>
+                  {beautyOn ? 'ON' : 'OFF'}
+                </Text>
+                <Text style={[styles.statLabel, { color: colors.textMuted }]}>Beauty</Text>
               </View>
             </View>
 
-            <Pressable style={styles.beautyBtn} onPress={() => runHostTool('beauty')}>
-              <Ionicons name="sparkles" size={18} color={colors.accent} />
-              <Text style={styles.beautyText}>
+            <Pressable
+              style={[
+                styles.beautyBtn,
+                {
+                  backgroundColor: `${colors.accent}14`,
+                  borderColor: `${colors.accent}55`,
+                },
+              ]}
+              onPress={() => runHostTool('beauty')}
+            >
+              <Sparkles size={18} color={colors.accent} />
+              <Text style={[styles.beautyText, { color: colors.accent }]}>
                 {beautyOn ? 'Beauty filter is ON' : 'Turn on beauty filter'}
               </Text>
             </Pressable>
 
             {!myRoom.isLive ? (
-              <Pressable style={styles.primary} onPress={startPartyLive}>
-                <Ionicons name="radio" size={20} color="#fff" />
+              <Pressable
+                style={[styles.primary, { backgroundColor: colors.primary }]}
+                onPress={startPartyLive}
+              >
+                <Radio size={20} color="#fff" />
                 <Text style={styles.primaryText}>Go Live Now</Text>
               </Pressable>
             ) : (
-              <Pressable style={styles.endBtn} onPress={endPartyLive}>
-                <Ionicons name="stop" size={20} color="#fff" />
+              <Pressable
+                style={[styles.endBtn, { backgroundColor: colors.danger }]}
+                onPress={endPartyLive}
+              >
+                <StopCircle size={20} color="#fff" />
                 <Text style={styles.primaryText}>End Live</Text>
               </Pressable>
             )}
@@ -131,76 +161,85 @@ export function LiveScreen({ navigation }: { navigation?: any }) {
         )}
       </LinearGradient>
 
-      <Text style={styles.section}>Hosts live now · {liveHosts.length}</Text>
+      <Text style={[styles.section, { color: colors.text }]}>
+        Hosts live now · {liveHosts.length}
+      </Text>
       {liveHosts.length === 0 ? (
-        <Text style={styles.empty}>No one live yet — be the first ✨</Text>
+        <Text style={{ color: colors.textSecondary }}>No one live yet — be the first</Text>
       ) : (
         liveHosts.map((h) => (
           <Pressable
             key={h.id}
-            style={styles.hostRow}
+            style={[
+              styles.hostRow,
+              { backgroundColor: colors.bgCard, borderColor: colors.border },
+            ]}
             onPress={() => navigation?.navigate?.('HostProfile', { hostId: h.id })}
           >
             <Image source={{ uri: h.avatarUrl }} style={styles.hostAvatar} />
             <View style={{ flex: 1 }}>
-              <Text style={styles.hostName}>{h.name}</Text>
-              <Text style={styles.hostMeta}>
+              <Text style={[styles.hostName, { color: colors.text }]}>{h.name}</Text>
+              <Text style={[styles.hostMeta, { color: colors.textMuted }]}>
                 {h.todayMinutes}m today · best {formatLive(h.longestCallSeconds)}
               </Text>
             </View>
-            <View style={styles.livePill}>
+            <View style={[styles.livePill, { backgroundColor: colors.danger }]}>
               <Text style={styles.livePillText}>LIVE</Text>
             </View>
           </Pressable>
         ))
       )}
 
-      <Text style={styles.section}>Live rooms</Text>
+      <Text style={[styles.section, { color: colors.text }]}>Live rooms · Join</Text>
       {liveRooms.length === 0 ? (
-        <Text style={styles.empty}>Create your room and go live to show here.</Text>
+        <Text style={{ color: colors.textSecondary }}>
+          Create your room and go live to show here.
+        </Text>
       ) : (
         liveRooms.map((room) => (
-          <Pressable key={room.id} style={styles.roomRow} onPress={() => joinRoom(room.id)}>
+          <Pressable
+            key={room.id}
+            style={[
+              styles.roomRow,
+              { backgroundColor: colors.bgCard, borderColor: colors.border },
+            ]}
+            onPress={() => joinRoom(room.id)}
+          >
             <Image source={{ uri: room.avatarUrl }} style={styles.hostAvatar} />
             <View style={{ flex: 1 }}>
-              <Text style={styles.hostName}>{room.title}</Text>
-              <Text style={styles.hostMeta}>
+              <Text style={[styles.hostName, { color: colors.text }]}>{room.title}</Text>
+              <Text style={[styles.hostMeta, { color: colors.textMuted }]}>
                 {room.viewers} watching · {room.language}
               </Text>
             </View>
-            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
           </Pressable>
         ))
       )}
 
-      <Text style={styles.tip}>
-        Tip: Long 1:1 calls on Calls tab + live gifts here = higher competition rank.
+      <Text style={[styles.tip, { color: colors.textMuted }]}>
+        Tip: Long 1:1 calls + live gifts = higher competition rank.
       </Text>
-    </ScrollView>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
-  title: { color: colors.text, fontSize: 30, fontWeight: '800' },
-  subtitle: { color: colors.textSecondary, marginTop: 6, marginBottom: 14, lineHeight: 20 },
+  title: { fontSize: 30, fontWeight: '800' },
+  subtitle: { marginTop: 6, marginBottom: 14, lineHeight: 20 },
   nudge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: 'rgba(245,193,108,0.12)',
     borderWidth: 1,
-    borderColor: 'rgba(245,193,108,0.35)',
     borderRadius: 14,
     padding: 12,
     marginBottom: 14,
   },
-  nudgeText: { flex: 1, color: colors.accent, fontWeight: '700', fontSize: 13, lineHeight: 18 },
+  nudgeText: { flex: 1, fontWeight: '700', fontSize: 13, lineHeight: 18 },
   card: {
     borderRadius: 24,
     padding: 20,
     borderWidth: 1,
-    borderColor: colors.border,
   },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   avatarBig: {
@@ -210,30 +249,25 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     marginBottom: 12,
     borderWidth: 2,
-    borderColor: colors.primarySoft,
   },
   avatar: {
     width: 64,
     height: 64,
     borderRadius: 32,
     borderWidth: 2,
-    borderColor: colors.primarySoft,
   },
   cardTitle: {
-    color: colors.text,
     fontWeight: '800',
     fontSize: 20,
     textAlign: 'center',
   },
   cardSub: {
-    color: colors.textSecondary,
     marginTop: 8,
     textAlign: 'center',
     lineHeight: 20,
   },
   left: { textAlign: 'left' },
   livePill: {
-    backgroundColor: colors.danger,
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 10,
@@ -247,8 +281,8 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   stat: { flex: 1, alignItems: 'center' },
-  statValue: { color: colors.blush, fontWeight: '800', fontSize: 18 },
-  statLabel: { color: colors.textMuted, marginTop: 2, fontSize: 11 },
+  statValue: { fontWeight: '800', fontSize: 18 },
+  statLabel: { marginTop: 2, fontSize: 11 },
   beautyBtn: {
     marginTop: 14,
     flexDirection: 'row',
@@ -257,20 +291,19 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 12,
     borderRadius: 14,
-    backgroundColor: 'rgba(245,193,108,0.12)',
     borderWidth: 1,
-    borderColor: 'rgba(245,193,108,0.35)',
+    minHeight: 48,
   },
-  beautyText: { color: colors.accent, fontWeight: '700' },
+  beautyText: { fontWeight: '700' },
   primary: {
     marginTop: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: colors.primary,
     borderRadius: 16,
     paddingVertical: 15,
+    minHeight: 52,
   },
   endBtn: {
     marginTop: 16,
@@ -278,13 +311,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: colors.danger,
     borderRadius: 16,
     paddingVertical: 15,
+    minHeight: 52,
   },
   primaryText: { color: '#fff', fontWeight: '800', fontSize: 16 },
   section: {
-    color: colors.text,
     fontWeight: '800',
     fontSize: 17,
     marginTop: 22,
@@ -294,31 +326,25 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    backgroundColor: colors.bgCard,
     borderRadius: 16,
     padding: 12,
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: colors.border,
   },
   roomRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    backgroundColor: colors.bgCard,
     borderRadius: 16,
     padding: 12,
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: colors.border,
   },
   hostAvatar: { width: 48, height: 48, borderRadius: 24 },
-  hostName: { color: colors.text, fontWeight: '800' },
-  hostMeta: { color: colors.textMuted, marginTop: 3, fontSize: 12 },
-  empty: { color: colors.textSecondary, marginBottom: 8 },
+  hostName: { fontWeight: '800' },
+  hostMeta: { marginTop: 3, fontSize: 12 },
   tip: {
     marginTop: 18,
-    color: colors.textMuted,
     textAlign: 'center',
     lineHeight: 20,
   },

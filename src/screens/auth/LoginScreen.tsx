@@ -1,24 +1,28 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { Mail, Phone } from 'lucide-react-native';
 import { useState } from 'react';
 import {
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Pressable,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
+import { AppTextInput, SegmentedControl } from '../../components/ui/AppTextInput';
+import { PrimaryButton } from '../../components/ui/PrimaryButton';
+import { Screen } from '../../components/ui/Screen';
 import { useAuth } from '../../context/AuthContext';
 import type { AuthStackParamList } from '../../navigation/types';
-import { colors } from '../../theme/colors';
+import { radii, typography } from '../../theme/colors';
+import { useTheme } from '../../theme/ThemeContext';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Login'>;
 type AuthMethod = 'email' | 'phone';
 
 export function LoginScreen({ navigation }: Props) {
   const { signIn, usingFirebase } = useAuth();
+  const { colors } = useTheme();
   const [method, setMethod] = useState<AuthMethod>('email');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -65,187 +69,140 @@ export function LoginScreen({ navigation }: Props) {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-        <Text style={styles.brand}>CoinCall Beauty</Text>
-      <Text style={styles.subtitle}>Host login · earn with your smile</Text>
-      <Text style={styles.mode}>
-        {usingFirebase ? 'Real Firebase login ON' : 'Demo mode'}
-      </Text>
-
-      <View style={styles.methodRow}>
-        {(['email', 'phone'] as const).map((m) => (
-          <Pressable
-            key={m}
-            style={[styles.methodChip, method === m && styles.methodChipActive]}
-            onPress={() => {
-              setMethod(m);
-              setError(null);
-            }}
-          >
-            <Text style={[styles.methodText, method === m && styles.methodTextActive]}>
-              {m === 'email' ? 'Email' : 'Phone OTP'}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
-
-      {method === 'email' ? (
-        <View style={styles.form}>
-          <Text style={styles.label}>Email</Text>
-          <TextInput
-            style={styles.input}
-            autoCapitalize="none"
-            keyboardType="email-address"
-            placeholder="you@example.com"
-            placeholderTextColor={colors.textMuted}
-            value={email}
-            onChangeText={setEmail}
-          />
-          <Text style={styles.label}>Password</Text>
-          <TextInput
-            style={styles.input}
-            secureTextEntry
-            placeholder="Your password"
-            placeholderTextColor={colors.textMuted}
-            value={password}
-            onChangeText={setPassword}
-          />
+    <Screen scroll>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <Text style={[styles.brand, { color: colors.text }]}>CoinCall</Text>
+        <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+          Premium host studio · sign in to continue
+        </Text>
+        <View
+          style={[
+            styles.badge,
+            { backgroundColor: `${colors.primary}22`, borderColor: colors.border },
+          ]}
+        >
+          <Text style={{ color: colors.primarySoft, fontWeight: '700', fontSize: 12 }}>
+            {usingFirebase ? 'Secure cloud login' : 'Demo mode'}
+          </Text>
         </View>
-      ) : (
+
+        <SegmentedControl
+          value={method}
+          onChange={(m) => {
+            setMethod(m);
+            setError(null);
+          }}
+          options={[
+            { key: 'email', label: 'Email' },
+            { key: 'phone', label: 'Phone OTP' },
+          ]}
+        />
+
         <View style={styles.form}>
-          <Text style={styles.label}>Phone</Text>
-          <TextInput
-            style={styles.input}
-            keyboardType="phone-pad"
-            placeholder="+92 300 1234567"
-            placeholderTextColor={colors.textMuted}
-            value={phone}
-            onChangeText={setPhone}
-          />
-          {!otpSent ? (
-            <Pressable style={styles.secondaryButton} onPress={handleSendOtp}>
-              <Text style={styles.secondaryButtonText}>Send OTP</Text>
-            </Pressable>
+          {method === 'email' ? (
+            <>
+              <Text style={[styles.label, { color: colors.text }]}>Email</Text>
+              <View style={styles.inputRow}>
+                <View style={styles.inputIcon}>
+                  <Mail size={18} color={colors.textMuted} />
+                </View>
+                <AppTextInput
+                  style={styles.inputFlex}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  value={email}
+                  onChangeText={setEmail}
+                  placeholder="you@email.com"
+                />
+              </View>
+              <Text style={[styles.label, { color: colors.text }]}>Password</Text>
+              <AppTextInput
+                secureTextEntry
+                value={password}
+                onChangeText={setPassword}
+                placeholder="••••••••"
+              />
+            </>
           ) : (
             <>
-              <Text style={styles.hint}>Mock OTP sent. Enter any 4+ digits.</Text>
-              <Text style={styles.label}>OTP</Text>
-              <TextInput
-                style={styles.input}
-                keyboardType="number-pad"
-                placeholder="1234"
-                placeholderTextColor={colors.textMuted}
-                value={otp}
-                onChangeText={setOtp}
-              />
+              <Text style={[styles.label, { color: colors.text }]}>Phone</Text>
+              <View style={styles.inputRow}>
+                <View style={styles.inputIcon}>
+                  <Phone size={18} color={colors.textMuted} />
+                </View>
+                <AppTextInput
+                  style={styles.inputFlex}
+                  keyboardType="phone-pad"
+                  value={phone}
+                  onChangeText={setPhone}
+                  placeholder="+971…"
+                />
+              </View>
+              {otpSent ? (
+                <>
+                  <Text style={[styles.label, { color: colors.text }]}>OTP</Text>
+                  <AppTextInput
+                    keyboardType="number-pad"
+                    value={otp}
+                    onChangeText={setOtp}
+                    placeholder="6-digit code"
+                  />
+                </>
+              ) : null}
             </>
           )}
         </View>
-      )}
 
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+        {error ? <Text style={[styles.error, { color: colors.danger }]}>{error}</Text> : null}
 
-      <Pressable
-        style={[styles.primaryButton, loading && styles.buttonDisabled]}
-        onPress={handleLogin}
-        disabled={loading || (method === 'phone' && !otpSent)}
-      >
-        {loading ? (
-          <ActivityIndicator color="#fff" />
+        {method === 'phone' && !otpSent ? (
+          <PrimaryButton label="Send OTP" onPress={handleSendOtp} style={{ marginTop: 20 }} />
         ) : (
-          <Text style={styles.primaryButtonText}>Log In</Text>
+          <PrimaryButton
+            label="Sign in"
+            onPress={handleLogin}
+            loading={loading}
+            style={{ marginTop: 20 }}
+          />
         )}
-      </Pressable>
 
-      <Pressable onPress={() => navigation.navigate('Signup')} style={styles.footerLink}>
-        <Text style={styles.footerText}>
-          New here? <Text style={styles.footerTextBold}>Create an account</Text>
-        </Text>
-      </Pressable>
-    </KeyboardAvoidingView>
+        <Pressable
+          accessibilityRole="link"
+          onPress={() => navigation.navigate('Signup')}
+          style={styles.footer}
+        >
+          <Text style={{ color: colors.textSecondary }}>
+            New host?{' '}
+            <Text style={{ color: colors.primarySoft, fontWeight: '800' }}>Create account</Text>
+          </Text>
+        </Pressable>
+      </KeyboardAvoidingView>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.bg,
-    paddingHorizontal: 24,
-    paddingTop: 72,
-  },
-  brand: {
-    fontSize: 36,
-    fontWeight: '800',
-    color: colors.text,
-  },
-  subtitle: {
-    marginTop: 8,
-    fontSize: 16,
-    color: colors.textSecondary,
-    marginBottom: 8,
-  },
-  mode: {
-    color: colors.primarySoft,
-    fontSize: 12,
-    fontWeight: '700',
+  brand: { ...typography.hero, marginTop: 12 },
+  subtitle: { marginTop: 8, marginBottom: 16, ...typography.subtitle },
+  badge: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: radii.full,
+    borderWidth: 1,
     marginBottom: 20,
   },
-  methodRow: { flexDirection: 'row', gap: 10, marginBottom: 24 },
-  methodChip: {
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 16,
-    backgroundColor: colors.bgCard,
-    borderWidth: 1,
-    borderColor: colors.border,
+  form: { marginTop: 18, gap: 8 },
+  label: { ...typography.label, marginTop: 8 },
+  inputRow: { position: 'relative', justifyContent: 'center' },
+  inputIcon: {
+    position: 'absolute',
+    left: 14,
+    zIndex: 2,
+    height: 52,
+    justifyContent: 'center',
   },
-  methodChipActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  methodText: { color: colors.textSecondary, fontWeight: '700' },
-  methodTextActive: { color: colors.text },
-  form: { gap: 8 },
-  label: {
-    marginTop: 8,
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  input: {
-    backgroundColor: colors.bgCard,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    fontSize: 16,
-    color: colors.text,
-  },
-  hint: { marginTop: 8, color: colors.textSecondary, fontSize: 13 },
-  error: { marginTop: 16, color: colors.danger, fontSize: 14 },
-  primaryButton: {
-    marginTop: 24,
-    backgroundColor: colors.primary,
-    borderRadius: 16,
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
-  buttonDisabled: { opacity: 0.7 },
-  primaryButtonText: { color: '#fff', fontSize: 16, fontWeight: '800' },
-  secondaryButton: {
-    marginTop: 12,
-    borderRadius: 14,
-    paddingVertical: 14,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.primary,
-  },
-  secondaryButtonText: { color: colors.primary, fontWeight: '800' },
-  footerLink: { marginTop: 24, alignItems: 'center' },
-  footerText: { color: colors.textSecondary, fontSize: 15 },
-  footerTextBold: { color: colors.primarySoft, fontWeight: '800' },
+  inputFlex: { paddingLeft: 42 },
+  error: { marginTop: 14, fontWeight: '600' },
+  footer: { marginTop: 24, alignItems: 'center', minHeight: 44, justifyContent: 'center' },
 });

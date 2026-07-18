@@ -1,5 +1,5 @@
-import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import { CheckCircle2, Images, Plus, Video, X } from 'lucide-react-native';
 import { useState } from 'react';
 import {
   ActivityIndicator,
@@ -14,13 +14,15 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
 import { HOST_COUNTRIES } from '../../data/countries';
-import { colors } from '../../theme/colors';
+import { radii } from '../../theme/colors';
+import { useTheme } from '../../theme/ThemeContext';
 import { notify } from '../../utils/notify';
 
 const MAX_PHOTOS = 8;
 
 export function HostApplyScreen() {
   const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
   const { user, submitHostApplication, signOut } = useAuth();
   const [name, setName] = useState(user?.name ?? '');
   const [country, setCountry] = useState(user?.country ?? '');
@@ -89,7 +91,7 @@ export function HostApplyScreen() {
     setLoading(true);
     try {
       await submitHostApplication({ name, country, photoUrls, videoUrl });
-      notify('Submitted 💖', 'Your host ID is ready. Wait for admin approval.');
+      notify('Submitted', 'Your host ID is ready. Wait for admin approval.');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Submit failed.');
     } finally {
@@ -99,7 +101,7 @@ export function HostApplyScreen() {
 
   return (
     <ScrollView
-      style={styles.container}
+      style={{ flex: 1, backgroundColor: colors.bg }}
       contentContainerStyle={{
         paddingTop: insets.top + 16,
         paddingBottom: insets.bottom + 40,
@@ -107,25 +109,38 @@ export function HostApplyScreen() {
       }}
       keyboardShouldPersistTaps="handled"
     >
-      <Text style={styles.brand}>Become a Host</Text>
-      <Text style={styles.sub}>
+      <Text style={[styles.brand, { color: colors.text }]}>Become a Host</Text>
+      <Text style={[styles.sub, { color: colors.textSecondary }]}>
         {user?.hostStatus === 'rejected'
           ? 'Your last application was declined. Update photos/video and submit again.'
           : 'Submit your beauty profile. You cannot start hosting until we approve your ID.'}
       </Text>
 
-      <Text style={styles.label}>Display name</Text>
+      <Text style={[styles.label, { color: colors.text }]}>Display name</Text>
       <TextInput
-        style={styles.input}
+        style={[
+          styles.input,
+          {
+            backgroundColor: colors.bgCard,
+            borderColor: colors.border,
+            color: colors.text,
+          },
+        ]}
         value={name}
         onChangeText={setName}
         placeholder="Your host name"
         placeholderTextColor={colors.textMuted}
       />
 
-      <Text style={styles.label}>Country</Text>
+      <Text style={[styles.label, { color: colors.text }]}>Country</Text>
       <Pressable
-        style={styles.input}
+        style={[
+          styles.input,
+          {
+            backgroundColor: colors.bgCard,
+            borderColor: colors.border,
+          },
+        ]}
         onPress={() => {
           setShowCountries((v) => !v);
           setCountryQuery('');
@@ -136,30 +151,51 @@ export function HostApplyScreen() {
         </Text>
       </Pressable>
       {showCountries ? (
-        <View style={styles.countryBox}>
+        <View
+          style={[
+            styles.countryBox,
+            {
+              backgroundColor: colors.bgElevated,
+              borderColor: colors.border,
+            },
+          ]}
+        >
           <TextInput
-            style={styles.searchInput}
+            style={[
+              styles.searchInput,
+              { color: colors.text, borderBottomColor: colors.border },
+            ]}
             value={countryQuery}
             onChangeText={setCountryQuery}
             placeholder="Type to search all countries…"
             placeholderTextColor={colors.textMuted}
             autoFocus
           />
-          <ScrollView style={styles.countryList} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+          <ScrollView
+            style={styles.countryList}
+            nestedScrollEnabled
+            keyboardShouldPersistTaps="handled"
+          >
             {filteredCountries.length === 0 ? (
-              <Text style={styles.emptyCountry}>No country found</Text>
+              <Text style={[styles.emptyCountry, { color: colors.textMuted }]}>
+                No country found
+              </Text>
             ) : (
               filteredCountries.map((c) => (
                 <Pressable
                   key={c}
-                  style={[styles.countryItem, country === c && styles.countryItemOn]}
+                  style={[
+                    styles.countryItem,
+                    { borderBottomColor: colors.border },
+                    country === c && { backgroundColor: `${colors.primary}28` },
+                  ]}
                   onPress={() => {
                     setCountry(c);
                     setShowCountries(false);
                     setCountryQuery('');
                   }}
                 >
-                  <Text style={styles.countryText}>{c}</Text>
+                  <Text style={{ color: colors.text }}>{c}</Text>
                 </Pressable>
               ))
             )}
@@ -167,57 +203,95 @@ export function HostApplyScreen() {
         </View>
       ) : null}
 
-      <Text style={styles.label}>
+      <Text style={[styles.label, { color: colors.text }]}>
         Photos · {photoUrls.length}/{MAX_PHOTOS} (min 2)
       </Text>
-      <Text style={styles.hint}>First photo is your main profile picture</Text>
+      <Text style={[styles.hint, { color: colors.textMuted }]}>
+        First photo is your main profile picture
+      </Text>
 
       <View style={styles.grid}>
         {photoUrls.map((uri, index) => (
-          <View key={`${uri}_${index}`} style={styles.thumbWrap}>
+          <View
+            key={`${uri}_${index}`}
+            style={[styles.thumbWrap, { backgroundColor: colors.bgCard }]}
+          >
             <Image source={{ uri }} style={styles.thumb} />
             {index === 0 ? (
-              <View style={styles.mainBadge}>
+              <View style={[styles.mainBadge, { backgroundColor: colors.primary }]}>
                 <Text style={styles.mainBadgeText}>Main</Text>
               </View>
             ) : null}
-            <Pressable style={styles.removeBtn} onPress={() => removePhoto(uri)}>
-              <Ionicons name="close" size={14} color="#fff" />
+            <Pressable
+              style={styles.removeBtn}
+              onPress={() => removePhoto(uri)}
+              hitSlop={8}
+              accessibilityLabel="Remove photo"
+            >
+              <X size={14} color="#fff" />
             </Pressable>
           </View>
         ))}
 
         {photoUrls.length < MAX_PHOTOS ? (
-          <Pressable style={styles.addTile} onPress={pickPhotos}>
-            <Ionicons name="add" size={28} color={colors.primarySoft} />
-            <Text style={styles.addText}>Add</Text>
+          <Pressable
+            style={[
+              styles.addTile,
+              { borderColor: colors.border, backgroundColor: colors.bgCard },
+            ]}
+            onPress={pickPhotos}
+          >
+            <Plus size={28} color={colors.primarySoft} />
+            <Text style={[styles.addText, { color: colors.textSecondary }]}>Add</Text>
           </Pressable>
         ) : null}
       </View>
 
-      <Pressable style={styles.addMore} onPress={pickPhotos}>
-        <Ionicons name="images" size={18} color={colors.primarySoft} />
-        <Text style={styles.addMoreText}>Add multiple photos</Text>
-      </Pressable>
-
-      <Text style={styles.label}>Intro video (max 60s)</Text>
-      <Pressable style={styles.mediaBox} onPress={pickVideo}>
-        <Ionicons
-          name={videoUrl ? 'checkmark-circle' : 'videocam'}
-          size={28}
-          color={videoUrl ? colors.online : colors.primarySoft}
-        />
-        <Text style={styles.mediaText}>
-          {videoUrl ? 'Intro video selected ✓' : 'Upload smile intro video'}
+      <Pressable
+        style={[
+          styles.addMore,
+          {
+            backgroundColor: `${colors.primary}18`,
+            borderColor: `${colors.primary}55`,
+          },
+        ]}
+        onPress={pickPhotos}
+      >
+        <Images size={18} color={colors.primarySoft} />
+        <Text style={[styles.addMoreText, { color: colors.primarySoft }]}>
+          Add multiple photos
         </Text>
       </Pressable>
 
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      <Text style={[styles.label, { color: colors.text }]}>Intro video (max 60s)</Text>
+      <Pressable
+        style={[
+          styles.mediaBox,
+          { borderColor: colors.border, backgroundColor: colors.bgCard },
+        ]}
+        onPress={pickVideo}
+      >
+        {videoUrl ? (
+          <CheckCircle2 size={28} color={colors.online} />
+        ) : (
+          <Video size={28} color={colors.primarySoft} />
+        )}
+        <Text style={[styles.mediaText, { color: colors.textSecondary }]}>
+          {videoUrl ? 'Intro video selected' : 'Upload smile intro video'}
+        </Text>
+      </Pressable>
+
+      {error ? <Text style={[styles.error, { color: colors.danger }]}>{error}</Text> : null}
 
       <Pressable
-        style={[styles.submit, loading && styles.disabled]}
+        style={[
+          styles.submit,
+          { backgroundColor: colors.primary },
+          loading && styles.disabled,
+        ]}
         onPress={onSubmit}
         disabled={loading}
+        accessibilityRole="button"
       >
         {loading ? (
           <ActivityIndicator color="#fff" />
@@ -227,81 +301,61 @@ export function HostApplyScreen() {
       </Pressable>
 
       <Pressable style={styles.signOut} onPress={signOut}>
-        <Text style={styles.signOutText}>Sign out</Text>
+        <Text style={[styles.signOutText, { color: colors.textMuted }]}>Sign out</Text>
       </Pressable>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
-  brand: { color: colors.text, fontSize: 30, fontWeight: '800' },
-  sub: { color: colors.textSecondary, marginTop: 8, marginBottom: 22, lineHeight: 21 },
-  label: { color: colors.text, fontWeight: '700', marginBottom: 8, marginTop: 10 },
-  hint: { color: colors.textMuted, fontSize: 12, marginTop: -4, marginBottom: 10 },
+  brand: { fontSize: 30, fontWeight: '800' },
+  sub: { marginTop: 8, marginBottom: 22, lineHeight: 21 },
+  label: { fontWeight: '700', marginBottom: 8, marginTop: 10 },
+  hint: { fontSize: 12, marginTop: -4, marginBottom: 10 },
   input: {
-    backgroundColor: colors.bgCard,
     borderWidth: 1,
-    borderColor: colors.border,
     borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 14,
-    color: colors.text,
     fontSize: 16,
+    minHeight: 52,
+    justifyContent: 'center',
   },
   countryBox: {
     marginTop: 8,
-    backgroundColor: colors.bgElevated,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.border,
     overflow: 'hidden',
   },
   searchInput: {
     paddingHorizontal: 14,
     paddingVertical: 12,
-    color: colors.text,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
     fontSize: 15,
+    minHeight: 48,
   },
-  countryList: {
-    maxHeight: 220,
-  },
+  countryList: { maxHeight: 220 },
   countryItem: {
     paddingHorizontal: 14,
     paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    minHeight: 48,
+    justifyContent: 'center',
   },
-  countryItemOn: {
-    backgroundColor: 'rgba(232,90,140,0.18)',
-  },
-  countryText: { color: colors.text },
-  emptyCountry: {
-    color: colors.textMuted,
-    padding: 16,
-    textAlign: 'center',
-  },
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-  },
+  emptyCountry: { padding: 16, textAlign: 'center' },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   thumbWrap: {
     width: '30%',
     aspectRatio: 1,
     borderRadius: 14,
     overflow: 'hidden',
     position: 'relative',
-    backgroundColor: colors.bgCard,
   },
   thumb: { width: '100%', height: '100%' },
   mainBadge: {
     position: 'absolute',
     left: 6,
     bottom: 6,
-    backgroundColor: colors.primary,
     borderRadius: 8,
     paddingHorizontal: 6,
     paddingVertical: 2,
@@ -311,9 +365,9 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 6,
     right: 6,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     backgroundColor: 'rgba(0,0,0,0.65)',
     alignItems: 'center',
     justifyContent: 'center',
@@ -323,14 +377,12 @@ const styles = StyleSheet.create({
     aspectRatio: 1,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: colors.border,
     borderStyle: 'dashed',
-    backgroundColor: colors.bgCard,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 4,
   },
-  addText: { color: colors.textSecondary, fontWeight: '700', fontSize: 12 },
+  addText: { fontWeight: '700', fontSize: 12 },
   addMore: {
     marginTop: 12,
     flexDirection: 'row',
@@ -339,34 +391,32 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 12,
     borderRadius: 14,
-    backgroundColor: 'rgba(232,90,140,0.12)',
     borderWidth: 1,
-    borderColor: 'rgba(232,90,140,0.35)',
+    minHeight: 48,
   },
-  addMoreText: { color: colors.primarySoft, fontWeight: '800' },
+  addMoreText: { fontWeight: '800' },
   mediaBox: {
     minHeight: 120,
-    borderRadius: 18,
+    borderRadius: radii.lg,
     borderWidth: 1,
-    borderColor: colors.border,
     borderStyle: 'dashed',
-    backgroundColor: colors.bgCard,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
     overflow: 'hidden',
   },
-  mediaText: { color: colors.textSecondary, fontWeight: '600' },
-  error: { color: colors.danger, marginTop: 14 },
+  mediaText: { fontWeight: '600' },
+  error: { marginTop: 14 },
   submit: {
     marginTop: 24,
-    backgroundColor: colors.primary,
-    borderRadius: 16,
+    borderRadius: radii.md,
     paddingVertical: 16,
     alignItems: 'center',
+    minHeight: 52,
+    justifyContent: 'center',
   },
   disabled: { opacity: 0.7 },
   submitText: { color: '#fff', fontWeight: '800', fontSize: 16 },
-  signOut: { marginTop: 18, alignItems: 'center' },
-  signOutText: { color: colors.textMuted, fontWeight: '700' },
+  signOut: { marginTop: 18, alignItems: 'center', minHeight: 44, justifyContent: 'center' },
+  signOutText: { fontWeight: '700' },
 });
