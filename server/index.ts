@@ -308,6 +308,10 @@ app.post('/api/calls/:id/accept', (req, res) => {
     res.status(404).json({ error: 'Call not found' });
     return;
   }
+  if (call.status === 'accepted') {
+    res.json({ call });
+    return;
+  }
   if (call.status !== 'ringing') {
     res.status(409).json({ error: `Call is ${call.status}` });
     return;

@@ -38,21 +38,41 @@ function formatTime(totalSeconds: number) {
   return `${m}:${s}`;
 }
 
+function waitForEl(
+  getter: () => HTMLElement | null,
+  tries = 30,
+): Promise<HTMLElement> {
+  return new Promise((resolve, reject) => {
+    let n = 0;
+    const tick = () => {
+      const el = getter();
+      if (el) {
+        resolve(el);
+        return;
+      }
+      n += 1;
+      if (n >= tries) {
+        reject(new Error('Video surface not ready'));
+        return;
+      }
+      requestAnimationFrame(tick);
+    };
+    tick();
+  });
+}
+
 export function CallScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
-  const { getHost, call, endCall, user, reportUser, blockUser } =
-    useApp();
+  const { getHost, call, endCall, user, reportUser, blockUser } = useApp();
   const bridgeCallId = route.params.bridgeCallId;
   const isBridge = Boolean(bridgeCallId);
   const peerHost = !isBridge ? getHost(route.params.hostId) : undefined;
-  const peerName =
-    route.params.peerName || peerHost?.name || 'Caller';
+  const peerName = route.params.peerName || peerHost?.name || 'Caller';
   const peerAvatar =
     route.params.peerAvatar ||
     peerHost?.avatarUrl ||
     `https://i.pravatar.cc/300?u=${route.params.hostId}`;
-  const rate =
-    route.params.ratePerMinute || peerHost?.ratePerMinute || 80;
+  const rate = route.params.ratePerMinute || peerHost?.ratePerMinute || 80;
   const channel =
     route.params.channel || (peerHost ? `call_${peerHost.id}` : '');
 
@@ -61,10 +81,12 @@ export function CallScreen({ navigation, route }: Props) {
   const [videoStatus, setVideoStatus] = useState('Starting camera...');
   const [bridgeSeconds, setBridgeSeconds] = useState(0);
   const [bridgeCoins, setBridgeCoins] = useState(rate);
+  const [surfacesReady, setSurfacesReady] = useState(false);
   const agoraReady = isAgoraConfigured() && Platform.OS === 'web';
   const activeCallIdRef = useRef<string | null>(null);
+  const localRef = useRef<HTMLDivElement | null>(null);
+  const remoteRef = useRef<HTMLDivElement | null>(null);
 
-  // Legacy host↔host demo call: ensure session exists
   useEffect(() => {
     if (isBridge) return;
     if (!call || call.status === 'ended') {
@@ -127,48 +149,51 @@ export function CallScreen({ navigation, route }: Props) {
   }, [call?.seconds, call?.coinsSpent, isBridge]);
 
   useEffect(() => {
-    if (!agoraReady || !channel) return;
+    if (!agoraReady || !channel || !surfacesReady) return;
     if (!isBridge && (!call || !peerHost)) return;
 
     let active = true;
     (async () => {
       try {
-        const localEl = document.getElementById('agora-local');
-        const remoteEl = document.getElementById('agora-remote');
-        if (!localEl || !remoteEl) {
-          setVideoStatus('Video containers missing');
-          return;
-        }
+        const localEl = await waitForEl(() => localRef.current);
+        const remoteEl = await waitForEl(() => remoteRef.current);
+        if (!active) return;
 
-        let uid: number | undefined;
+        setVideoStatus('Joining secure room…');
+
         if (isBridge && bridgeCallId) {
           const tokenPayload = await fetchCallToken(bridgeCallId, 'host');
-          uid = tokenPayload.uid;
-          setVideoStatus('Connected to Luma user · live');
+          if (!active) return;
+          await startAgoraCall({
+            channel: tokenPayload.channel || channel,
+            localVideoEl: localEl,
+            remoteVideoEl: remoteEl,
+            uid: tokenPayload.uid,
+            token: tokenPayload.token,
+            appId: tokenPayload.appId,
+          });
+        } else {
+          await startAgoraCall({
+            channel,
+            localVideoEl: localEl,
+            remoteVideoEl: remoteEl,
+          });
         }
 
-        await startAgoraCall({
-          channel,
-          localVideoEl: localEl,
-          remoteVideoEl: remoteEl,
-          uid,
-        });
         if (active) {
           setVideoStatus(
-            isBridge
-              ? 'Live with Luma user'
-              : 'Live · admin can monitor silently',
+            isBridge ? 'Live with Luma user · video on' : 'Live video connected',
           );
         }
-      } catch (e: any) {
-        if (active) {
-          setVideoStatus(e?.message || 'Could not start video');
-          notify(
-            'Video error',
-            e?.message ||
-              'Check Agora App ID and allow camera/mic in the browser.',
-          );
-        }
+      } catch (e: unknown) {
+        if (!active) return;
+        const message =
+          e instanceof Error ? e.message : 'Could not start video';
+        setVideoStatus(message);
+        notify(
+          'Video error',
+          `${message}. Allow camera/mic, then reopen the call.`,
+        );
       }
     })();
 
@@ -183,6 +208,7 @@ export function CallScreen({ navigation, route }: Props) {
     channel,
     isBridge,
     peerHost?.id,
+    surfacesReady,
   ]);
 
   const displaySeconds = isBridge ? bridgeSeconds : call?.seconds ?? 0;
@@ -215,7 +241,15 @@ export function CallScreen({ navigation, route }: Props) {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       {agoraReady ? (
-        <div id="agora-remote" style={webRemoteStyle} />
+        // @ts-expect-error web video surface
+        <div
+          ref={(el: HTMLDivElement | null) => {
+            remoteRef.current = el;
+            if (el && localRef.current) setSurfacesReady(true);
+          }}
+          id="agora-remote"
+          style={webRemoteStyle}
+        />
       ) : (
         <Image source={{ uri: peerAvatar }} style={styles.remote} />
       )}
@@ -231,13 +265,21 @@ export function CallScreen({ navigation, route }: Props) {
         <Text style={styles.videoStatus}>
           {agoraReady
             ? videoStatus
-            : 'Demo video (add Agora App ID for real camera)'}
+            : 'Connecting video (open on web / allow camera)'}
         </Text>
       </View>
 
       <View style={[styles.localPreview, cameraOff && styles.cameraOff]}>
         {agoraReady ? (
-          <div id="agora-local" style={webLocalStyle} />
+          // @ts-expect-error web video surface
+          <div
+            ref={(el: HTMLDivElement | null) => {
+              localRef.current = el;
+              if (el && remoteRef.current) setSurfacesReady(true);
+            }}
+            id="agora-local"
+            style={webLocalStyle}
+          />
         ) : cameraOff ? (
           <Ionicons name="videocam-off" size={28} color={colors.text} />
         ) : (
@@ -300,7 +342,9 @@ export function CallScreen({ navigation, route }: Props) {
       </View>
 
       <Text style={styles.spent}>
-        {isBridge ? 'Connected via CoinCall bridge' : `Call earnings: ${displayCoins} coins`}
+        {isBridge
+          ? 'Connected via CoinCall bridge'
+          : `Call earnings: ${displayCoins} coins`}
       </Text>
       {!isBridge && (
         <Pressable
@@ -336,10 +380,10 @@ const webLocalStyle = {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
-  remote: { ...StyleSheet.absoluteFill, width: '100%', height: '100%' },
+  remote: { ...StyleSheet.absoluteFillObject, width: '100%', height: '100%' },
   overlay: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(8,0,20,0.2)',
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(8,0,20,0.15)',
   },
   topBar: { alignItems: 'center', marginTop: 12, zIndex: 2 },
   timer: { color: colors.text, fontSize: 34, fontWeight: '800' },
@@ -350,6 +394,8 @@ const styles = StyleSheet.create({
     marginTop: 6,
     fontSize: 12,
     fontWeight: '600',
+    textAlign: 'center',
+    paddingHorizontal: 16,
   },
   localPreview: {
     position: 'absolute',
@@ -393,6 +439,11 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     zIndex: 2,
   },
-  blockLink: { position: 'absolute', bottom: 86, alignSelf: 'center', zIndex: 2 },
+  blockLink: {
+    position: 'absolute',
+    bottom: 86,
+    alignSelf: 'center',
+    zIndex: 2,
+  },
   blockText: { color: colors.danger, fontWeight: '700' },
 });
