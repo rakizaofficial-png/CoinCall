@@ -23,6 +23,12 @@ import type {
   Transaction,
   User,
 } from '../types/models';
+import type {
+  HostPresenceStatus,
+  HostWorkspaceMode,
+  PartySeat,
+  PkBattleState,
+} from '../types/hostWorkspace';
 import { notify } from '../utils/notify';
 
 type HomeFilter = 'working' | 'live' | 'online' | 'prime';
@@ -124,6 +130,19 @@ type AppContextValue = {
   /** Incoming call from Luma / user app */
   incomingBridgeCall: BridgeCall | null;
   clearIncomingBridgeCall: () => void;
+  /** Persistent host workspace / presence */
+  workspaceMode: HostWorkspaceMode;
+  setWorkspaceMode: (mode: HostWorkspaceMode) => void;
+  hostPresenceStatus: HostPresenceStatus;
+  partySeats: PartySeat[];
+  partyGroupGiftsToday: number;
+  joinPartySeat: (seatIndex: number) => void;
+  leavePartySeat: () => void;
+  enterPartyRoom: () => void;
+  pkBattle: PkBattleState | null;
+  enterPkBattle: () => void;
+  leavePkBattle: () => void;
+  tickPkBattle: () => void;
 };
 
 const AppContext = createContext<AppContextValue | undefined>(undefined);
@@ -225,15 +244,229 @@ export function AppProvider({
   const [incomingBridgeCall, setIncomingBridgeCall] = useState<BridgeCall | null>(
     null,
   );
+  const [workspaceMode, setWorkspaceModeState] =
+    useState<HostWorkspaceMode>('waiting_1v1');
+  const [partySeats, setPartySeats] = useState<PartySeat[]>(() =>
+    Array.from({ length: 6 }, (_, index) => ({
+      index,
+      occupied: false,
+      hostId: null,
+      name: '',
+      avatarUrl: '',
+      isMe: false,
+      isSpeaking: false,
+      micOn: false,
+    })),
+  );
+  const [partyGroupGiftsToday, setPartyGroupGiftsToday] = useState(1840);
+  const [pkBattle, setPkBattle] = useState<PkBattleState | null>(null);
   const callRef = useRef<CallSession | null>(null);
 
   const clearIncomingBridgeCall = useCallback(() => {
     setIncomingBridgeCall(null);
   }, []);
 
+  const setWorkspaceMode = useCallback((mode: HostWorkspaceMode) => {
+    setWorkspaceModeState(mode);
+  }, []);
+
+  const hostPresenceStatus: HostPresenceStatus = useMemo(() => {
+    if (!hostOnline) return 'offline';
+    if (call?.status === 'active' || workspaceMode === 'solo_calling') {
+      return 'solo_calling';
+    }
+    if (workspaceMode === 'party_room') return 'party_room';
+    return 'online';
+  }, [call?.status, hostOnline, workspaceMode]);
+
+  const enterPartyRoom = useCallback(() => {
+    setHostOnlineState(true);
+    setUser((u) => ({ ...u, isOnline: true }));
+    setWorkspaceModeState('party_room');
+
+    setPartySeats((seats) => {
+      const peers = MOCK_HOSTS.filter((h) => h.isOnline).slice(0, 4);
+      const next = seats.map((s, i) => {
+        if (i === 0) {
+          return {
+            ...s,
+            occupied: true,
+            hostId: user.id,
+            name: user.name,
+            avatarUrl: user.avatarUrl,
+            isMe: true,
+            isSpeaking: true,
+            micOn: true,
+          };
+        }
+        const peer = peers[i - 1];
+        if (peer) {
+          return {
+            ...s,
+            occupied: true,
+            hostId: peer.id,
+            name: peer.name,
+            avatarUrl: peer.avatarUrl,
+            isMe: false,
+            isSpeaking: i % 2 === 0,
+            micOn: true,
+          };
+        }
+        return {
+          ...s,
+          occupied: false,
+          hostId: null,
+          name: '',
+          avatarUrl: '',
+          isMe: false,
+          isSpeaking: false,
+          micOn: false,
+        };
+      });
+      return next;
+    });
+    notify('Party Room', 'Joined multi-host group stream workspace.');
+  }, [user.avatarUrl, user.id, user.name]);
+
+  const joinPartySeat = useCallback(
+    (seatIndex: number) => {
+      setWorkspaceModeState('party_room');
+      setPartySeats((seats) => {
+        const withoutMe = seats.map((s) =>
+          s.isMe
+            ? {
+                ...s,
+                occupied: false,
+                hostId: null,
+                name: '',
+                avatarUrl: '',
+                isMe: false,
+                isSpeaking: false,
+                micOn: false,
+              }
+            : s,
+        );
+        return withoutMe.map((s) =>
+          s.index === seatIndex
+            ? {
+                ...s,
+                occupied: true,
+                hostId: user.id,
+                name: user.name,
+                avatarUrl: user.avatarUrl,
+                isMe: true,
+                isSpeaking: true,
+                micOn: true,
+              }
+            : s,
+        );
+      });
+    },
+    [user.avatarUrl, user.id, user.name],
+  );
+
+  const leavePartySeat = useCallback(() => {
+    setPartySeats((seats) =>
+      seats.map((s) =>
+        s.isMe
+          ? {
+              ...s,
+              occupied: false,
+              hostId: null,
+              name: '',
+              avatarUrl: '',
+              isMe: false,
+              isSpeaking: false,
+              micOn: false,
+            }
+          : s,
+      ),
+    );
+  }, []);
+
+  const enterPkBattle = useCallback(() => {
+    setHostOnlineState(true);
+    const rival =
+      MOCK_HOSTS.find((h) => h.isOnline && h.id !== user.id) ?? MOCK_HOSTS[0];
+    setPkBattle({
+      active: true,
+      mySide: 'pink',
+      pinkPoints: 420,
+      bluePoints: 388,
+      pinkHost: {
+        id: user.id,
+        name: user.name,
+        avatarUrl: user.avatarUrl,
+      },
+      blueHost: {
+        id: rival.id,
+        name: rival.name,
+        avatarUrl: rival.avatarUrl,
+      },
+      secondsLeft: 3 * 60,
+      engagementTick: 0,
+    });
+    setWorkspaceModeState('pk_battle');
+    notify('PK Battle', `Matched vs ${rival.name}. Fight for engagement votes!`);
+  }, [user.avatarUrl, user.id, user.name]);
+
+  const leavePkBattle = useCallback(() => {
+    setPkBattle(null);
+    if (workspaceMode === 'pk_battle') {
+      setWorkspaceModeState('waiting_1v1');
+    }
+  }, [workspaceMode]);
+
+  const tickPkBattle = useCallback(() => {
+    setPkBattle((battle) => {
+      if (!battle || !battle.active) return battle;
+      const pinkDelta = Math.floor(Math.random() * 18);
+      const blueDelta = Math.floor(Math.random() * 18);
+      const nextSeconds = Math.max(0, battle.secondsLeft - 1);
+      return {
+        ...battle,
+        pinkPoints: battle.pinkPoints + pinkDelta,
+        bluePoints: battle.bluePoints + blueDelta,
+        secondsLeft: nextSeconds,
+        engagementTick: battle.engagementTick + 1,
+        active: nextSeconds > 0,
+      };
+    });
+    setPartyGroupGiftsToday((g) => g + Math.floor(Math.random() * 3));
+  }, []);
+
+  // Animate party seat speaking indicators + gift ticker while in party room
+  useEffect(() => {
+    if (workspaceMode !== 'party_room') return;
+    const t = setInterval(() => {
+      setPartySeats((seats) =>
+        seats.map((s) =>
+          s.occupied
+            ? { ...s, isSpeaking: Math.random() > 0.55 }
+            : s,
+        ),
+      );
+      setPartyGroupGiftsToday((g) => g + Math.floor(Math.random() * 4));
+    }, 1600);
+    return () => clearInterval(t);
+  }, [workspaceMode]);
+
+  // Auto flip to solo_calling when an active call exists
+  useEffect(() => {
+    if (call?.status === 'active') {
+      setWorkspaceModeState('solo_calling');
+    } else if (workspaceMode === 'solo_calling') {
+      setWorkspaceModeState('waiting_1v1');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [call?.status]);
+
   const setHostOnline = useCallback((v: boolean, opts?: { silent?: boolean }) => {
     setHostOnlineState(v);
     setUser((u) => ({ ...u, isOnline: v }));
+    if (!v) {
+      setWorkspaceModeState('waiting_1v1');
+    }
     void syncHostPresence(user.id, { isOnline: v });
     // Always try production bridge — never skip when online
     void publishHostPresence({
@@ -416,6 +649,7 @@ export function AppProvider({
         coinsSpent: peer.ratePerMinute,
         status: 'active',
       });
+      setWorkspaceModeState('solo_calling');
       return { ok: true };
     },
     [blockedIds, hostOnline, hosts],
@@ -430,7 +664,10 @@ export function AppProvider({
       setMyLongestCallSeconds((best) => Math.max(best, secs));
     }
     setCall((c) => (c ? { ...c, status: 'ended' } : null));
-    setTimeout(() => setCall(null), 300);
+    setTimeout(() => {
+      setCall(null);
+      setWorkspaceModeState('waiting_1v1');
+    }, 300);
     const tip =
       secs >= 5 * 60
         ? 'Great long call! You climbed the competition 🏆'
@@ -656,23 +893,44 @@ export function AppProvider({
       );
       return;
     }
-    setUser((u) => ({ ...u, coinBalance: 0 }));
-    setHostEarnings({ call: 0, gift: 0, task: 0, invite: 0, managed: 0 });
-    setTransactions((txs) => [
-      {
-        id: `tx_${Date.now()}`,
-        type: 'payout',
-        amount,
-        label: 'Withdraw requested',
-        timestamp: Date.now(),
-      },
-      ...txs,
-    ]);
-    notify(
-      'Cash-Out requested 💸',
-      `${amount} coins → EasyPaisa / JazzCash / bank. We'll process your payout soon.`,
-    );
-  }, [user.coinBalance]);
+    // Production: open Earnings destination form — default EasyPaisa path
+    void (async () => {
+      const { requestHostPayout } = await import('../services/payouts');
+      const { getHostAuthToken } = await import('../config/env');
+      const token = getHostAuthToken() || user.id;
+      const result = await requestHostPayout(
+        {
+          method: 'easypaisa',
+          amountCoins: amount,
+          destination: {
+            accountName: user.name,
+            accountNumber: user.phone || user.hostId || user.id,
+          },
+        },
+        token,
+      );
+      if (!result.ok) {
+        notify('Cash-Out failed', result.error);
+        return;
+      }
+      setUser((u) => ({ ...u, coinBalance: 0 }));
+      setHostEarnings({ call: 0, gift: 0, task: 0, invite: 0, managed: 0 });
+      setTransactions((txs) => [
+        {
+          id: `tx_${Date.now()}`,
+          type: 'payout',
+          amount,
+          label: `Cash-Out ${result.payoutId} · EasyPaisa`,
+          timestamp: Date.now(),
+        },
+        ...txs,
+      ]);
+      notify(
+        'Cash-Out requested 💸',
+        `${amount} coins queued (${result.status}). EasyPaisa / JazzCash settlement via API.`,
+      );
+    })();
+  }, [user.coinBalance, user.hostId, user.id, user.name, user.phone]);
 
   const refreshList = useCallback(() => {
     setHosts((list) => [...list].sort(() => Math.random() - 0.5));
@@ -963,6 +1221,18 @@ export function AppProvider({
       unreadNewsCount,
       incomingBridgeCall,
       clearIncomingBridgeCall,
+      workspaceMode,
+      setWorkspaceMode,
+      hostPresenceStatus,
+      partySeats,
+      partyGroupGiftsToday,
+      joinPartySeat,
+      leavePartySeat,
+      enterPartyRoom,
+      pkBattle,
+      enterPkBattle,
+      leavePkBattle,
+      tickPkBattle,
     }),
     [
       user,
@@ -1017,6 +1287,18 @@ export function AppProvider({
       unreadNewsCount,
       incomingBridgeCall,
       clearIncomingBridgeCall,
+      workspaceMode,
+      setWorkspaceMode,
+      hostPresenceStatus,
+      partySeats,
+      partyGroupGiftsToday,
+      joinPartySeat,
+      leavePartySeat,
+      enterPartyRoom,
+      pkBattle,
+      enterPkBattle,
+      leavePkBattle,
+      tickPkBattle,
     ],
   );
 

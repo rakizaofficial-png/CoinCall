@@ -10,6 +10,10 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { HostWorkspaceSwitcher } from '../../components/HostWorkspaceSwitcher';
+import { PartyRoomHub } from '../../components/PartyRoomHub';
+import { PkBattleArena } from '../../components/PkBattleArena';
+import { Waiting1v1Panel } from '../../components/Waiting1v1Panel';
 import { env } from '../../config/env';
 import { useApp } from '../../context/AppContext';
 import type { Host } from '../../types/models';
@@ -42,7 +46,6 @@ export function HomeScreen({ navigation }: { navigation: any }) {
   const {
     filteredHosts,
     hostOnline,
-    setHostOnline,
     setHomeFilter,
     homeFilter,
     refreshList,
@@ -55,11 +58,14 @@ export function HomeScreen({ navigation }: { navigation: any }) {
     liveHosts,
     hostEarnings,
     requestPayout,
+    workspaceMode,
+    setWorkspaceMode,
+    enterPkBattle,
+    enterPartyRoom,
+    hostPresenceStatus,
   } = useApp();
   const [bridgeOk, setBridgeOk] = useState<boolean | null>(null);
   const [listed, setListed] = useState(0);
-  const [pkMatching, setPkMatching] = useState(false);
-  const [pkProgress, setPkProgress] = useState(0);
 
   const todayEarn =
     hostEarnings.call +
@@ -98,26 +104,6 @@ export function HomeScreen({ navigation }: { navigation: any }) {
     };
   }, [hostOnline, user.id]);
 
-  useEffect(() => {
-    if (!pkMatching) return;
-    setPkProgress(0);
-    const t = setInterval(() => {
-      setPkProgress((p) => {
-        if (p >= 100) {
-          clearInterval(t);
-          setPkMatching(false);
-          notify(
-            'PK Match found 🔥',
-            'Host competitor ready. Winner gets 30 min discovery boost.',
-          );
-          return 100;
-        }
-        return p + 8;
-      });
-    }, 280);
-    return () => clearInterval(t);
-  }, [pkMatching]);
-
   const top3 = competition.slice(0, 3);
   const rival =
     competition.find((c) => !c.isMe && c.rank < myRank) ?? competition[0];
@@ -135,7 +121,27 @@ export function HomeScreen({ navigation }: { navigation: any }) {
 
   const ListHeader = (
     <View>
-      {/* Blueprint: sticky earnings + EasyPaisa cash-out */}
+      <HostWorkspaceSwitcher />
+
+      {workspaceMode === 'waiting_1v1' || workspaceMode === 'solo_calling' ? (
+        <Waiting1v1Panel />
+      ) : null}
+      {workspaceMode === 'pk_battle' ? <PkBattleArena /> : null}
+      {workspaceMode === 'party_room' ? <PartyRoomHub /> : null}
+
+      {workspaceMode === 'solo_calling' ? (
+        <LinearGradient
+          colors={['rgba(255,42,122,0.35)', 'rgba(21,16,38,0.95)']}
+          style={styles.soloBanner}
+        >
+          <Text style={styles.soloTitle}>Solo Calling Mode</Text>
+          <Text style={styles.soloSub}>
+            1v1 session active · Party Room & PK paused until you hang up
+          </Text>
+        </LinearGradient>
+      ) : null}
+
+      {/* Earnings + EasyPaisa cash-out */}
       <LinearGradient
         colors={['#1a1020', '#2a1830']}
         style={styles.earnHeader}
@@ -143,47 +149,15 @@ export function HomeScreen({ navigation }: { navigation: any }) {
         <View style={{ flex: 1 }}>
           <Text style={styles.earnLabel}>Today earnings</Text>
           <Text style={styles.earnGold}>Rs. {localCash.toLocaleString()}</Text>
-          <Text style={styles.earnCoins}>{todayEarn} coins · live ticker</Text>
+          <Text style={styles.earnCoins}>
+            {todayEarn} coins · status {hostPresenceStatus}
+          </Text>
         </View>
         <Pressable style={styles.cashOutBtn} onPress={requestPayout}>
           <Text style={styles.cashOutText}>💸 Cash-Out</Text>
           <Text style={styles.cashOutSub}>EasyPaisa</Text>
         </Pressable>
       </LinearGradient>
-
-      {/* Blueprint: massive Go Live switcher */}
-      <Pressable
-        onPress={() => setHostOnline(!hostOnline)}
-        style={styles.statusWrap}
-      >
-        <LinearGradient
-          colors={
-            hostOnline
-              ? ['#1a3a28', '#0d2818']
-              : ['#4a1020', '#2a0810']
-          }
-          style={[
-            styles.statusOrb,
-            hostOnline ? styles.statusOrbOn : styles.statusOrbOff,
-          ]}
-        >
-          <View
-            style={[
-              styles.statusRing,
-              {
-                borderColor: hostOnline ? colors.online : colors.danger,
-              },
-            ]}
-          >
-            <Text style={styles.statusTitle}>
-              {hostOnline ? 'Go Offline' : 'Go Live to Earn'}
-            </Text>
-            <Text style={styles.statusSub}>
-              {hostOnline ? 'Ruby offline' : 'Neon green · accepting calls'}
-            </Text>
-          </View>
-        </LinearGradient>
-      </Pressable>
 
       <View
         style={[
@@ -197,44 +171,48 @@ export function HomeScreen({ navigation }: { navigation: any }) {
       >
         <Text style={styles.bridgeText}>
           {bridgeOk === false
-            ? 'Not visible on Luma — tap Go Live again'
+            ? 'Not visible on Luma — go Online from 1v1 Wait'
             : bridgeOk
               ? `Visible on Luma · ${listed} host(s) listed`
               : 'Connecting to Luma bridge…'}
         </Text>
       </View>
 
-      {/* Blueprint: PK Battle Arena */}
-      <LinearGradient colors={['#2a1838', '#1a1028']} style={styles.pkCard}>
-        <Text style={styles.pkTitle}>🔥 EARN NOW: Host PK Battle Arena</Text>
-        <Text style={styles.pkSub}>
-          Idle? Challenge another host. Winner gets 30 min boost on Luma feed.
-        </Text>
+      {/* Quick launch downtime hubs */}
+      <View style={styles.hubRow}>
         <Pressable
-          style={styles.pkBtn}
+          style={styles.hubCard}
           onPress={() => {
-            if (!hostOnline) {
-              notify('Go Live first', 'Turn Online to enter PK Battle.');
-              return;
-            }
-            setPkMatching(true);
+            enterPkBattle();
+            setWorkspaceMode('pk_battle');
           }}
-          disabled={pkMatching}
         >
-          <Text style={styles.pkBtnText}>
-            {pkMatching
-              ? `Finding competitor… ${pkProgress}%`
-              : 'Find Host Competitor'}
-          </Text>
+          <LinearGradient
+            colors={['rgba(255,42,122,0.3)', '#151026']}
+            style={styles.hubGrad}
+          >
+            <Text style={styles.hubTitle}>🔥 PK Battle Arena</Text>
+            <Text style={styles.hubSub}>Pink vs Blue · live points</Text>
+          </LinearGradient>
         </Pressable>
-        {pkMatching ? (
-          <View style={styles.pkBarTrack}>
-            <View style={[styles.pkBarFill, { width: `${pkProgress}%` }]} />
-          </View>
-        ) : null}
-      </LinearGradient>
+        <Pressable
+          style={styles.hubCard}
+          onPress={() => {
+            enterPartyRoom();
+            setWorkspaceMode('party_room');
+          }}
+        >
+          <LinearGradient
+            colors={['rgba(255,184,0,0.25)', '#151026']}
+            style={styles.hubGrad}
+          >
+            <Text style={styles.hubTitle}>🎉 Party Room Hub</Text>
+            <Text style={styles.hubSub}>4–6 seat group stream</Text>
+          </LinearGradient>
+        </Pressable>
+      </View>
 
-      {/* Blueprint: Voice Coach */}
+      {/* Audio Coach */}
       <Pressable
         style={styles.coachCard}
         onPress={() =>
@@ -261,13 +239,16 @@ export function HomeScreen({ navigation }: { navigation: any }) {
         <Ionicons name="play-circle" size={28} color={colors.accent} />
       </Pressable>
 
-      {/* Blueprint: Story reel creator */}
+      {/* Story reel creator */}
       <Text style={styles.section}>Quick Story Reels · 15s teasers</Text>
       <View style={styles.storyRow}>
         <Pressable
           style={styles.storyAdd}
           onPress={() =>
-            notify('Story upload', '15s teaser clip ready — premium lock applied.')
+            notify(
+              'Story upload',
+              '15s teaser clip ready — premium lock applied.',
+            )
           }
         >
           <Ionicons name="add" size={28} color={colors.accent} />
@@ -363,7 +344,10 @@ export function HomeScreen({ navigation }: { navigation: any }) {
   );
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top + 8 }]}>
+    <LinearGradient
+      colors={['#0b0813', '#151026', '#0b0813']}
+      style={[styles.container, { paddingTop: insets.top + 8 }]}
+    >
       <View style={styles.header}>
         <View>
           <Text style={styles.hello}>Hi {user.name.split(' ')[0]}</Text>
@@ -436,12 +420,12 @@ export function HomeScreen({ navigation }: { navigation: any }) {
           </Pressable>
         )}
       />
-    </View>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg, paddingHorizontal: 16 },
+  container: { flex: 1, paddingHorizontal: 16 },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -451,6 +435,18 @@ const styles = StyleSheet.create({
   hello: { color: colors.textSecondary, fontSize: 14 },
   title: { color: colors.text, fontSize: 28, fontWeight: '800', marginTop: 2 },
   walletLink: { color: colors.accent, fontWeight: '800', fontSize: 16 },
+  soloBanner: {
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,42,122,0.5)',
+    shadowColor: '#ff2a7a',
+    shadowOpacity: 0.45,
+    shadowRadius: 12,
+  },
+  soloTitle: { color: '#fff', fontWeight: '900', fontSize: 16 },
+  soloSub: { color: colors.textSecondary, marginTop: 4, fontSize: 12 },
   earnHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -459,6 +455,9 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     borderWidth: 1,
     borderColor: 'rgba(255,184,0,0.35)',
+    shadowColor: '#ffb800',
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
   },
   earnLabel: { color: colors.textSecondary, fontSize: 12, fontWeight: '700' },
   earnGold: {
@@ -474,33 +473,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
     alignItems: 'center',
+    shadowColor: '#ffb800',
+    shadowOpacity: 0.55,
+    shadowRadius: 10,
   },
   cashOutText: { color: '#1a1020', fontWeight: '900', fontSize: 13 },
   cashOutSub: { color: '#3a2810', fontSize: 10, fontWeight: '700', marginTop: 2 },
-  statusWrap: { alignItems: 'center', marginBottom: 14 },
-  statusOrb: {
-    width: '100%',
-    borderRadius: 28,
-    padding: 6,
-  },
-  statusOrbOn: {
-    shadowColor: colors.online,
-    shadowOpacity: 0.55,
-    shadowRadius: 16,
-  },
-  statusOrbOff: {
-    shadowColor: colors.danger,
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-  },
-  statusRing: {
-    borderWidth: 3,
-    borderRadius: 24,
-    paddingVertical: 22,
-    alignItems: 'center',
-  },
-  statusTitle: { color: '#fff', fontWeight: '900', fontSize: 20 },
-  statusSub: { color: 'rgba(255,255,255,0.75)', marginTop: 4, fontSize: 12 },
   bridgeBanner: {
     borderRadius: 14,
     paddingHorizontal: 12,
@@ -521,34 +499,20 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   bridgeText: { color: colors.text, fontWeight: '700', fontSize: 12 },
-  pkCard: {
-    borderRadius: 20,
-    padding: 16,
-    marginBottom: 12,
+  hubRow: { flexDirection: 'row', gap: 10, marginBottom: 12 },
+  hubCard: {
+    flex: 1,
+    borderRadius: 18,
+    overflow: 'hidden',
     borderWidth: 1,
     borderColor: 'rgba(255,42,122,0.35)',
+    shadowColor: '#ff2a7a',
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
   },
-  pkTitle: { color: '#fff', fontWeight: '900', fontSize: 15 },
-  pkSub: { color: colors.textSecondary, marginTop: 6, fontSize: 12, lineHeight: 17 },
-  pkBtn: {
-    marginTop: 12,
-    backgroundColor: colors.primary,
-    borderRadius: 14,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  pkBtnText: { color: '#fff', fontWeight: '800', fontSize: 13 },
-  pkBarTrack: {
-    marginTop: 10,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    overflow: 'hidden',
-  },
-  pkBarFill: {
-    height: 6,
-    backgroundColor: colors.accent,
-  },
+  hubGrad: { padding: 14, minHeight: 88, justifyContent: 'center' },
+  hubTitle: { color: '#fff', fontWeight: '900', fontSize: 14 },
+  hubSub: { color: colors.textSecondary, fontSize: 11, marginTop: 4 },
   coachCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -558,7 +522,10 @@ const styles = StyleSheet.create({
     padding: 14,
     marginBottom: 14,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: 'rgba(255,184,0,0.35)',
+    shadowColor: '#ffb800',
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
   },
   coachWave: {
     flexDirection: 'row',
@@ -586,7 +553,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: colors.bgCard,
   },
-  storyAddText: { color: colors.accent, fontWeight: '800', fontSize: 11, marginTop: 4 },
+  storyAddText: {
+    color: colors.accent,
+    fontWeight: '800',
+    fontSize: 11,
+    marginTop: 4,
+  },
   storyThumbWrap: { position: 'relative' },
   storyThumb: { width: 72, height: 110, borderRadius: 14 },
   storyLock: {
@@ -601,6 +573,9 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     padding: 16,
     marginBottom: 14,
+    shadowColor: '#ff2a7a',
+    shadowOpacity: 0.45,
+    shadowRadius: 14,
   },
   raceRank: { color: 'rgba(255,255,255,0.9)', fontWeight: '700', fontSize: 13 },
   raceTitle: {
@@ -636,11 +611,24 @@ const styles = StyleSheet.create({
   podiumMe: {
     borderColor: colors.primarySoft,
     backgroundColor: 'rgba(255,42,122,0.15)',
+    shadowColor: '#ff2a7a',
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
   },
   podiumRank: { color: colors.accent, fontWeight: '800', fontSize: 12 },
   podiumAvatar: { width: 40, height: 40, borderRadius: 20, marginTop: 6 },
-  podiumName: { color: colors.text, fontWeight: '700', marginTop: 6, fontSize: 12 },
-  podiumMin: { color: colors.blush, fontWeight: '800', marginTop: 2, fontSize: 13 },
+  podiumName: {
+    color: colors.text,
+    fontWeight: '700',
+    marginTop: 6,
+    fontSize: 12,
+  },
+  podiumMin: {
+    color: colors.blush,
+    fontWeight: '800',
+    marginTop: 2,
+    fontSize: 13,
+  },
   podiumLive: {
     marginTop: 4,
     color: colors.danger,
@@ -688,7 +676,10 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: 'rgba(255,42,122,0.25)',
+    shadowColor: '#ff2a7a',
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
   },
   avatar: { width: 56, height: 56, borderRadius: 28 },
   onlineDot: {
@@ -703,7 +694,12 @@ const styles = StyleSheet.create({
   },
   body: { flex: 1, marginLeft: 12 },
   name: { color: colors.text, fontWeight: '800', fontSize: 15 },
-  meta: { color: colors.primarySoft, marginTop: 3, fontSize: 12, fontWeight: '700' },
+  meta: {
+    color: colors.primarySoft,
+    marginTop: 3,
+    fontSize: 12,
+    fontWeight: '700',
+  },
   comp: { color: colors.textMuted, marginTop: 3, fontSize: 11 },
   callBtn: {
     flexDirection: 'row',
