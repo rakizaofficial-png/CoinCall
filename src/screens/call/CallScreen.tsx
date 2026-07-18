@@ -1,14 +1,14 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
   Flag,
+  Gift,
   Mic,
   MicOff,
   PhoneOff,
-  Settings,
   Signal,
+  Sparkles,
   Video,
   VideoOff,
-  Volume2,
 } from 'lucide-react-native';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -29,15 +29,25 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Avatar } from '../../components/ui/Avatar';
 import { IconButton } from '../../components/ui/IconButton';
 import { useApp } from '../../context/AppContext';
+import { GIFT_CATALOG } from '../../data/gifts';
 import type { RootStackParamList } from '../../navigation/types';
 import {
+  type BeautyPreset,
+  beautyCssFilter,
   isAgoraConfigured,
+  setAgoraBeauty,
   setAgoraCameraOff,
   setAgoraMuted,
   startAgoraCall,
   stopAgoraCall,
 } from '../../services/agoraService';
 import { endBridgeCall, fetchCallToken } from '../../services/callBridge';
+import {
+  type GiftRequest,
+  listenGiftRequestEvents,
+  requestGiftFromUser,
+  respondToGiftRequest,
+} from '../../services/giftRequestService';
 import {
   endActiveCall,
   publishActiveCall,
@@ -50,6 +60,12 @@ import { notify, promptChoices } from '../../utils/notify';
 type Props = NativeStackScreenProps<RootStackParamList, 'Call'>;
 
 const REACTIONS = ['❤️', '🔥', '👏', '😍', '✨', '🎉'];
+const BEAUTY_CYCLE: BeautyPreset[] = ['snap', 'glamour', 'natural', 'off'];
+
+function nextBeauty(current: BeautyPreset): BeautyPreset {
+  const i = BEAUTY_CYCLE.indexOf(current);
+  return BEAUTY_CYCLE[(i + 1) % BEAUTY_CYCLE.length];
+}
 
 function formatTime(totalSeconds: number) {
   const m = Math.floor(totalSeconds / 60)
@@ -96,7 +112,8 @@ function MicPulse({ active }: { active: boolean }) {
 export function CallScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
-  const { getHost, call, endCall, user, reportUser, blockUser, beautyOn } = useApp();
+  const { getHost, call, endCall, user, reportUser, beautyOn } =
+    useApp();
   const bridgeCallId = route.params.bridgeCallId;
   const isBridge = Boolean(bridgeCallId);
   const peerHost = !isBridge ? getHost(route.params.hostId) : undefined;
@@ -111,13 +128,19 @@ export function CallScreen({ navigation, route }: Props) {
 
   const [muted, setMuted] = useState(false);
   const [cameraOff, setCameraOff] = useState(false);
-  const [speakerOn, setSpeakerOn] = useState(true);
   const [videoStatus, setVideoStatus] = useState('Starting camera...');
   const [bridgeSeconds, setBridgeSeconds] = useState(0);
   const [bridgeCoins, setBridgeCoins] = useState(rate);
   const [surfacesReady, setSurfacesReady] = useState(false);
   const [reaction, setReaction] = useState<string | null>(null);
   const [netQuality] = useState<'Excellent' | 'Good' | 'Fair'>('Good');
+  const [beautyPreset, setBeautyPreset] = useState<BeautyPreset>(
+    beautyOn ? 'snap' : 'off',
+  );
+  const [giftPickerOpen, setGiftPickerOpen] = useState(false);
+  const [giftBusy, setGiftBusy] = useState(false);
+  const [pendingGiftReq, setPendingGiftReq] = useState<GiftRequest | null>(null);
+  const [giftBurst, setGiftBurst] = useState<string | null>(null);
   const agoraReady = isAgoraConfigured() && Platform.OS === 'web';
   const activeCallIdRef = useRef<string | null>(null);
   const localRef = useRef<HTMLDivElement | null>(null);
@@ -207,18 +230,22 @@ export function CallScreen({ navigation, route }: Props) {
             uid: tokenPayload.uid,
             token: tokenPayload.token,
             appId: tokenPayload.appId,
+            beauty: beautyPreset,
           });
         } else {
           await startAgoraCall({
             channel,
             localVideoEl: localEl,
             remoteVideoEl: remoteEl,
+            beauty: beautyPreset,
           });
         }
 
         if (active) {
           setVideoStatus(
-            isBridge ? 'Live with user · video on' : 'Live video connected',
+            isBridge
+              ? `Live · beauty ${beautyPreset}`
+              : `Live video · beauty ${beautyPreset}`,
           );
         }
       } catch (e: unknown) {
@@ -252,6 +279,73 @@ export function CallScreen({ navigation, route }: Props) {
     const t = setTimeout(() => setReaction(null), 1600);
     return () => clearTimeout(t);
   }, [reaction]);
+
+  useEffect(() => {
+    if (!bridgeCallId) return;
+    return listenGiftRequestEvents(bridgeCallId, (type, gift) => {
+      if (type === 'gift:accepted') {
+        setPendingGiftReq(null);
+        setGiftBurst(`${gift.giftEmoji} ${gift.giftName}`);
+        setTimeout(() => setGiftBurst(null), 2800);
+      } else if (type === 'gift:declined') {
+        setPendingGiftReq(null);
+        notify('Gift declined', `${peerName} declined your request`);
+      } else if (type === 'gift:expired') {
+        setPendingGiftReq(null);
+        notify('Gift request expired', 'User did not respond in time');
+      } else if (type === 'gift:request') {
+        setPendingGiftReq(gift);
+      }
+    });
+  }, [bridgeCallId, peerName]);
+
+  const sendGiftRequest = async (giftId: string) => {
+    if (!bridgeCallId) {
+      notify('Gift request', 'Available on live user calls.');
+      return;
+    }
+    if (pendingGiftReq?.status === 'pending') {
+      notify('Waiting', 'User still has a pending gift request.');
+      return;
+    }
+    setGiftBusy(true);
+    try {
+      const gift = GIFT_CATALOG.find((g) => g.id === giftId);
+      const req = await requestGiftFromUser({
+        callId: bridgeCallId,
+        giftId,
+        message: `${user.name} is requesting ${gift?.emoji || ''} ${gift?.name || 'a gift'} 💕`,
+      });
+      setPendingGiftReq(req);
+      setGiftPickerOpen(false);
+      notify('Request sent', `Waiting for ${peerName} to accept…`);
+    } catch (e) {
+      notify('Gift request failed', e instanceof Error ? e.message : 'Try again');
+    } finally {
+      setGiftBusy(false);
+    }
+  };
+
+  /** Demo: simulate user accept from host (dev / when user app not open) */
+  const demoAcceptAsUser = async () => {
+    if (!bridgeCallId || !pendingGiftReq) return;
+    setGiftBusy(true);
+    try {
+      const result = await respondToGiftRequest({
+        callId: bridgeCallId,
+        requestId: pendingGiftReq.id,
+        action: 'accept',
+        userId: pendingGiftReq.userId,
+      });
+      setPendingGiftReq(null);
+      setGiftBurst(`${result.giftEmoji} ${result.giftName}`);
+      setTimeout(() => setGiftBurst(null), 2800);
+    } catch (e) {
+      notify('Accept failed', e instanceof Error ? e.message : 'Try again');
+    } finally {
+      setGiftBusy(false);
+    }
+  };
 
   const displaySeconds = isBridge ? bridgeSeconds : call?.seconds ?? 0;
   const displayCoins = isBridge ? bridgeCoins : call?.coinsSpent ?? 0;
@@ -346,7 +440,10 @@ export function CallScreen({ navigation, route }: Props) {
         style={[
           styles.localPreview,
           cameraOff && { backgroundColor: '#121826' },
-          { borderColor: colors.glassBorder },
+          {
+            borderColor:
+              beautyPreset === 'off' ? colors.glassBorder : 'rgba(255,182,220,0.85)',
+          },
         ]}
       >
         {agoraReady ? (
@@ -358,24 +455,51 @@ export function CallScreen({ navigation, route }: Props) {
             id="agora-local"
             style={{
               ...webLocalStyle,
-              filter: beautyOn
-                ? 'brightness(1.08) contrast(1.05) saturate(1.15) blur(0.2px)'
-                : 'none',
+              filter: beautyCssFilter(beautyPreset),
             }}
           />
         ) : cameraOff ? (
-          <VideoOff size={28} color="#fff" />
+          <VideoOff size={22} color="#fff" />
         ) : (
           <Image
             source={{ uri: user.avatarUrl }}
-            style={{ width: '100%', height: '100%', borderRadius: 16 }}
+            style={{ width: '100%', height: '100%', borderRadius: 18 }}
           />
         )}
+        <View style={styles.beautyBadge}>
+          <Sparkles size={10} color="#fff" />
+          <Text style={styles.beautyBadgeText}>
+            {beautyPreset === 'off' ? 'Raw' : beautyPreset}
+          </Text>
+        </View>
       </View>
 
       {reaction ? (
         <View style={styles.reactionBurst} pointerEvents="none">
           <Text style={styles.reactionEmoji}>{reaction}</Text>
+        </View>
+      ) : null}
+
+      {giftBurst ? (
+        <View style={styles.giftBurst} pointerEvents="none">
+          <Text style={styles.giftBurstEmoji}>{giftBurst.split(' ')[0]}</Text>
+          <Text style={styles.giftBurstText}>{giftBurst}</Text>
+        </View>
+      ) : null}
+
+      {pendingGiftReq?.status === 'pending' ? (
+        <View style={[styles.pendingBanner, { bottom: insets.bottom + 168 }]}>
+          <Text style={styles.pendingText}>
+            Waiting for {peerName} to send {pendingGiftReq.giftEmoji}{' '}
+            {pendingGiftReq.giftName}…
+          </Text>
+          {__DEV__ ? (
+            <Pressable onPress={() => void demoAcceptAsUser()} style={styles.demoAccept}>
+              <Text style={styles.demoAcceptText}>
+                {giftBusy ? '…' : 'Demo: user accepts'}
+              </Text>
+            </Pressable>
+          ) : null}
         </View>
       ) : null}
 
@@ -429,10 +553,34 @@ export function CallScreen({ navigation, route }: Props) {
           }}
         />
         <IconButton
-          icon={Volume2}
-          label="Speaker"
-          active={speakerOn}
-          onPress={() => setSpeakerOn((v) => !v)}
+          icon={Gift}
+          label="Ask gift"
+          active={Boolean(pendingGiftReq)}
+          onPress={() => {
+            if (!isBridge) {
+              notify('Ask gift', 'Gift requests work on live user calls.');
+              return;
+            }
+            setGiftPickerOpen(true);
+          }}
+        />
+        <IconButton
+          icon={Sparkles}
+          label={beautyPreset === 'off' ? 'Beauty' : beautyPreset}
+          active={beautyPreset !== 'off'}
+          onPress={() => {
+            const next = nextBeauty(beautyPreset);
+            setBeautyPreset(next);
+            void setAgoraBeauty(next);
+            notify(
+              'Beauty filter',
+              next === 'off'
+                ? 'Beauty off'
+                : next === 'snap'
+                  ? 'Snapchat · world beauty ON'
+                  : `${next} beauty ON`,
+            );
+          }}
         />
         <IconButton
           icon={Flag}
@@ -450,28 +598,34 @@ export function CallScreen({ navigation, route }: Props) {
             ])
           }
         />
-        <IconButton
-          icon={Settings}
-          label="More"
-          onPress={() => {
-            if (!isBridge) {
-              promptChoices('Call settings', 'Choose', [
-                {
-                  label: 'Block user',
-                  onPress: async () => {
-                    blockUser(route.params.hostId);
-                    await hangUp();
-                    navigation.popToTop();
-                  },
-                },
-              ]);
-            } else {
-              notify('Settings', speakerOn ? 'Speaker on' : 'Speaker off');
-            }
-          }}
-        />
         <IconButton icon={PhoneOff} label="Leave" danger onPress={hangUp} />
       </View>
+
+      {giftPickerOpen ? (
+        <View style={styles.giftSheet}>
+          <Text style={styles.giftSheetTitle}>Request a gift</Text>
+          <Text style={styles.giftSheetSub}>
+            {peerName} will see this and can Accept or Decline
+          </Text>
+          <View style={styles.giftGrid}>
+            {GIFT_CATALOG.map((g) => (
+              <Pressable
+                key={g.id}
+                style={styles.giftItem}
+                disabled={giftBusy}
+                onPress={() => void sendGiftRequest(g.id)}
+              >
+                <Text style={styles.giftEmoji}>{g.emoji}</Text>
+                <Text style={styles.giftName}>{g.name}</Text>
+                <Text style={styles.giftCoins}>{g.coins}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <Pressable onPress={() => setGiftPickerOpen(false)}>
+            <Text style={styles.giftClose}>Close</Text>
+          </Pressable>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -487,7 +641,7 @@ const webRemoteStyle = {
 const webLocalStyle = {
   width: '100%',
   height: '100%',
-  borderRadius: 16,
+  borderRadius: 18,
   overflow: 'hidden' as const,
   background: '#121826',
 };
@@ -554,16 +708,38 @@ const styles = StyleSheet.create({
   },
   localPreview: {
     position: 'absolute',
-    right: 16,
-    top: 150,
-    width: 112,
-    height: 152,
-    borderRadius: radii.md,
+    right: 14,
+    top: 140,
+    width: 86,
+    height: 118,
+    borderRadius: 20,
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
+    borderWidth: 2,
     zIndex: 3,
+    shadowColor: '#FF8DC7',
+    shadowOpacity: 0.55,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  beautyBadge: {
+    position: 'absolute',
+    bottom: 6,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: 'rgba(255,105,180,0.75)',
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 10,
+  },
+  beautyBadgeText: {
+    color: '#fff',
+    fontSize: 9,
+    fontWeight: '800',
+    textTransform: 'capitalize',
   },
   reactions: {
     position: 'absolute',
@@ -589,6 +765,64 @@ const styles = StyleSheet.create({
     zIndex: 5,
   },
   reactionEmoji: { fontSize: 72 },
+  giftBurst: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 6,
+  },
+  giftBurstEmoji: { fontSize: 80 },
+  giftBurstText: { color: '#fff', fontWeight: '900', fontSize: 18, marginTop: 8 },
+  pendingBanner: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    backgroundColor: 'rgba(245,193,76,0.92)',
+    borderRadius: 14,
+    padding: 12,
+    zIndex: 5,
+    alignItems: 'center',
+    gap: 8,
+  },
+  pendingText: { color: '#1a1200', fontWeight: '800', textAlign: 'center', fontSize: 13 },
+  demoAccept: {
+    backgroundColor: 'rgba(0,0,0,0.2)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+  },
+  demoAcceptText: { color: '#1a1200', fontWeight: '900', fontSize: 12 },
+  giftSheet: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#121826',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 16,
+    paddingBottom: 36,
+    zIndex: 20,
+  },
+  giftSheetTitle: { color: '#fff', fontWeight: '900', fontSize: 18 },
+  giftSheetSub: { color: 'rgba(255,255,255,0.6)', marginTop: 4, marginBottom: 12, fontSize: 12 },
+  giftGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  giftItem: {
+    width: '22%',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 14,
+    paddingVertical: 10,
+  },
+  giftEmoji: { fontSize: 28 },
+  giftName: { color: '#fff', fontSize: 11, fontWeight: '700', marginTop: 4 },
+  giftCoins: { color: '#F5C14C', fontSize: 11, fontWeight: '800' },
+  giftClose: {
+    color: '#9B8CFF',
+    textAlign: 'center',
+    marginTop: 14,
+    fontWeight: '800',
+  },
   controlPanel: {
     position: 'absolute',
     left: 12,

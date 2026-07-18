@@ -25,6 +25,14 @@ export type HostRow = {
   applicationSubmittedAt?: number;
   rejectionReason?: string;
   banned?: boolean;
+  suspended?: boolean;
+  bio?: string;
+  languages?: string[];
+  categories?: string[];
+  callPrice?: number;
+  idDocumentUrl?: string;
+  selfieUrl?: string;
+  docsRequested?: string;
 };
 
 export type ActiveCall = {
@@ -46,11 +54,11 @@ function requireDb(): Database {
   return db;
 }
 
-export async function adminLogin(key: string) {
+export async function adminLogin(key: string, role = 'super_admin') {
   const res = await fetch(`${apiBaseUrl}/admin/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ key }),
+    body: JSON.stringify({ key, role, adminId: `admin_${role}` }),
   });
   if (!res.ok) throw new Error('Wrong admin key');
   return res.json();

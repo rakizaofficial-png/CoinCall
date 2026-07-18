@@ -5,6 +5,7 @@ import agoraToken from 'agora-token';
 import { randomUUID } from 'crypto';
 import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
+import { registerHostManagementRoutes } from './hostManagement.ts';
 
 const { RtcRole, RtcTokenBuilder } = agoraToken as {
   RtcRole: { PUBLISHER: number; SUBSCRIBER: number };
@@ -59,6 +60,41 @@ type CallRecord = {
   updatedAt: number;
   hostUidAgora: number;
   userUidAgora: number;
+  giftRequest?: GiftRequestRecord | null;
+};
+
+type GiftRequestStatus = 'pending' | 'accepted' | 'declined' | 'expired';
+
+type GiftRequestRecord = {
+  id: string;
+  callId: string;
+  hostId: string;
+  hostName: string;
+  userId: string;
+  giftId: string;
+  giftName: string;
+  giftEmoji: string;
+  coins: number;
+  message?: string;
+  status: GiftRequestStatus;
+  createdAt: number;
+  updatedAt: number;
+};
+
+const GIFT_CATALOG_SERVER: Record<
+  string,
+  { name: string; emoji: string; coins: number }
+> = {
+  rose: { name: 'Rose', emoji: '🌹', coins: 1 },
+  heart: { name: 'Heart', emoji: '💖', coins: 5 },
+  kiss: { name: 'Kiss', emoji: '💋', coins: 10 },
+  star: { name: 'Star', emoji: '⭐', coins: 20 },
+  diamond: { name: 'Diamond', emoji: '💎', coins: 99 },
+  crown: { name: 'Crown', emoji: '👑', coins: 199 },
+  sports: { name: 'Sports Car', emoji: '🏎️', coins: 520 },
+  yacht: { name: 'Yacht', emoji: '🛥️', coins: 999 },
+  castle: { name: 'Castle', emoji: '🏰', coins: 1999 },
+  rocket: { name: 'Rocket', emoji: '🚀', coins: 2999 },
 };
 
 const hosts = new Map<string, HostPresence>();
@@ -382,13 +418,186 @@ app.get('/api/calls/:id/token', (req, res) => {
   }
 });
 
+/** Host asks user for a gift during an active call */
+app.post('/api/calls/:id/gift-requests', (req, res) => {
+  const call = calls.get(String(req.params.id));
+  if (!call) {
+    res.status(404).json({ error: 'Call not found' });
+    return;
+  }
+  if (call.status !== 'accepted') {
+    res.status(409).json({ error: 'Call must be active to request a gift' });
+    return;
+  }
+  if (call.giftRequest?.status === 'pending') {
+    res.status(409).json({ error: 'A gift request is already pending', giftRequest: call.giftRequest });
+    return;
+  }
+
+  const giftId = String(req.body?.giftId || '').trim();
+  const catalog = GIFT_CATALOG_SERVER[giftId];
+  if (!catalog) {
+    res.status(400).json({ error: 'Invalid giftId', gifts: Object.keys(GIFT_CATALOG_SERVER) });
+    return;
+  }
+
+  const giftRequest: GiftRequestRecord = {
+    id: randomUUID().slice(0, 10),
+    callId: call.id,
+    hostId: call.hostId,
+    hostName: call.hostName,
+    userId: call.userId,
+    giftId,
+    giftName: catalog.name,
+    giftEmoji: catalog.emoji,
+    coins: catalog.coins,
+    message: String(req.body?.message || `${call.hostName} would love a ${catalog.name}!`),
+    status: 'pending',
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+
+  call.giftRequest = giftRequest;
+  call.updatedAt = Date.now();
+  calls.set(call.id, call);
+
+  broadcastWs({
+    type: 'gift:request',
+    payload: giftRequest,
+  });
+  pushToHost(call.hostId, 'gift_request_sent', giftRequest);
+
+  // Auto-expire after 90s
+  setTimeout(() => {
+    const current = calls.get(call.id);
+    if (current?.giftRequest?.id === giftRequest.id && current.giftRequest.status === 'pending') {
+      current.giftRequest.status = 'expired';
+      current.giftRequest.updatedAt = Date.now();
+      current.updatedAt = Date.now();
+      calls.set(current.id, current);
+      broadcastWs({ type: 'gift:expired', payload: current.giftRequest });
+      pushToHost(current.hostId, 'gift_request_expired', current.giftRequest);
+    }
+  }, 90_000);
+
+  res.status(201).json({ ok: true, giftRequest, call });
+});
+
+/** User (or host) reads pending gift request on a call */
+app.get('/api/calls/:id/gift-requests/pending', (req, res) => {
+  const call = calls.get(String(req.params.id));
+  if (!call) {
+    res.status(404).json({ error: 'Call not found' });
+    return;
+  }
+  const gr = call.giftRequest;
+  if (!gr || gr.status !== 'pending') {
+    res.json({ giftRequest: null });
+    return;
+  }
+  res.json({ giftRequest: gr });
+});
+
+/** User accepts or declines a host gift request */
+app.post('/api/calls/:id/gift-requests/:reqId/respond', (req, res) => {
+  const call = calls.get(String(req.params.id));
+  if (!call) {
+    res.status(404).json({ error: 'Call not found' });
+    return;
+  }
+  const gr = call.giftRequest;
+  if (!gr || gr.id !== String(req.params.reqId)) {
+    res.status(404).json({ error: 'Gift request not found' });
+    return;
+  }
+  if (gr.status !== 'pending') {
+    res.status(409).json({ error: `Request already ${gr.status}`, giftRequest: gr });
+    return;
+  }
+
+  const action = String(req.body?.action || '').toLowerCase();
+  const userId = String(req.body?.userId || call.userId).trim();
+
+  if (action === 'decline' || action === 'reject') {
+    gr.status = 'declined';
+    gr.updatedAt = Date.now();
+    call.giftRequest = gr;
+    call.updatedAt = Date.now();
+    calls.set(call.id, call);
+    broadcastWs({ type: 'gift:declined', payload: gr });
+    pushToHost(call.hostId, 'gift_request_declined', gr);
+    res.json({ ok: true, giftRequest: gr });
+    return;
+  }
+
+  if (action !== 'accept') {
+    res.status(400).json({ error: 'action must be accept or decline' });
+    return;
+  }
+
+  // Deduct from user wallet
+  const userWallet = ensureWallet(userId, { displayName: call.userName, role: 'user' });
+  if (userWallet.coinBalance < gr.coins) {
+    res.status(402).json({
+      error: 'Insufficient coins',
+      need: gr.coins,
+      wallet: walletPublic(userWallet),
+      giftRequest: gr,
+    });
+    return;
+  }
+  userWallet.coinBalance -= gr.coins;
+  userWallet.xp += gr.coins;
+  wallets.set(userId, userWallet);
+  pushLedger(userId, gr.coins, `gift_to_${call.hostId}_${gr.giftId}`, 'spend');
+
+  // Credit host
+  const hostWallet = ensureWallet(call.hostId, {
+    displayName: call.hostName,
+    role: 'host',
+  });
+  hostWallet.coinBalance += gr.coins;
+  hostWallet.xp += gr.coins;
+  wallets.set(call.hostId, hostWallet);
+  pushLedger(call.hostId, gr.coins, `gift_from_${userId}_${gr.giftId}`, 'credit');
+
+  gr.status = 'accepted';
+  gr.updatedAt = Date.now();
+  call.giftRequest = gr;
+  call.updatedAt = Date.now();
+  calls.set(call.id, call);
+
+  const payload = {
+    ...gr,
+    fromUserId: userId,
+    fromUserName: call.userName,
+    hostWallet: walletPublic(hostWallet),
+    userWallet: walletPublic(userWallet),
+  };
+
+  broadcastWs({
+    type: 'gift:accepted',
+    payload,
+  });
+  pushToHost(call.hostId, 'gift_request_accepted', payload);
+
+  res.json({ ok: true, giftRequest: gr, hostWallet: walletPublic(hostWallet), userWallet: walletPublic(userWallet) });
+});
+
 app.post('/api/admin/login', (req, res) => {
   const key = String(req.body?.key || '');
   if (key !== ADMIN_KEY) {
     res.status(401).json({ ok: false, error: 'Wrong admin key' });
     return;
   }
-  res.json({ ok: true, role: 'admin' });
+  const role = String(req.body?.role || 'super_admin');
+  const allowed = ['super_admin', 'moderator', 'finance', 'support'];
+  res.json({
+    ok: true,
+    role: allowed.includes(role) ? role : 'super_admin',
+    roles: allowed,
+    adminId: String(req.body?.adminId || 'admin'),
+  });
 });
 
 app.get('/api/admin/health', (req, res) => {
@@ -602,6 +811,160 @@ const withdrawals: WithdrawalRequest[] = [];
 const reports: ReportRow[] = [];
 const iapReceipts = new Set<string>();
 
+/** Active app users (WS / heartbeat) — mass text targets */
+type ActiveUserRow = {
+  userId: string;
+  userName: string;
+  role: 'user' | 'host';
+  lastSeen: number;
+};
+const activeUsers = new Map<string, ActiveUserRow>();
+
+/** Per-user recharge totals — updated on every recharge */
+type RechargeUserRow = {
+  userId: string;
+  userName: string;
+  totalCoins: number;
+  lastCoins: number;
+  rechargeCount: number;
+  lastAt: number;
+};
+type RechargeEvent = {
+  id: string;
+  userId: string;
+  userName: string;
+  coins: number;
+  totalCoins: number;
+  roomId?: string;
+  at: number;
+};
+const rechargeByUser = new Map<string, RechargeUserRow>();
+const recentRecharges: RechargeEvent[] = [];
+
+type SupportTicket = {
+  id: string;
+  hostId: string;
+  hostName: string;
+  text: string;
+  status: 'open' | 'answered' | 'closed';
+  createdAt: number;
+  updatedAt: number;
+};
+const supportTickets: SupportTicket[] = [];
+const massTextHistory: Array<{
+  id: string;
+  hostId: string;
+  hostName: string;
+  text: string;
+  toCount: number;
+  userIds: string[];
+  at: number;
+}> = [];
+
+function touchActiveUser(input: {
+  userId: string;
+  userName?: string;
+  role?: 'user' | 'host';
+}) {
+  const userId = String(input.userId || '').trim();
+  if (!userId || userId === 'anon' || userId === 'system') return;
+  const prev = activeUsers.get(userId);
+  activeUsers.set(userId, {
+    userId,
+    userName: String(input.userName || prev?.userName || 'User').slice(0, 40),
+    role: input.role || prev?.role || 'user',
+    lastSeen: Date.now(),
+  });
+}
+
+function pruneActiveUsers(maxAgeMs = 15 * 60_000) {
+  const now = Date.now();
+  for (const [id, row] of activeUsers) {
+    if (now - row.lastSeen > maxAgeMs) activeUsers.delete(id);
+  }
+}
+
+function listActiveUsers() {
+  pruneActiveUsers();
+  return [...activeUsers.values()]
+    .filter((u) => u.role === 'user')
+    .sort((a, b) => b.lastSeen - a.lastSeen);
+}
+
+/** Create/update recharge row for userId every time they recharge */
+function recordUserRecharge(input: {
+  userId: string;
+  coins: number;
+  userName?: string;
+  roomId?: string;
+}): RechargeEvent {
+  const userId = String(input.userId || '').trim() || 'viewer';
+  const coins = Math.max(1, Math.floor(Number(input.coins) || 0));
+  const userName = String(input.userName || rechargeByUser.get(userId)?.userName || 'Viewer').slice(
+    0,
+    40,
+  );
+  const prev = rechargeByUser.get(userId);
+  const row: RechargeUserRow = {
+    userId,
+    userName,
+    totalCoins: (prev?.totalCoins || 0) + coins,
+    lastCoins: coins,
+    rechargeCount: (prev?.rechargeCount || 0) + 1,
+    lastAt: Date.now(),
+  };
+  rechargeByUser.set(userId, row);
+  touchActiveUser({ userId, userName, role: 'user' });
+
+  const event: RechargeEvent = {
+    id: randomUUID().slice(0, 10),
+    userId,
+    userName,
+    coins,
+    totalCoins: row.totalCoins,
+    roomId: input.roomId,
+    at: row.lastAt,
+  };
+  recentRecharges.unshift(event);
+  if (recentRecharges.length > 200) recentRecharges.length = 200;
+
+  broadcastWs({
+    type: 'recharge:updated',
+    payload: {
+      event,
+      user: row,
+      users: [...rechargeByUser.values()].sort((a, b) => b.lastAt - a.lastAt),
+    },
+  });
+  // Notify live hosts via SSE when a user recharges
+  for (const h of hosts.values()) {
+    if (h.isLive || h.isOnline) {
+      pushToHost(h.id, 'system_recharge', {
+        type: 'recharge',
+        title: 'System information',
+        body: `ID ${userId} user, recharge ${coins} coins`,
+        userId,
+        coins,
+        totalCoins: row.totalCoins,
+      });
+    }
+  }
+  if (input.roomId) {
+    broadcastWs({
+      type: 'live:recharge',
+      payload: {
+        roomId: input.roomId,
+        userId,
+        userName,
+        coins,
+        totalCoins: row.totalCoins,
+        at: row.lastAt,
+      },
+    });
+  }
+  return event;
+}
+
 function pushLedger(
   userId: string,
   amount: number,
@@ -663,11 +1026,19 @@ function ensureWallet(userId: string, patch?: Partial<WalletRow>): WalletRow {
       xp: 0,
       isPremium: false,
       displayName: patch?.displayName || 'Luma Fan',
+      avatarUrl: patch?.avatarUrl,
       role: patch?.role || 'user',
     };
     wallets.set(userId, row);
-  } else if (patch) {
-    row = { ...row, ...patch };
+    return row;
+  }
+  if (patch) {
+    if (patch.displayName) row.displayName = patch.displayName;
+    if (patch.avatarUrl !== undefined) row.avatarUrl = patch.avatarUrl;
+    if (patch.role) row.role = patch.role;
+    if (patch.isPremium !== undefined) row.isPremium = patch.isPremium;
+    if (patch.coinBalance !== undefined) row.coinBalance = patch.coinBalance;
+    if (patch.xp !== undefined) row.xp = patch.xp;
     wallets.set(userId, row);
   }
   return row;
@@ -690,11 +1061,37 @@ app.post('/api/wallet/me', (req, res) => {
     res.status(400).json({ error: 'userId required' });
     return;
   }
-  const row = ensureWallet(userId, {
-    displayName: String(req.body?.displayName || 'Luma Fan'),
-    role: req.body?.role === 'host' ? 'host' : 'user',
-  });
-  res.json({ wallet: walletPublic(row) });
+  const existed = wallets.has(userId);
+  const displayName = String(req.body?.displayName || '').trim();
+  const avatarUrl = String(req.body?.avatarUrl || '').trim();
+  const updateProfile = Boolean(req.body?.updateProfile);
+
+  let row: WalletRow;
+  if (!existed) {
+    row = ensureWallet(userId, {
+      displayName: displayName || 'Luma Fan',
+      avatarUrl: avatarUrl || undefined,
+      role: req.body?.role === 'host' ? 'host' : 'user',
+    });
+    // Welcome coins for brand-new user profiles
+    row.coinBalance = 100;
+    row.xp = 10;
+    wallets.set(userId, row);
+    pushLedger(userId, 100, 'Welcome bonus', 'credit');
+    broadcastWs({
+      type: 'wallet:updated',
+      payload: { userId, coinBalance: row.coinBalance, xp: row.xp },
+    });
+  } else {
+    row = ensureWallet(userId);
+    if (updateProfile || displayName) {
+      if (displayName) row.displayName = displayName;
+      if (avatarUrl) row.avatarUrl = avatarUrl;
+      wallets.set(userId, row);
+    }
+  }
+
+  res.json({ wallet: walletPublic(row), created: !existed });
 });
 
 app.post('/api/wallet/sync', (req, res) => {
@@ -733,6 +1130,21 @@ app.post('/api/wallet/credit', (req, res) => {
   row.xp += Math.floor(amount);
   wallets.set(userId, row);
   pushLedger(userId, Math.floor(amount), reason, 'credit');
+  const reasonLower = reason.toLowerCase();
+  const isRecharge =
+    reasonLower.includes('iap') ||
+    reasonLower.includes('recharge') ||
+    reasonLower.includes('topup') ||
+    reasonLower.includes('purchase') ||
+    req.body?.role === 'user';
+  if (isRecharge) {
+    recordUserRecharge({
+      userId,
+      coins: Math.floor(amount),
+      userName: String(req.body?.displayName || req.body?.userName || row.displayName),
+      roomId: String(req.body?.roomId || '').trim() || undefined,
+    });
+  }
   broadcastWs({
     type: 'wallet:updated',
     payload: { userId, coinBalance: row.coinBalance, xp: row.xp, reason },
@@ -857,6 +1269,14 @@ app.post('/api/wallet/iap/verify', (req, res) => {
   row.coinBalance += credited;
   wallets.set(userId, row);
   pushLedger(userId, credited, `IAP · ${product.title}`, 'credit');
+  const userName = String(req.body?.userName || row.displayName || 'Viewer').slice(0, 40);
+  const liveRoomId = String(req.body?.roomId || '').trim() || undefined;
+  recordUserRecharge({
+    userId,
+    coins: credited,
+    userName,
+    roomId: liveRoomId,
+  });
   broadcastWs({
     type: 'wallet:updated',
     payload: { userId, coinBalance: row.coinBalance, xp: row.xp },
@@ -1060,6 +1480,8 @@ function broadcastWs(event: unknown) {
   }
 }
 
+registerHostManagementRoutes(app, { requireAdmin, broadcastWs });
+
 /** In-memory live rooms (Firebase is source of truth on clients; API mirrors for Luma) */
 const liveRooms = new Map<string, Record<string, unknown>>();
 
@@ -1107,6 +1529,203 @@ app.post('/api/live/rooms/:id/end', (req, res) => {
   res.json({ ok: true });
 });
 
+app.post('/api/live/rooms/:id/title', (req, res) => {
+  const id = String(req.params.id || '');
+  const title = String(req.body?.title || '').trim().slice(0, 48);
+  const room = liveRooms.get(id);
+  if (!room) {
+    res.status(404).json({ error: 'Room not found' });
+    return;
+  }
+  if (!title) {
+    res.status(400).json({ error: 'title required' });
+    return;
+  }
+  room.title = title;
+  room.updatedAt = Date.now();
+  liveRooms.set(id, room);
+  broadcastWs({ type: 'live:title', payload: { id, title } });
+  res.json({ ok: true, room });
+});
+
+/** Announce a viewer recharge into a live room (user app / host demo). */
+app.post('/api/live/rooms/:id/recharge', (req, res) => {
+  const id = String(req.params.id || '');
+  const room = liveRooms.get(id);
+  if (!room || !room.isLive) {
+    res.status(404).json({ error: 'Live room not found' });
+    return;
+  }
+  const userName = String(req.body?.userName || 'Viewer').slice(0, 40);
+  const userId = String(req.body?.userId || 'viewer').slice(0, 64);
+  const coins = Math.max(1, Math.floor(Number(req.body?.coins) || 0));
+  const event = recordUserRecharge({ userId, userName, coins, roomId: id });
+  pushToHost(String(room.hostId || ''), 'viewer_recharge', event);
+  res.json({ ok: true, recharge: event });
+});
+
+/** Active users (for mass text) */
+app.get('/api/users/active', (_req, res) => {
+  res.json({ users: listActiveUsers(), count: listActiveUsers().length });
+});
+
+app.post('/api/users/active', (req, res) => {
+  const userId = String(req.body?.userId || '').trim();
+  if (!userId) {
+    res.status(400).json({ error: 'userId required' });
+    return;
+  }
+  touchActiveUser({
+    userId,
+    userName: String(req.body?.userName || 'User'),
+    role: req.body?.role === 'host' ? 'host' : 'user',
+  });
+  res.json({ ok: true, users: listActiveUsers() });
+});
+
+/** Recharge board: every userId + coins, updated on each recharge */
+app.get('/api/recharges', (_req, res) => {
+  res.json({
+    users: [...rechargeByUser.values()].sort((a, b) => b.lastAt - a.lastAt),
+    events: recentRecharges.slice(0, 50),
+  });
+});
+
+/** Host mass-texts ALL known users (active + rechargers + wallets) */
+app.post('/api/host/mass-text', (req, res) => {
+  const hostId = String(req.body?.hostId || '').trim();
+  const hostName = String(req.body?.hostName || 'Host').slice(0, 40);
+  const text = String(req.body?.text || '').trim().slice(0, 500);
+  if (!hostId || !text) {
+    res.status(400).json({ error: 'hostId and text required' });
+    return;
+  }
+
+  pruneActiveUsers();
+  const targetMap = new Map<string, { userId: string; userName: string }>();
+  for (const u of listActiveUsers()) {
+    if (u.userId !== hostId) targetMap.set(u.userId, { userId: u.userId, userName: u.userName });
+  }
+  for (const u of rechargeByUser.values()) {
+    if (u.userId !== hostId) {
+      targetMap.set(u.userId, { userId: u.userId, userName: u.userName });
+    }
+  }
+  for (const w of wallets.values()) {
+    if (w.role === 'user' && w.userId !== hostId) {
+      if (!targetMap.has(w.userId)) {
+        targetMap.set(w.userId, {
+          userId: w.userId,
+          userName: w.displayName || 'User',
+        });
+      }
+    }
+  }
+
+  // Ensure demo recipients so mass text always has targets in empty env
+  if (targetMap.size === 0) {
+    for (let i = 1; i <= 8; i++) {
+      const id = `demo_user_${i}`;
+      touchActiveUser({ userId: id, userName: `Fan ${i}`, role: 'user' });
+      targetMap.set(id, { userId: id, userName: `Fan ${i}` });
+    }
+  }
+
+  const targets = [...targetMap.values()];
+  const payload = {
+    id: randomUUID().slice(0, 10),
+    hostId,
+    hostName,
+    text,
+    toCount: targets.length,
+    userIds: targets.map((u) => u.userId),
+    at: Date.now(),
+  };
+  massTextHistory.unshift(payload);
+  if (massTextHistory.length > 50) massTextHistory.length = 50;
+
+  broadcastWs({ type: 'mass:text', payload });
+  for (const u of targets) {
+    pushToHost(u.userId, 'mass_text', payload);
+  }
+  pushToHost(hostId, 'mass_text_sent', {
+    ...payload,
+    title: 'Mass texting sent',
+    body: `Sent to ${targets.length} users`,
+  });
+
+  res.json({
+    ok: true,
+    sent: targets.length,
+    broadcast: payload,
+    userIds: payload.userIds,
+    recipients: targets.slice(0, 40),
+  });
+});
+
+app.get('/api/host/mass-text/history', (req, res) => {
+  const hostId = String(req.query.hostId || '').trim();
+  const list = hostId
+    ? massTextHistory.filter((m) => m.hostId === hostId)
+    : massTextHistory;
+  res.json({ items: list.slice(0, 30) });
+});
+
+/** Host creates admin support ticket */
+app.post('/api/support/tickets', (req, res) => {
+  const hostId = String(req.body?.hostId || '').trim();
+  const hostName = String(req.body?.hostName || 'Host').slice(0, 40);
+  const text = String(req.body?.text || '').trim().slice(0, 1000);
+  if (!hostId || !text) {
+    res.status(400).json({ error: 'hostId and text required' });
+    return;
+  }
+  const ticket: SupportTicket = {
+    id: `sup_${randomUUID().slice(0, 8)}`,
+    hostId,
+    hostName,
+    text,
+    status: 'open',
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  supportTickets.unshift(ticket);
+  broadcastWs({ type: 'support:ticket', payload: ticket });
+  res.status(201).json({ ok: true, ticket });
+});
+
+app.get('/api/support/tickets', (req, res) => {
+  const hostId = String(req.query.hostId || '').trim();
+  const list = hostId
+    ? supportTickets.filter((t) => t.hostId === hostId)
+    : supportTickets;
+  res.json({ tickets: list.slice(0, 100) });
+});
+
+app.get('/api/admin/support/tickets', (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  res.json({ tickets: supportTickets.slice(0, 200) });
+});
+
+app.post('/api/admin/support/tickets/:id/status', (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const id = String(req.params.id || '');
+  const ticket = supportTickets.find((t) => t.id === id);
+  if (!ticket) {
+    res.status(404).json({ error: 'Ticket not found' });
+    return;
+  }
+  const status = String(req.body?.status || '').toLowerCase();
+  if (!['open', 'answered', 'closed'].includes(status)) {
+    res.status(400).json({ error: 'status must be open|answered|closed' });
+    return;
+  }
+  ticket.status = status as SupportTicket['status'];
+  ticket.updatedAt = Date.now();
+  broadcastWs({ type: 'support:ticket', payload: ticket });
+  res.json({ ok: true, ticket });
+});
+
 const httpServer = createServer(app);
 const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
 
@@ -1114,6 +1733,9 @@ wss.on('connection', (socket, req) => {
   wsClients.add(socket);
   const url = new URL(req.url || '/', `http://${req.headers.host}`);
   const userId = url.searchParams.get('userId') || 'anon';
+  const userName = url.searchParams.get('name') || 'User';
+  const role = url.searchParams.get('role') === 'host' ? 'host' : 'user';
+  touchActiveUser({ userId, userName, role });
   socket.send(JSON.stringify({ type: 'connected', payload: { userId } }));
 
   socket.on('message', (buf) => {
@@ -1137,7 +1759,12 @@ wss.on('connection', (socket, req) => {
       const coins = Number(raw.coins ?? payload.coins ?? 0);
       const hostId = String(raw.userId || payload.hostId || payload.userId || userId);
 
-      if (type === 'host:hello') {
+      if (type === 'host:hello' || type === 'user:hello') {
+        touchActiveUser({
+          userId: hostId,
+          userName: String(payload.name || payload.userName || userName),
+          role: type === 'host:hello' ? 'host' : 'user',
+        });
         socket.send(JSON.stringify({ type: 'host:welcome', payload: { hostId } }));
         return;
       }
@@ -1164,6 +1791,26 @@ wss.on('connection', (socket, req) => {
             coins,
             label: raw.label || payload.label || 'Gift',
             toHostId: raw.toHostId || payload.toHostId,
+          },
+        });
+      }
+
+      if (type === 'gift:request') {
+        broadcastWs({
+          type: 'gift:request',
+          payload: {
+            ...payload,
+            at: Date.now(),
+          },
+        });
+      }
+
+      if (type === 'gift:respond') {
+        broadcastWs({
+          type: String(payload.status) === 'accepted' ? 'gift:accepted' : 'gift:declined',
+          payload: {
+            ...payload,
+            at: Date.now(),
           },
         });
       }

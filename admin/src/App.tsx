@@ -2,8 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import AgoraRTC, { type IAgoraRTCClient } from 'agora-rtc-sdk-ng';
 import {
   adminLogin,
-  approveHost,
-  banHost,
   endCallRemote,
   fetchAdminReports,
   fetchAdminWithdrawals,
@@ -11,11 +9,9 @@ import {
   listenActiveCalls,
   listenHosts,
   listenReports,
-  rejectHost,
   resolveAdminReport,
   resolveFirebaseReport,
   sendControl,
-  setHostCoins,
   setHostOnline,
   setWithdrawalStatus,
   type ActiveCall,
@@ -23,10 +19,12 @@ import {
   type ReportAdminRow,
   type WithdrawalRow,
 } from './api';
+import { HostManagementPanel } from './components/HostManagement';
 import { adminKey, agoraAppId, firebaseReady } from './firebase';
 import './styles.css';
 
-type Tab = 'dashboard' | 'pending' | 'hosts' | 'calls' | 'control' | 'payouts' | 'reports';
+type Tab = 'dashboard' | 'hosts' | 'calls' | 'control' | 'payouts' | 'reports';
+type AdminRole = 'super_admin' | 'moderator' | 'finance' | 'support';
 
 function formatClock(sec = 0) {
   const m = Math.floor(sec / 60).toString().padStart(2, '0');
@@ -37,11 +35,13 @@ function formatClock(sec = 0) {
 export default function App() {
   const [authed, setAuthed] = useState(() => localStorage.getItem('cc_admin') === '1');
   const [key, setKey] = useState(adminKey);
+  const [adminRole, setAdminRole] = useState<AdminRole>(
+    () => (localStorage.getItem('cc_admin_role') as AdminRole) || 'super_admin',
+  );
   const [loginError, setLoginError] = useState('');
   const [tab, setTab] = useState<Tab>('dashboard');
   const [hosts, setHosts] = useState<HostRow[]>([]);
   const [calls, setCalls] = useState<ActiveCall[]>([]);
-  const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected' | 'online'>('all');
   const [monitor, setMonitor] = useState<ActiveCall | null>(null);
   const [monitorStatus, setMonitorStatus] = useState('');
   const [withdrawals, setWithdrawals] = useState<WithdrawalRow[]>([]);
@@ -144,31 +144,24 @@ export default function App() {
   }
 
   const stats = useMemo(() => {
-    const pending = hosts.filter((h) => h.hostStatus === 'pending').length;
+    const pending = hosts.filter(
+      (h) => h.hostStatus === 'pending' || h.hostStatus === 'under_review',
+    ).length;
     const approved = hosts.filter((h) => h.hostStatus === 'approved').length;
     const online = hosts.filter((h) => h.isOnline).length;
-    return { total: hosts.length, pending, approved, online, liveCalls: calls.length };
+    const banned = hosts.filter((h) => h.banned || h.hostStatus === 'banned').length;
+    return { total: hosts.length, pending, approved, online, banned, liveCalls: calls.length };
   }, [hosts, calls]);
-
-  const filteredHosts = useMemo(() => {
-    return hosts.filter((h) => {
-      if (filter === 'pending') return h.hostStatus === 'pending';
-      if (filter === 'approved') return h.hostStatus === 'approved';
-      if (filter === 'rejected') return h.hostStatus === 'rejected';
-      if (filter === 'online') return !!h.isOnline;
-      return true;
-    });
-  }, [hosts, filter]);
-
-  const pendingHosts = hosts.filter((h) => h.hostStatus === 'pending');
 
   async function onLogin(e: React.FormEvent) {
     e.preventDefault();
     setLoginError('');
     try {
-      await adminLogin(key.trim());
+      await adminLogin(key.trim(), adminRole);
       localStorage.setItem('cc_admin', '1');
       localStorage.setItem('cc_admin_key', key.trim());
+      localStorage.setItem('cc_admin_role', adminRole);
+      localStorage.setItem('cc_admin_id', `admin_${adminRole}`);
       setAuthed(true);
     } catch (err) {
       setLoginError(err instanceof Error ? err.message : 'Login failed');
@@ -180,7 +173,7 @@ export default function App() {
       <div className="login-wrap">
         <form className="login-card" onSubmit={onLogin}>
           <h1>CoinCall Admin</h1>
-          <p>Full control panel for hosts, approvals, and silent 1:1 video monitor.</p>
+          <p>Host management · approvals · finance · silent monitor</p>
           <input
             type="password"
             value={key}
@@ -188,10 +181,20 @@ export default function App() {
             placeholder="Admin key"
             autoFocus
           />
+          <select
+            value={adminRole}
+            onChange={(e) => setAdminRole(e.target.value as AdminRole)}
+            style={{ width: '100%', marginTop: 10, padding: 10, borderRadius: 10 }}
+          >
+            <option value="super_admin">Super Admin</option>
+            <option value="moderator">Moderator</option>
+            <option value="finance">Finance</option>
+            <option value="support">Support</option>
+          </select>
           <button type="submit">Enter Admin Panel</button>
           {loginError ? <div className="error">{loginError}</div> : null}
           <p style={{ marginTop: 14, fontSize: 12 }}>
-            Default key: <code>coincall-admin</code> · API must be running on port 3000
+            Default key: <code>coincall-admin</code>
           </p>
         </form>
       </div>
@@ -204,12 +207,13 @@ export default function App() {
         <div className="brand">
           CoinCall <span>Admin</span>
         </div>
-        <small>Control hosts · silent live · approvals</small>
+        <small>
+          Role: {adminRole.replace('_', ' ')} · hosts &amp; live control
+        </small>
         {(
           [
             ['dashboard', 'Dashboard'],
-            ['pending', `Approvals (${stats.pending})`],
-            ['hosts', 'All Hosts'],
+            ['hosts', `Hosts (${stats.total})`],
             ['calls', `Live 1:1 (${stats.liveCalls})`],
             ['payouts', `Payouts (${withdrawals.filter((w) => w.status !== 'paid').length})`],
             ['reports', `Reports (${reports.filter((r) => r.status !== 'resolved').length})`],
@@ -250,14 +254,14 @@ export default function App() {
         {tab === 'dashboard' ? (
           <>
             <h2>Dashboard</h2>
-            <p className="sub">Live overview of the beauty host network</p>
+            <p className="sub">Live overview of the host network</p>
             <div className="stats">
               <div className="stat">
                 <span>Total hosts</span>
                 <b>{stats.total}</b>
               </div>
               <div className="stat">
-                <span>Pending approval</span>
+                <span>Pending / review</span>
                 <b>{stats.pending}</b>
               </div>
               <div className="stat">
@@ -269,54 +273,22 @@ export default function App() {
                 <b>{stats.online}</b>
               </div>
               <div className="stat">
+                <span>Banned</span>
+                <b>{stats.banned}</b>
+              </div>
+              <div className="stat">
                 <span>Live 1:1 calls</span>
                 <b>{stats.liveCalls}</b>
               </div>
             </div>
             <div className="warn">
-              Silent monitor joins Agora as subscriber only — host does not see admin camera or
-              hear admin mic.
+              Use <strong>Hosts</strong> for full management: KYC review, bulk actions,
+              permissions, finance, monitoring, and audit logs.
             </div>
           </>
         ) : null}
 
-        {tab === 'pending' ? (
-          <>
-            <h2>Host Approvals</h2>
-            <p className="sub">Review photo + video applications before hosting unlocks</p>
-            <div className="list">
-              {pendingHosts.length === 0 ? (
-                <div className="meta">No pending applications</div>
-              ) : (
-                pendingHosts.map((h) => <HostCard key={h.id} host={h} detailed />)
-              )}
-            </div>
-          </>
-        ) : null}
-
-        {tab === 'hosts' ? (
-          <>
-            <h2>All Hosts</h2>
-            <p className="sub">Approve, reject, ban, coins, online force</p>
-            <div className="toolbar">
-              {(['all', 'pending', 'approved', 'rejected', 'online'] as const).map((f) => (
-                <button
-                  key={f}
-                  type="button"
-                  className={`chip ${filter === f ? 'on' : ''}`}
-                  onClick={() => setFilter(f)}
-                >
-                  {f}
-                </button>
-              ))}
-            </div>
-            <div className="list">
-              {filteredHosts.map((h) => (
-                <HostCard key={h.id} host={h} detailed />
-              ))}
-            </div>
-          </>
-        ) : null}
+        {tab === 'hosts' ? <HostManagementPanel firebaseHosts={hosts} /> : null}
 
         {tab === 'calls' ? (
           <>
@@ -580,84 +552,6 @@ export default function App() {
           </>
         ) : null}
       </main>
-    </div>
-  );
-}
-
-function HostCard({ host, detailed }: { host: HostRow; detailed?: boolean }) {
-  const photos = host.photoUrls?.length
-    ? host.photoUrls
-    : host.photoUrl
-      ? [host.photoUrl]
-      : [];
-
-  return (
-    <div className="card">
-      <img src={photos[0] || host.avatarUrl || ''} alt="" />
-      <div>
-        <h3>
-          {host.name || 'Host'} {host.hostId ? `· ${host.hostId}` : ''}
-        </h3>
-        <div className="meta">
-          <span className={`badge ${host.hostStatus || 'none'}`}>
-            {(host.hostStatus || 'none').toUpperCase()}
-          </span>
-          {host.isOnline ? <span className="badge online">ONLINE</span> : null}
-          {host.banned ? <span className="badge rejected">BANNED</span> : null}
-          <br />
-          {host.country || '—'} · {host.email || 'no email'} · coins {host.coinBalance ?? 0}
-          {host.videoUrl ? ' · video ✓' : ' · no video'}
-        </div>
-        {detailed && photos.length > 0 ? (
-          <div className="photos">
-            {photos.map((p) => (
-              <img key={p} src={p} alt="" />
-            ))}
-          </div>
-        ) : null}
-        {detailed && host.videoUrl ? (
-          <div className="meta" style={{ marginTop: 8 }}>
-            Video:{' '}
-            <a href={host.videoUrl} target="_blank" rel="noreferrer">
-              Open intro video
-            </a>
-          </div>
-        ) : null}
-      </div>
-      <div className="actions">
-        <button type="button" className="btn-green" onClick={() => void approveHost(host.id)}>
-          Approve
-        </button>
-        <button
-          type="button"
-          className="btn-gold"
-          onClick={() =>
-            void rejectHost(host.id, window.prompt('Reject reason?') || 'Not approved')
-          }
-        >
-          Reject
-        </button>
-        <button
-          type="button"
-          className="btn-ghost"
-          onClick={() => {
-            const n = window.prompt('Set coin balance', String(host.coinBalance ?? 0));
-            if (n != null) void setHostCoins(host.id, Number(n) || 0);
-          }}
-        >
-          Set coins
-        </button>
-        <button
-          type="button"
-          className="btn-ghost"
-          onClick={() => void setHostOnline(host.id, !host.isOnline)}
-        >
-          {host.isOnline ? 'Force offline' : 'Force online'}
-        </button>
-        <button type="button" className="btn-red" onClick={() => void banHost(host.id)}>
-          Ban
-        </button>
-      </div>
     </div>
   );
 }

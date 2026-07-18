@@ -62,7 +62,16 @@ export function GoLiveScreen({ navigation, mode = 'solo' }: Props) {
       return;
     }
     let cancelled = false;
-    (async () => {
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const mountPreview = async (attempt = 0) => {
+      const mount = document.getElementById('golive-preview-mount');
+      if (!mount) {
+        if (attempt < 20 && !cancelled) {
+          retryTimer = setTimeout(() => void mountPreview(attempt + 1), 50);
+        }
+        return;
+      }
       try {
         let el = document.getElementById('golive-preview') as HTMLVideoElement | null;
         if (!el) {
@@ -71,29 +80,37 @@ export function GoLiveScreen({ navigation, mode = 'solo' }: Props) {
           el.autoplay = true;
           el.muted = true;
           el.playsInline = true;
+          el.setAttribute('playsinline', 'true');
           el.style.width = '100%';
           el.style.height = '100%';
           el.style.objectFit = 'cover';
           el.style.transform =
             goLiveDraft.facing === 'user' ? 'scaleX(-1)' : 'none';
-          document.getElementById('golive-preview-mount')?.appendChild(el);
+          mount.innerHTML = '';
+          mount.appendChild(el);
         }
         videoRef.current = el;
         await startCameraPreview(el, goLiveDraft.facing);
         if (!cancelled) setPreviewReady(true);
       } catch (e) {
-        notify(
-          'Camera permission',
-          e instanceof Error ? e.message : 'Allow camera & mic to go live',
-        );
+        if (!cancelled) {
+          setPreviewReady(false);
+          notify(
+            'Camera permission',
+            e instanceof Error ? e.message : 'Allow camera & mic to go live',
+          );
+        }
       }
-    })();
+    };
+
+    void mountPreview();
     return () => {
       cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
       stopCameraPreview(videoRef.current);
       document.getElementById('golive-preview')?.remove();
     };
-  }, []);
+  }, [permission?.granted]);
 
   const onFlip = async () => {
     if (Platform.OS === 'web') {
@@ -286,11 +303,7 @@ export function GoLiveScreen({ navigation, mode = 'solo' }: Props) {
 
           <PrimaryButton
             label={
-              busy
-                ? 'Starting…'
-                : mode === 'party'
-                  ? 'Start Party Live'
-                  : 'Start Live'
+              busy ? 'Starting…' : mode === 'party' ? 'Start Party Live' : 'Start Live'
             }
             onPress={() => void onStart()}
             loading={busy}

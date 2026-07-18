@@ -29,7 +29,14 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 function HostGate() {
   const { user } = useAuth();
   if (!user) return null;
-  if (user.hostStatus === 'pending') return <HostPendingScreen />;
+  if (
+    user.hostStatus === 'pending' ||
+    user.hostStatus === 'under_review' ||
+    user.hostStatus === 'suspended' ||
+    user.hostStatus === 'banned'
+  ) {
+    return <HostPendingScreen />;
+  }
   return <HostApplyScreen />;
 }
 

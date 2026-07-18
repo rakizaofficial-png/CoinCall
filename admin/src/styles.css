@@ -246,4 +246,109 @@ button, input, select, textarea {
   .card { grid-template-columns: 64px 1fr; }
   .actions { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; }
   .monitor { grid-template-columns: 1fr; }
+  .hm-layout { grid-template-columns: 1fr; }
 }
+
+/* Host Management */
+.badge.under_review { background: rgba(245,193,108,0.2); color: var(--gold); }
+.badge.suspended { background: rgba(255,120,80,0.2); color: #ff8a5c; }
+.badge.banned { background: rgba(255,80,80,0.2); color: #ff6b6b; }
+
+.hm-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.hm-header-actions { display: flex; gap: 8px; }
+.hm-toast {
+  background: rgba(255,42,122,0.12);
+  border: 1px solid rgba(255,42,122,0.35);
+  color: #ff8ab8;
+  padding: 10px 12px;
+  border-radius: 10px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+.hm-toolbar { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+.hm-search {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.04);
+  color: inherit;
+}
+.hm-bulk {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.hm-layout {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+.hm-card {
+  grid-template-columns: 28px 72px 1fr !important;
+  align-items: start;
+}
+.hm-check { display: flex; align-items: center; padding-top: 8px; }
+.hm-side {
+  position: sticky;
+  top: 12px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 14px;
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+}
+.hm-detail-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.hm-bio {
+  margin: 10px 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--muted, #a89a8c);
+}
+.hm-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+.hm-metrics > div {
+  background: rgba(0,0,0,0.25);
+  border-radius: 10px;
+  padding: 8px;
+}
+.hm-metrics span { display: block; font-size: 10px; opacity: 0.7; }
+.hm-metrics b { font-size: 15px; }
+.hm-perm { flex-direction: row !important; flex-wrap: wrap; }
+.hm-audit ul, .hm-logins {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+}
+.hm-audit li, .hm-logins li {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.hm-detail h4 {
+  margin: 14px 0 6px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.7;
+}
+

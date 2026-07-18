@@ -1,7 +1,12 @@
 import { LinearGradient } from 'expo-linear-gradient';
+import * as ImagePicker from 'expo-image-picker';
 import {
   Gift,
   Heart,
+  LifeBuoy,
+  Lock,
+  Megaphone,
+  MessageSquare,
   Mic,
   MicOff,
   Share2,
@@ -28,7 +33,8 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { GIFT_CATALOG } from '../../data/gifts';
+import { HostChatSection } from '../../components/HostChatSection';
+import { GIFT_CATALOG, PHOTO_UNLOCK_MIN_COINS } from '../../data/gifts';
 import { useApp } from '../../context/AppContext';
 import { useLiveStudio } from '../../context/LiveStudioContext';
 import {
@@ -41,7 +47,7 @@ import {
 } from '../../services/agoraService';
 import { radii } from '../../theme/colors';
 import { useTheme } from '../../theme/ThemeContext';
-import { notify } from '../../utils/notify';
+import { notify, promptText } from '../../utils/notify';
 import * as Clipboard from 'expo-clipboard';
 
 type Props = {
@@ -68,13 +74,20 @@ export function LiveRoomScreen({ navigation, route }: Props) {
     comments,
     gifts,
     giftOverlay,
+    lockedPhotos,
+    rechargeTicker,
+    rechargeUsers,
     liveSeconds,
-    sendComment,
     sendGift,
     likeRoom,
     stopLive,
     openRoom,
     setAnnouncement,
+    renameRoom,
+    massTextAllActive,
+    contactAdminSupport,
+    addGiftLockedPhoto,
+    simulateViewerRecharge,
     muteUser,
     kickUser,
     blockUserInRoom,
@@ -87,7 +100,6 @@ export function LiveRoomScreen({ navigation, route }: Props) {
     liveRooms.find((r) => r.id === roomId) ||
     myLiveRoom;
 
-  const [text, setText] = useState('');
   const [giftsOpen, setGiftsOpen] = useState(false);
   const [modsOpen, setModsOpen] = useState(false);
   const [rankOpen, setRankOpen] = useState(false);
@@ -97,6 +109,8 @@ export function LiveRoomScreen({ navigation, route }: Props) {
   const [camOff, setCamOff] = useState(false);
   const [beauty, setBeauty] = useState(true);
   const [joinToast, setJoinToast] = useState<string | null>(null);
+  const [previewPhoto, setPreviewPhoto] = useState<string | null>(null);
+  const [rechargeBoardOpen, setRechargeBoardOpen] = useState(false);
   const localMountReady = useRef(false);
   const hearts = useSharedValue(0);
   const seenCommentIds = useRef<Set<string>>(new Set());
@@ -138,8 +152,9 @@ export function LiveRoomScreen({ navigation, route }: Props) {
         await startAgoraLiveBroadcast({
           channel: room.channel,
           localVideoEl: el,
+          beauty: beauty ? 'snap' : 'off',
         });
-        await setAgoraBeauty(beauty);
+        await setAgoraBeauty(beauty ? 'snap' : 'off');
         localMountReady.current = true;
       } catch (e) {
         if (!cancelled) {
@@ -201,6 +216,20 @@ export function LiveRoomScreen({ navigation, route }: Props) {
     const link = `https://coincall-host.onrender.com/?room=${roomId}`;
     await Clipboard.setStringAsync(link);
     notify('Shared', 'Live link copied');
+  };
+
+  const pickLockedPhoto = async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      notify('Permission', 'Allow photos to add locked gift images');
+      return;
+    }
+    const res = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.75,
+    });
+    if (res.canceled || !res.assets?.[0]?.uri) return;
+    await addGiftLockedPhoto(res.assets[0].uri, 'Exclusive', PHOTO_UNLOCK_MIN_COINS);
   };
 
   if (!room) {
@@ -290,15 +319,18 @@ export function LiveRoomScreen({ navigation, route }: Props) {
         </View>
       ) : null}
 
+      {joinToast ? (
+        <View style={styles.joinToast} pointerEvents="none">
+          <Text style={styles.joinToastText}>{joinToast}</Text>
+        </View>
+      ) : null}
+
       {room.mode === 'party' && room.seats ? (
         <View style={styles.partySeats}>
           {room.seats.map((seat) => (
             <View
               key={seat.index}
-              style={[
-                styles.partySeat,
-                seat.hostId ? styles.partySeatOn : null,
-              ]}
+              style={[styles.partySeat, seat.hostId ? styles.partySeatOn : null]}
             >
               {seat.hostId ? (
                 <Image source={{ uri: seat.avatarUrl }} style={styles.partyAv} />
@@ -313,24 +345,29 @@ export function LiveRoomScreen({ navigation, route }: Props) {
         </View>
       ) : null}
 
-      {joinToast ? (
-        <View style={styles.joinToast} pointerEvents="none">
-          <Text style={styles.joinToastText}>{joinToast}</Text>
+      {rechargeTicker ? (
+        <View style={styles.rechargeTicker} pointerEvents="none">
+          <Text style={styles.rechargeTickerText}>
+            💎 ID {rechargeTicker.userId || '—'} · {rechargeTicker.userName} · +
+            {rechargeTicker.coins}
+          </Text>
         </View>
       ) : null}
 
-      <FlatList
-        data={comments}
-        keyExtractor={(c) => c.id}
-        style={styles.comments}
-        contentContainerStyle={{ paddingBottom: 8 }}
-        renderItem={({ item }) => (
-          <View style={styles.comment}>
-            <Text style={styles.commentUser}>{item.userName}</Text>
-            <Text style={styles.commentText}>{item.text}</Text>
-          </View>
-        )}
-      />
+      {hostMode && rechargeUsers.length > 0 ? (
+        <Pressable
+          style={styles.rechargeChip}
+          onPress={() => setRechargeBoardOpen(true)}
+        >
+          <Text style={styles.rechargeChipText}>
+            Recharges · {rechargeUsers.length}
+          </Text>
+        </Pressable>
+      ) : null}
+
+      <View style={styles.chatSection}>
+        <HostChatSection compact onOpenImage={(url) => setPreviewPhoto(url)} />
+      </View>
 
       {giftOverlay ? (
         <View style={styles.giftBurst} pointerEvents="none">
@@ -347,31 +384,21 @@ export function LiveRoomScreen({ navigation, route }: Props) {
       </Animated.View>
 
       <View style={[styles.bottom, { paddingBottom: insets.bottom + 10 }]}>
-        <TextInput
-          style={styles.input}
-          value={text}
-          onChangeText={setText}
-          placeholder="Say something…"
-          placeholderTextColor="rgba(255,255,255,0.5)"
-          onSubmitEditing={() => {
-            void sendComment(text);
-            setText('');
-          }}
-        />
-        <Pressable
-          style={styles.iconBtn}
-          onPress={() => {
-            void sendComment(text);
-            setText('');
-          }}
-        >
-          <Text style={{ color: '#fff', fontWeight: '800' }}>Send</Text>
-        </Pressable>
         <Pressable style={styles.iconBtn} onPress={onLike}>
           <Heart size={20} color="#FF6B8A" />
         </Pressable>
         <Pressable style={styles.iconBtn} onPress={() => setGiftsOpen(true)}>
           <Gift size={20} color="#F5C14C" />
+        </Pressable>
+        <Pressable
+          style={styles.iconBtn}
+          onPress={() =>
+            promptText('Admin support', 'Create support ticket for admin', (msg) => {
+              void contactAdminSupport(msg);
+            })
+          }
+        >
+          <LifeBuoy size={18} color="#9B8CFF" />
         </Pressable>
         <Pressable style={styles.iconBtn} onPress={onShare}>
           <Share2 size={18} color="#fff" />
@@ -413,10 +440,32 @@ export function LiveRoomScreen({ navigation, route }: Props) {
             onPress={async () => {
               const next = !beauty;
               setBeauty(next);
-              await setAgoraBeauty(next);
+              await setAgoraBeauty(next ? 'snap' : 'off');
             }}
           >
             <Sparkles size={18} color="#fff" />
+          </Pressable>
+          <Pressable
+            style={[styles.hCtrl, { backgroundColor: 'rgba(155,140,255,0.55)' }]}
+            onPress={() => {
+              notify('Live chat', 'Type in the chat box at the bottom · tap 📷 for photos');
+            }}
+          >
+            <MessageSquare size={18} color="#fff" />
+          </Pressable>
+          <Pressable
+            style={[styles.hCtrl, { backgroundColor: 'rgba(245,193,76,0.65)' }]}
+            onPress={() =>
+              promptText(
+                'Mass text all active users',
+                'This message goes to every online user',
+                (msg) => {
+                  void massTextAllActive(msg);
+                },
+              )
+            }
+          >
+            <Megaphone size={18} color="#fff" />
           </Pressable>
         </View>
       ) : null}
@@ -424,7 +473,54 @@ export function LiveRoomScreen({ navigation, route }: Props) {
       {giftsOpen ? (
         <View style={styles.giftSheet}>
           <Text style={styles.sheetTitle}>Send a gift</Text>
-          <Text style={styles.sheetSub}>Tap again fast for combo · luxury effects</Text>
+          <Text style={styles.sheetSub}>
+            Luxury gifts unlock locked photos · tap again for combo
+          </Text>
+          {lockedPhotos.length > 0 ? (
+            <View style={styles.lockedRow}>
+              <Text style={styles.lockedTitle}>Locked photos · open with gift</Text>
+              <FlatList
+                horizontal
+                data={lockedPhotos}
+                keyExtractor={(p) => p.id}
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ gap: 10 }}
+                renderItem={({ item }) => {
+                  const open =
+                    hostMode || Boolean(item.unlockedBy?.[user.id]);
+                  return (
+                    <Pressable
+                      style={styles.lockedCard}
+                      onPress={() => {
+                        if (open) {
+                          setPreviewPhoto(item.url);
+                          return;
+                        }
+                        notify(
+                          'Locked',
+                          `Send a gift ≥ ${item.unlockCoins || PHOTO_UNLOCK_MIN_COINS} coins to open`,
+                        );
+                      }}
+                    >
+                      <Image
+                        source={{ uri: item.url }}
+                        style={[styles.lockedImg, !open && styles.lockedBlur]}
+                        blurRadius={open ? 0 : 18}
+                      />
+                      {!open ? (
+                        <View style={styles.lockedOverlay}>
+                          <Lock size={18} color="#fff" />
+                          <Text style={styles.lockedNeed}>
+                            {item.unlockCoins || PHOTO_UNLOCK_MIN_COINS}+
+                          </Text>
+                        </View>
+                      ) : null}
+                    </Pressable>
+                  );
+                }}
+              />
+            </View>
+          ) : null}
           <View style={styles.giftGrid}>
             {GIFT_CATALOG.map((g) => (
               <Pressable
@@ -442,7 +538,9 @@ export function LiveRoomScreen({ navigation, route }: Props) {
                 <Text style={styles.giftItemEmoji}>{g.emoji}</Text>
                 <Text style={styles.giftItemName}>{g.name}</Text>
                 <Text style={styles.giftItemCoins}>{g.coins}</Text>
-                <Text style={styles.giftTier}>{g.tier}</Text>
+                <Text style={styles.giftTier}>
+                  {g.unlocksPhotos ? 'unlocks 📷' : g.tier}
+                </Text>
               </Pressable>
             ))}
           </View>
@@ -497,11 +595,54 @@ export function LiveRoomScreen({ navigation, route }: Props) {
           <Pressable
             style={styles.modBtn}
             onPress={() => {
+              promptText('Room name', 'Change live room name', (title) => {
+                void renameRoom(title);
+              }, room.title);
+            }}
+          >
+            <Text style={styles.modText}>Change room name</Text>
+          </Pressable>
+          <Pressable
+            style={styles.modBtn}
+            onPress={() => {
               const msg = 'Be respectful · No spam';
               void setAnnouncement(msg);
             }}
           >
             <Text style={styles.modText}>Pin announcement</Text>
+          </Pressable>
+          <Pressable
+            style={styles.modBtn}
+            onPress={() => {
+              promptText(
+                'Mass text all active users',
+                'Message every online user',
+                (msg) => {
+                  void massTextAllActive(msg);
+                },
+              );
+            }}
+          >
+            <Text style={styles.modText}>Mass text all active users</Text>
+          </Pressable>
+          <Pressable style={styles.modBtn} onPress={() => setRechargeBoardOpen(true)}>
+            <Text style={styles.modText}>Recharge board (user ID + coins)</Text>
+          </Pressable>
+          <Pressable style={styles.modBtn} onPress={() => void pickLockedPhoto()}>
+            <Text style={styles.modText}>Add locked photo (gift unlock)</Text>
+          </Pressable>
+          <Pressable style={styles.modBtn} onPress={() => void simulateViewerRecharge()}>
+            <Text style={styles.modText}>Demo: viewer recharge</Text>
+          </Pressable>
+          <Pressable
+            style={styles.modBtn}
+            onPress={() =>
+              promptText('Admin support', 'Create support ticket for admin', (msg) => {
+                void contactAdminSupport(msg);
+              })
+            }
+          >
+            <Text style={styles.modText}>Create admin support ticket</Text>
           </Pressable>
           <Pressable
             style={styles.modBtn}
@@ -519,6 +660,43 @@ export function LiveRoomScreen({ navigation, route }: Props) {
             <Text style={styles.closeSheet}>Close</Text>
           </Pressable>
         </View>
+      ) : null}
+
+      {rechargeBoardOpen ? (
+        <View style={styles.giftSheet}>
+          <Text style={styles.sheetTitle}>User recharges</Text>
+          <Text style={styles.sheetSub}>
+            User ID + coins · updates every recharge
+          </Text>
+          {rechargeUsers.length === 0 ? (
+            <Text style={{ color: 'rgba(255,255,255,0.6)' }}>No recharges yet</Text>
+          ) : (
+            rechargeUsers.slice(0, 30).map((u) => (
+              <View key={u.userId} style={styles.rechargeRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.rechargeId}>{u.userId}</Text>
+                  <Text style={styles.rechargeName}>{u.userName}</Text>
+                </View>
+                <View style={{ alignItems: 'flex-end' }}>
+                  <Text style={styles.rechargeCoins}>+{u.lastCoins}</Text>
+                  <Text style={styles.rechargeTotal}>
+                    total {u.totalCoins} · x{u.rechargeCount}
+                  </Text>
+                </View>
+              </View>
+            ))
+          )}
+          <Pressable onPress={() => setRechargeBoardOpen(false)}>
+            <Text style={styles.closeSheet}>Close</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      {previewPhoto ? (
+        <Pressable style={styles.photoPreview} onPress={() => setPreviewPhoto(null)}>
+          <Image source={{ uri: previewPhoto }} style={styles.photoPreviewImg} />
+          <Text style={styles.closeSheet}>Tap to close</Text>
+        </Pressable>
       ) : null}
     </View>
   );
@@ -582,26 +760,6 @@ const styles = StyleSheet.create({
   },
   vipLabel: { color: '#F5C14C', fontWeight: '900', fontSize: 11 },
   vipAv: { width: 28, height: 28, borderRadius: 14, borderWidth: 1, borderColor: '#F5C14C' },
-  partySeats: {
-    position: 'absolute',
-    right: 10,
-    top: 200,
-    width: 92,
-    gap: 6,
-    zIndex: 2,
-  },
-  partySeat: {
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    borderRadius: 12,
-    padding: 6,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-  },
-  partySeatOn: { borderColor: 'rgba(108,124,255,0.8)' },
-  partyAv: { width: 36, height: 36, borderRadius: 18 },
-  partyEmpty: { color: '#fff', fontSize: 18, fontWeight: '800' },
-  partySeatLabel: { color: '#fff', fontSize: 10, marginTop: 4, fontWeight: '700' },
   joinToast: {
     position: 'absolute',
     top: '28%',
@@ -679,24 +837,110 @@ const styles = StyleSheet.create({
   leaderRank: { color: '#F5C14C', fontWeight: '900', fontSize: 11, marginLeft: 4 },
   leaderAv: { width: 28, height: 28, borderRadius: 14 },
   comments: {
+    flexGrow: 0,
+    maxHeight: 160,
+  },
+  chatSection: {
     position: 'absolute',
-    left: 12,
-    right: 100,
-    bottom: 120,
-    maxHeight: 220,
+    left: 10,
+    right: 10,
+    bottom: 88,
+    zIndex: 3,
+    maxHeight: 300,
+  },
+  partySeats: {
+    position: 'absolute',
+    right: 10,
+    top: 200,
+    width: 92,
+    gap: 6,
     zIndex: 2,
   },
-  comment: {
-    backgroundColor: 'rgba(0,0,0,0.35)',
+  partySeat: {
+    backgroundColor: 'rgba(0,0,0,0.45)',
     borderRadius: 12,
+    padding: 6,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  partySeatOn: { borderColor: 'rgba(108,124,255,0.8)' },
+  partyAv: { width: 36, height: 36, borderRadius: 18 },
+  partyEmpty: { color: '#fff', fontSize: 18, fontWeight: '800' },
+  partySeatLabel: { color: '#fff', fontSize: 10, marginTop: 4, fontWeight: '700' },
+  rechargeTicker: {
+    position: 'absolute',
+    top: 120,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(245,193,76,0.95)',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    zIndex: 8,
+  },
+  rechargeTickerText: { color: '#1a1200', fontWeight: '900', fontSize: 12 },
+  rechargeChip: {
+    position: 'absolute',
+    top: 168,
+    right: 12,
+    backgroundColor: 'rgba(245,193,76,0.9)',
     paddingHorizontal: 10,
     paddingVertical: 6,
-    marginBottom: 6,
-    alignSelf: 'flex-start',
-    maxWidth: '100%',
+    borderRadius: 12,
+    zIndex: 4,
   },
-  commentUser: { color: '#9B8CFF', fontWeight: '800', fontSize: 11 },
-  commentText: { color: '#fff', fontSize: 13 },
+  rechargeChipText: { color: '#1a1200', fontWeight: '900', fontSize: 11 },
+  rechargeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,255,255,0.08)',
+    gap: 10,
+  },
+  rechargeId: { color: '#F5C14C', fontWeight: '800', fontSize: 12 },
+  rechargeName: { color: 'rgba(255,255,255,0.7)', fontSize: 11, marginTop: 2 },
+  rechargeCoins: { color: '#fff', fontWeight: '900', fontSize: 15 },
+  rechargeTotal: { color: 'rgba(255,255,255,0.5)', fontSize: 10, marginTop: 2 },
+  lockedRow: { marginBottom: 12 },
+  lockedTitle: {
+    color: 'rgba(255,255,255,0.7)',
+    fontWeight: '700',
+    fontSize: 12,
+    marginBottom: 8,
+  },
+  lockedCard: {
+    width: 72,
+    height: 72,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: '#222',
+  },
+  lockedImg: { width: '100%', height: '100%' },
+  lockedBlur: { opacity: 0.85 },
+  lockedOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    gap: 2,
+  },
+  lockedNeed: { color: '#F5C14C', fontWeight: '900', fontSize: 11 },
+  photoPreview: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.88)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 40,
+    padding: 20,
+  },
+  photoPreviewImg: {
+    width: '100%',
+    maxWidth: 420,
+    height: '70%',
+    borderRadius: 16,
+    resizeMode: 'contain',
+  },
   giftBurst: {
     position: 'absolute',
     top: '35%',

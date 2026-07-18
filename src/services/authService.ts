@@ -48,6 +48,21 @@ function mapHostUser(uid: string, data: Record<string, unknown>, fallbackName: s
       ? Number(data.applicationSubmittedAt)
       : undefined,
     rejectionReason: data.rejectionReason ? String(data.rejectionReason) : undefined,
+    docsRequested: data.docsRequested ? String(data.docsRequested) : undefined,
+    bio: data.bio ? String(data.bio) : undefined,
+    languages: Array.isArray(data.languages) ? data.languages.map(String) : undefined,
+    categories: Array.isArray(data.categories) ? data.categories.map(String) : undefined,
+    callPrice: data.callPrice != null ? Number(data.callPrice) : undefined,
+    idDocumentUrl: data.idDocumentUrl ? String(data.idDocumentUrl) : undefined,
+    selfieUrl: data.selfieUrl ? String(data.selfieUrl) : undefined,
+    banned: Boolean(data.banned),
+    suspended: Boolean(data.suspended),
+    callsEnabled: data.callsEnabled !== false,
+    videoCallsEnabled: data.videoCallsEnabled !== false,
+    voiceCallsEnabled: data.voiceCallsEnabled !== false,
+    giftsEnabled: data.giftsEnabled !== false,
+    withdrawalsAllowed: data.withdrawalsAllowed !== false,
+    walletFrozen: Boolean(data.walletFrozen),
   };
 }
 
@@ -191,6 +206,12 @@ export async function submitHostApplicationToFirebase(
     photoUrls: string[];
     videoUrl: string;
     hostId: string;
+    bio?: string;
+    languages?: string[];
+    categories?: string[];
+    callPrice?: number;
+    idDocumentUrl?: string;
+    selfieUrl?: string;
   },
 ) {
   if (!isFirebaseReady()) throw new Error('Firebase is not configured.');
@@ -207,6 +228,21 @@ export async function submitHostApplicationToFirebase(
     isVerified: false,
     isOnline: false,
     rejectionReason: null,
+    docsRequested: null,
+    bio: data.bio || '',
+    languages: data.languages || [],
+    categories: data.categories || [],
+    callPrice: data.callPrice ?? 80,
+    idDocumentUrl: data.idDocumentUrl || null,
+    selfieUrl: data.selfieUrl || null,
+    callsEnabled: true,
+    videoCallsEnabled: true,
+    voiceCallsEnabled: true,
+    giftsEnabled: true,
+    withdrawalsAllowed: true,
+    walletFrozen: false,
+    banned: false,
+    suspended: false,
   });
 }
 

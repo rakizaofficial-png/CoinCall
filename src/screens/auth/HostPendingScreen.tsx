@@ -54,10 +54,23 @@ export function HostPendingScreen() {
           </View>
         )}
 
-        <Text style={[styles.title, { color: colors.text }]}>Waiting for approval</Text>
+        <Text style={[styles.title, { color: colors.text }]}>
+          {user?.hostStatus === 'banned'
+            ? 'Account banned'
+            : user?.hostStatus === 'suspended'
+              ? 'Account suspended'
+              : user?.hostStatus === 'under_review'
+                ? 'Under review'
+                : 'Waiting for approval'}
+        </Text>
         <Text style={[styles.sub, { color: colors.textSecondary }]}>
-          Admin is reviewing your picture, video, name and country. The hosting app stays locked
-          until your Host ID is approved.
+          {user?.hostStatus === 'banned'
+            ? user.rejectionReason || 'Your host account was banned by admin.'
+            : user?.hostStatus === 'suspended'
+              ? 'Admin suspended your hosting access. Contact support if this is unexpected.'
+              : user?.docsRequested
+                ? `Admin requested documents: ${user.docsRequested}`
+                : 'Admin is reviewing your profile. Hosting unlocks after approval.'}
         </Text>
 
         <View
@@ -86,11 +99,16 @@ export function HostPendingScreen() {
             Photos · {user?.photoUrls?.length || (user?.photoUrl ? 1 : 0)} uploaded
           </Text>
           <Text style={[styles.metaLine, { color: colors.textSecondary }]}>
-            Video · {user?.videoUrl ? 'Uploaded' : 'Missing'}
+            Rate · {user?.callPrice ?? '—'} coins/min (by level)
           </Text>
           <Text style={[styles.metaLine, { color: colors.textSecondary }]}>
-            Status · Pending review
+            Status · {(user?.hostStatus || 'pending').replace('_', ' ')}
           </Text>
+          {user?.rejectionReason ? (
+            <Text style={[styles.metaLine, { color: colors.danger }]}>
+              Reason · {user.rejectionReason}
+            </Text>
+          ) : null}
         </View>
 
         <View style={styles.waitRow}>

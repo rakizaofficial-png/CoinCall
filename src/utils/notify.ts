@@ -65,3 +65,39 @@ export function promptChoices(
     { text: 'Cancel', style: 'cancel' as const },
   ]);
 }
+
+/** Simple text prompt (web prompt / native Alert with default value). */
+export function promptText(
+  title: string,
+  message: string,
+  onSubmit: (value: string) => void,
+  defaultValue = '',
+) {
+  if (Platform.OS === 'web') {
+    const raw = window.prompt(`${title}\n\n${message}`, defaultValue);
+    if (raw != null && raw.trim()) onSubmit(raw.trim());
+    return;
+  }
+  if (typeof Alert.prompt === 'function') {
+    Alert.prompt(
+      title,
+      message,
+      (value) => {
+        if (value?.trim()) onSubmit(value.trim());
+      },
+      'plain-text',
+      defaultValue,
+    );
+    return;
+  }
+  // Android fallback
+  Alert.alert(title, `${message}${defaultValue ? `\n\nCurrent: ${defaultValue}` : ''}`, [
+    { text: 'Cancel', style: 'cancel' },
+    {
+      text: 'OK',
+      onPress: () => {
+        if (defaultValue.trim()) onSubmit(defaultValue.trim());
+      },
+    },
+  ]);
+}

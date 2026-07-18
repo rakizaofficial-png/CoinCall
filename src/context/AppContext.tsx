@@ -230,7 +230,7 @@ export function AppProvider({
   const [myRoomId, setMyRoomId] = useState<string | null>(null);
   const [partyLiveSeconds, setPartyLiveSeconds] = useState(0);
   const [hostOnline, setHostOnlineState] = useState(true);
-  const [beautyOn, setBeautyOn] = useState(false);
+  const [beautyOn, setBeautyOn] = useState(true);
   const [points, setPoints] = useState(120);
   const [hostEarnings, setHostEarnings] = useState({
     call: 0,
@@ -275,65 +275,17 @@ export function AppProvider({
     if (call?.status === 'active' || workspaceMode === 'solo_calling') {
       return 'solo_calling';
     }
-    if (workspaceMode === 'party_room') return 'party_room';
     return 'online';
   }, [call?.status, hostOnline, workspaceMode]);
 
   const enterPartyRoom = useCallback(() => {
-    setHostOnlineState(true);
-    setUser((u) => ({ ...u, isOnline: true }));
-    setWorkspaceModeState('party_room');
-    void import('../services/realtimeWs').then(({ joinPartyChannel }) => {
-      joinPartyChannel(`party_${user.id}`, user.id);
-    });
-
-    setPartySeats((seats) => {
-      const peers = MOCK_HOSTS.filter((h) => h.isOnline).slice(0, 4);
-      const next = seats.map((s, i) => {
-        if (i === 0) {
-          return {
-            ...s,
-            occupied: true,
-            hostId: user.id,
-            name: user.name,
-            avatarUrl: user.avatarUrl,
-            isMe: true,
-            isSpeaking: true,
-            micOn: true,
-          };
-        }
-        const peer = peers[i - 1];
-        if (peer) {
-          return {
-            ...s,
-            occupied: true,
-            hostId: peer.id,
-            name: peer.name,
-            avatarUrl: peer.avatarUrl,
-            isMe: false,
-            isSpeaking: i % 2 === 0,
-            micOn: true,
-          };
-        }
-        return {
-          ...s,
-          occupied: false,
-          hostId: null,
-          name: '',
-          avatarUrl: '',
-          isMe: false,
-          isSpeaking: false,
-          micOn: false,
-        };
-      });
-      return next;
-    });
-    notify('Party Room', 'Joined multi-host group stream workspace.');
-  }, [user.avatarUrl, user.id, user.name]);
+    notify('Party Room removed', 'Use Go Live for streaming.');
+    setWorkspaceModeState('waiting_1v1');
+  }, []);
 
   const joinPartySeat = useCallback(
     (seatIndex: number) => {
-      setWorkspaceModeState('party_room');
+      setWorkspaceModeState('waiting_1v1');
       setPartySeats((seats) => {
         const withoutMe = seats.map((s) =>
           s.isMe
@@ -386,22 +338,6 @@ export function AppProvider({
       ),
     );
   }, []);
-
-  // Animate party seat speaking indicators + gift ticker while in party room
-  useEffect(() => {
-    if (workspaceMode !== 'party_room') return;
-    const t = setInterval(() => {
-      setPartySeats((seats) =>
-        seats.map((s) =>
-          s.occupied
-            ? { ...s, isSpeaking: Math.random() > 0.55 }
-            : s,
-        ),
-      );
-      setPartyGroupGiftsToday((g) => g + Math.floor(Math.random() * 4));
-    }, 1600);
-    return () => clearInterval(t);
-  }, [workspaceMode]);
 
   // Auto flip to solo_calling when an active call exists
   useEffect(() => {
@@ -678,7 +614,33 @@ export function AppProvider({
         if (event.type === 'gift:received' && event.payload?.coins) {
           const coins = Number(event.payload.coins) || 0;
           if (coins > 0) {
-            addEarn(setUser, setHostEarnings, setTransactions, coins, 'gift', 'Live gift (realtime)');
+            const label = event.payload.giftName || event.payload.label || 'Gift';
+            const emoji = event.payload.giftEmoji || '🎁';
+            addEarn(
+              setUser,
+              setHostEarnings,
+              setTransactions,
+              coins,
+              'gift',
+              `${emoji} ${label} accepted`,
+            );
+            notify('Gift received', `${emoji} ${label} · +${coins} coins`);
+          }
+        }
+        if (event.type === 'gift:accepted' && event.payload?.coins) {
+          const coins = Number(event.payload.coins) || 0;
+          if (coins > 0) {
+            const label = event.payload.giftName || 'Gift';
+            const emoji = event.payload.giftEmoji || '🎁';
+            addEarn(
+              setUser,
+              setHostEarnings,
+              setTransactions,
+              coins,
+              'gift',
+              `${emoji} ${label} accepted`,
+            );
+            notify('Gift received', `${emoji} ${label} · +${coins} coins`);
           }
         }
       });
@@ -707,6 +669,8 @@ export function AppProvider({
         notify('Suspended', cmd.message || 'Your host account was suspended.');
       } else if (cmd.type === 'message') {
         notify('Message from Admin', cmd.message || 'Hello from admin.');
+      } else if (cmd.type === 'approval' || cmd.type === 'approved') {
+        notify('Approved', cmd.message || 'Your host application was approved!');
       }
     });
   }, [endCall, setHostOnline, user.id]);

@@ -51,7 +51,7 @@ export const darkColors: AppColors = {
   gradientMid: '#7C5CFF',
   gradientEnd: '#B45CFF',
   tabInactive: '#7E89B0',
-  tabActive: '#9B8CFF',
+  tabActive: '#FF2A7A',
   glass: 'rgba(20, 28, 46, 0.72)',
   glassBorder: 'rgba(156, 163, 255, 0.22)',
   shadow: 'rgba(79, 107, 255, 0.35)',

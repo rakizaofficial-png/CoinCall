@@ -76,7 +76,7 @@ export function DashboardScreen({ navigation }: { navigation: any }) {
                     roomId: myLiveRoom.id,
                     hostMode: true,
                   })
-                : navigation.navigate('GoLive', { mode: 'solo' })
+                : navigation.navigate('GoLive')
             }
             style={{ flex: 1 }}
           />
@@ -129,32 +129,18 @@ export function DashboardScreen({ navigation }: { navigation: any }) {
       </GlassCard>
 
       <Text style={[styles.section, { color: colors.text }]}>Quick start</Text>
-      <View style={styles.quick}>
-        <Pressable
-          style={[styles.quickCard, { backgroundColor: colors.bgCard, borderColor: colors.border }]}
-          onPress={() => navigation.navigate('GoLive', { mode: 'solo' })}
+      <Pressable
+        style={[styles.quickCard, { backgroundColor: colors.bgCard, borderColor: colors.border }]}
+        onPress={() => navigation.navigate('GoLive')}
+      >
+        <LinearGradient
+          colors={[`${colors.primary}55`, colors.bgElevated]}
+          style={styles.quickGrad}
         >
-          <LinearGradient
-            colors={[`${colors.primary}55`, colors.bgElevated]}
-            style={styles.quickGrad}
-          >
-            <Text style={styles.quickTitle}>Solo Live</Text>
-            <Text style={styles.quickSub}>Camera + beauty + gifts</Text>
-          </LinearGradient>
-        </Pressable>
-        <Pressable
-          style={[styles.quickCard, { backgroundColor: colors.bgCard, borderColor: colors.border }]}
-          onPress={() => navigation.navigate('GoLive', { mode: 'party' })}
-        >
-          <LinearGradient
-            colors={[`${colors.accent}44`, colors.bgElevated]}
-            style={styles.quickGrad}
-          >
-            <Text style={styles.quickTitle}>Party Room</Text>
-            <Text style={styles.quickSub}>Multi-host seats</Text>
-          </LinearGradient>
-        </Pressable>
-      </View>
+          <Text style={styles.quickTitle}>Go Live</Text>
+          <Text style={styles.quickSub}>Camera + beauty + gifts + chat</Text>
+        </LinearGradient>
+      </Pressable>
     </ScrollView>
   );
 }
@@ -203,9 +189,7 @@ const styles = StyleSheet.create({
   },
   toggleText: { color: '#fff', fontWeight: '900' },
   section: { fontWeight: '900', fontSize: 18, marginTop: 18, marginBottom: 10 },
-  quick: { flexDirection: 'row', gap: 10 },
   quickCard: {
-    flex: 1,
     borderRadius: radii.lg,
     overflow: 'hidden',
     borderWidth: 1,

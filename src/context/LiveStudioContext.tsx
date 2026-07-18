@@ -6,23 +6,35 @@ import React, {
   useMemo,
   useState,
 } from 'react';
-import { GIFT_CATALOG } from '../data/gifts';
+import { GIFT_CATALOG, PHOTO_UNLOCK_MIN_COINS } from '../data/gifts';
 import { useApp } from '../context/AppContext';
 import {
   endLiveRoom,
   listenLiveRooms,
+  listenLockedPhotos,
   listenRoomComments,
   listenRoomGifts,
   pinAnnouncement,
   postRoomComment,
   publishLiveRoom,
   sendRoomGift,
+  addLockedPhoto,
+  unlockLivePhoto,
   updatePartySeats,
+  updateRoomTitle,
   type LiveComment,
   type LiveGiftEvent,
   type LiveRoom,
+  type LockedLivePhoto,
   type PartySeatPublic,
 } from '../services/liveRoomService';
+import {
+  createAdminSupportTicket,
+  listenRechargeBoard,
+  massTextAllActiveUsers,
+  reportRoomRecharge,
+  type RechargeUserRow,
+} from '../services/hostOutreachService';
 import { syncHostPresence } from '../services/realtimeService';
 import { publishHostPresence } from '../services/callBridge';
 import { notify } from '../utils/notify';
@@ -43,6 +55,9 @@ type LiveStudioValue = {
   comments: LiveComment[];
   gifts: LiveGiftEvent[];
   giftOverlay: LiveGiftEvent | null;
+  lockedPhotos: LockedLivePhoto[];
+  rechargeTicker: { userName: string; coins: number; userId?: string } | null;
+  rechargeUsers: RechargeUserRow[];
   goLiveDraft: GoLiveDraft;
   setGoLiveDraft: (patch: Partial<GoLiveDraft>) => void;
   startSoloLive: () => Promise<LiveRoom>;
@@ -51,10 +66,17 @@ type LiveStudioValue = {
   openRoom: (roomId: string) => void;
   closeRoomView: () => void;
   sendComment: (text: string) => Promise<void>;
+  sendImageComment: (imageUrl: string, caption?: string) => Promise<void>;
   sendGift: (giftId: string) => Promise<void>;
   likeRoom: () => void;
   setAnnouncement: (text: string) => Promise<void>;
+  renameRoom: (title: string) => Promise<void>;
   updateSeats: (seats: PartySeatPublic[]) => Promise<void>;
+  massTextAllActive: (text: string) => Promise<number>;
+  contactAdminSupport: (text: string) => Promise<void>;
+  addGiftLockedPhoto: (url: string, caption?: string, unlockCoins?: number) => Promise<void>;
+  unlockPhotoWithGift: (photoId: string) => Promise<void>;
+  simulateViewerRecharge: () => Promise<void>;
   muteUser: (userId: string) => void;
   kickUser: (userId: string) => void;
   blockUserInRoom: (userId: string) => void;
@@ -88,6 +110,13 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
   const [comments, setComments] = useState<LiveComment[]>([]);
   const [gifts, setGifts] = useState<LiveGiftEvent[]>([]);
   const [giftOverlay, setGiftOverlay] = useState<LiveGiftEvent | null>(null);
+  const [lockedPhotos, setLockedPhotos] = useState<LockedLivePhoto[]>([]);
+  const [rechargeTicker, setRechargeTicker] = useState<{
+    userName: string;
+    coins: number;
+    userId?: string;
+  } | null>(null);
+  const [rechargeUsers, setRechargeUsers] = useState<RechargeUserRow[]>([]);
   const [mutedUserIds, setMutedUserIds] = useState<string[]>([]);
   const [blockedInRoom, setBlockedInRoom] = useState<string[]>([]);
   const [liveSeconds, setLiveSeconds] = useState(0);
@@ -107,10 +136,13 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
 
   useEffect(() => listenLiveRooms(setLiveRooms), []);
 
+  useEffect(() => listenRechargeBoard((users) => setRechargeUsers(users)), []);
+
   useEffect(() => {
     if (!activeRoomId) {
       setComments([]);
       setGifts([]);
+      setLockedPhotos([]);
       return;
     }
     const u1 = listenRoomComments(activeRoomId, setComments);
@@ -121,10 +153,55 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
         setTimeout(() => setGiftOverlay(null), 2800);
       }
     });
+    const u3 = listenLockedPhotos(activeRoomId, setLockedPhotos);
     return () => {
       u1();
       u2();
+      u3();
     };
+  }, [activeRoomId]);
+
+  useEffect(() => {
+    let unsub: (() => void) | undefined;
+    void import('../services/realtimeWs').then(({ subscribeRealtime }) => {
+      unsub = subscribeRealtime((event) => {
+        if (event.type !== 'recharge:updated') return;
+        const p = event.payload as {
+          users?: RechargeUserRow[];
+          event?: {
+            userId?: string;
+            userName?: string;
+            coins?: number;
+            totalCoins?: number;
+            roomId?: string;
+          };
+        };
+        if (p?.users) setRechargeUsers(p.users);
+        const ev = p?.event;
+        if (!ev?.coins) return;
+        setRechargeTicker({
+          userId: ev.userId,
+          userName: ev.userName || 'Viewer',
+          coins: Number(ev.coins) || 0,
+        });
+        setTimeout(() => setRechargeTicker(null), 3200);
+        notify(
+          'User recharge',
+          `ID ${ev.userId} · +${ev.coins} (total ${ev.totalCoins || ev.coins})`,
+        );
+        if (activeRoomId && (!ev.roomId || ev.roomId === activeRoomId)) {
+          void postRoomComment(activeRoomId, {
+            userId: ev.userId || 'viewer',
+            userName: ev.userName || 'Viewer',
+            text: `ID ${ev.userId} · +${ev.coins} coins (total ${ev.totalCoins || ev.coins}) 💎`,
+            createdAt: Date.now(),
+            kind: 'recharge',
+            rechargeCoins: Number(ev.coins) || 0,
+          });
+        }
+      });
+    });
+    return () => unsub?.();
   }, [activeRoomId]);
 
   useEffect(() => {
@@ -161,6 +238,10 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
     await publishLiveRoom(room);
     setMyLiveRoom(room);
     setActiveRoomId(room.id);
+    setLiveRooms((list) => {
+      const rest = list.filter((r) => r.id !== room.id && r.hostId !== user.id);
+      return [room, ...rest];
+    });
     setHostOnline(true, { silent: true });
     await syncHostPresence(user.id, {
       isOnline: true,
@@ -216,7 +297,7 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
       giftCoins: 0,
       isLive: true,
       mode: 'party',
-      announcement: 'Party room open — request a seat!',
+      announcement: 'Party room open — chat with host & friends ✨',
       level: user.level,
       badge: 'Party Host',
       startedAt: Date.now(),
@@ -225,6 +306,10 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
     await publishLiveRoom(room);
     setMyLiveRoom(room);
     setActiveRoomId(room.id);
+    setLiveRooms((list) => {
+      const rest = list.filter((r) => r.id !== room.id && r.hostId !== user.id);
+      return [room, ...rest];
+    });
     setHostOnline(true, { silent: true });
     await syncHostPresence(user.id, {
       isOnline: true,
@@ -243,7 +328,14 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
       isLive: true,
       isOnCall: false,
     });
-    notify('Party LIVE', 'Multi-host party room is live.');
+    await postRoomComment(room.id, {
+      userId: 'system',
+      userName: 'System',
+      text: `${user.name} opened the party room`,
+      createdAt: Date.now(),
+      kind: 'system',
+    });
+    notify('Party LIVE', 'Chat section is ready for room · user · mass text');
     return room;
   }, [goLiveDraft, setHostOnline, user]);
 
@@ -290,6 +382,25 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
     [activeRoomId, mutedUserIds, user.id, user.name],
   );
 
+  const sendImageComment = useCallback(
+    async (imageUrl: string, caption = '') => {
+      if (!activeRoomId || !imageUrl) return;
+      if (mutedUserIds.includes(user.id)) {
+        notify('Muted', 'You cannot comment right now.');
+        return;
+      }
+      await postRoomComment(activeRoomId, {
+        userId: user.id,
+        userName: user.name,
+        text: caption.trim() || '📷 Photo',
+        imageUrl,
+        createdAt: Date.now(),
+        kind: 'image',
+      });
+    },
+    [activeRoomId, mutedUserIds, user.id, user.name],
+  );
+
   const sendGift = useCallback(
     async (giftId: string) => {
       if (!activeRoomId) return;
@@ -320,6 +431,18 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
       if (myLiveRoom && myLiveRoom.id === activeRoomId) {
         setMyLiveRoom((r) => (r ? { ...r, giftCoins: r.giftCoins + gift.coins } : r));
       }
+      // Unlock locked photos when gift meets threshold
+      if (gift.unlocksPhotos || gift.coins >= PHOTO_UNLOCK_MIN_COINS) {
+        const locked = lockedPhotos.filter((p) => !p.unlockedBy?.[user.id]);
+        for (const photo of locked) {
+          if (gift.coins >= (photo.unlockCoins || PHOTO_UNLOCK_MIN_COINS)) {
+            await unlockLivePhoto(activeRoomId, photo.id, user.id);
+          }
+        }
+        if (locked.length) {
+          notify('Photo unlocked', 'Gift opened locked images in this room');
+        }
+      }
       void import('../services/notificationInboxService').then(({ pushHostNotification }) =>
         pushHostNotification(myLiveRoom?.hostId || user.id, {
           type: 'gift',
@@ -331,7 +454,7 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
         notify('Combo!', `${gift.name} x${combo} · ${total} coins`);
       }
     },
-    [activeRoomId, gifts, myLiveRoom, user],
+    [activeRoomId, gifts, lockedPhotos, myLiveRoom, user],
   );
 
   const likeRoom = useCallback(() => {
@@ -353,6 +476,21 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
     [myLiveRoom],
   );
 
+  const renameRoom = useCallback(
+    async (title: string) => {
+      if (!myLiveRoom) return;
+      const next = title.trim().slice(0, 48);
+      if (!next) return;
+      await updateRoomTitle(myLiveRoom.id, next);
+      setMyLiveRoom((r) => (r ? { ...r, title: next } : r));
+      setLiveRooms((list) =>
+        list.map((r) => (r.id === myLiveRoom.id ? { ...r, title: next } : r)),
+      );
+      notify('Room renamed', next);
+    },
+    [myLiveRoom],
+  );
+
   const updateSeats = useCallback(
     async (seats: PartySeatPublic[]) => {
       if (!myLiveRoom) return;
@@ -361,6 +499,71 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
     },
     [myLiveRoom],
   );
+
+  const massTextAllActive = useCallback(
+    async (text: string) => {
+      const sent = await massTextAllActiveUsers({
+        hostId: user.id,
+        hostName: user.name,
+        text,
+      });
+      notify('Mass text sent', `Delivered to ${sent} active users`);
+      return sent;
+    },
+    [user.id, user.name],
+  );
+
+  const contactAdminSupport = useCallback(
+    async (text: string) => {
+      const ticket = await createAdminSupportTicket({
+        hostId: user.id,
+        hostName: user.name,
+        text,
+      });
+      notify('Admin support', `Ticket ${ticket.id} created`);
+    },
+    [user.id, user.name],
+  );
+
+  const addGiftLockedPhoto = useCallback(
+    async (url: string, caption = '', unlockCoins = PHOTO_UNLOCK_MIN_COINS) => {
+      if (!myLiveRoom) {
+        notify('Go live first', 'Start a room to add locked photos');
+        return;
+      }
+      await addLockedPhoto(myLiveRoom.id, {
+        url,
+        caption: caption || 'Exclusive photo',
+        unlockCoins,
+        createdAt: Date.now(),
+      });
+      notify('Locked photo added', `Unlocks with gift ≥ ${unlockCoins} coins`);
+    },
+    [myLiveRoom],
+  );
+
+  const unlockPhotoWithGift = useCallback(
+    async (photoId: string) => {
+      if (!activeRoomId) return;
+      await unlockLivePhoto(activeRoomId, photoId, user.id);
+      notify('Unlocked', 'Photo is open for you');
+    },
+    [activeRoomId, user.id],
+  );
+
+  const simulateViewerRecharge = useCallback(async () => {
+    if (!activeRoomId) return;
+    const coins = [100, 500, 1380, 5000, 13800][Math.floor(Math.random() * 5)];
+    const names = ['Aya', 'Noor', 'Omar', 'Sara', 'Leo', 'Mia'];
+    const userName = names[Math.floor(Math.random() * names.length)];
+    const userId = `u_${userName.toLowerCase()}_${Math.floor(Math.random() * 9000 + 1000)}`;
+    await reportRoomRecharge({
+      roomId: activeRoomId,
+      userId,
+      userName,
+      coins,
+    });
+  }, [activeRoomId]);
 
   const muteUser = useCallback((userId: string) => {
     setMutedUserIds((ids) => (ids.includes(userId) ? ids : [...ids, userId]));
@@ -389,6 +592,9 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
       comments,
       gifts,
       giftOverlay,
+      lockedPhotos,
+      rechargeTicker,
+      rechargeUsers,
       goLiveDraft,
       setGoLiveDraft,
       startSoloLive,
@@ -397,10 +603,17 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
       openRoom,
       closeRoomView,
       sendComment,
+      sendImageComment,
       sendGift,
       likeRoom,
       setAnnouncement,
+      renameRoom,
       updateSeats,
+      massTextAllActive,
+      contactAdminSupport,
+      addGiftLockedPhoto,
+      unlockPhotoWithGift,
+      simulateViewerRecharge,
       muteUser,
       kickUser,
       blockUserInRoom,
@@ -417,6 +630,9 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
       comments,
       gifts,
       giftOverlay,
+      lockedPhotos,
+      rechargeTicker,
+      rechargeUsers,
       goLiveDraft,
       setGoLiveDraft,
       startSoloLive,
@@ -425,10 +641,17 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
       openRoom,
       closeRoomView,
       sendComment,
+      sendImageComment,
       sendGift,
       likeRoom,
       setAnnouncement,
+      renameRoom,
       updateSeats,
+      massTextAllActive,
+      contactAdminSupport,
+      addGiftLockedPhoto,
+      unlockPhotoWithGift,
+      simulateViewerRecharge,
       muteUser,
       kickUser,
       blockUserInRoom,

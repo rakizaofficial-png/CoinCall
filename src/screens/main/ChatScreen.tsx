@@ -1,7 +1,9 @@
-import { ChevronLeft, Video } from 'lucide-react-native';
+import { ChevronLeft, Image as ImageIcon, Video } from 'lucide-react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { useEffect, useState } from 'react';
 import {
   FlatList,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -34,6 +36,7 @@ export function ChatScreen({ navigation, route }: Props) {
   const [text, setText] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sending, setSending] = useState(false);
+  const [preview, setPreview] = useState<string | null>(null);
 
   useEffect(() => {
     if (!host) return;
@@ -48,15 +51,16 @@ export function ChatScreen({ navigation, route }: Props) {
     );
   }
 
-  const send = async () => {
-    if (!text.trim() || sending) return;
+  const send = async (imageUrl?: string) => {
+    if ((!text.trim() && !imageUrl) || sending) return;
     setSending(true);
     try {
       await sendChatMessage({
         fromId: meId,
         toId: host.id,
-        text: text.trim(),
+        text: text.trim() || (imageUrl ? '📷 Photo' : ''),
         fromName: user.name,
+        imageUrl,
       });
       setText('');
     } catch (e) {
@@ -64,6 +68,20 @@ export function ChatScreen({ navigation, route }: Props) {
     } finally {
       setSending(false);
     }
+  };
+
+  const sendImage = async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      notify('Permission', 'Allow photos to send images');
+      return;
+    }
+    const res = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.7,
+    });
+    if (res.canceled || !res.assets?.[0]?.uri) return;
+    await send(res.assets[0].uri);
   };
 
   const onCall = () => {
@@ -107,7 +125,7 @@ export function ChatScreen({ navigation, route }: Props) {
         contentContainerStyle={{ padding: 16, paddingBottom: 20 }}
         ListEmptyComponent={
           <Text style={{ color: colors.textSecondary, textAlign: 'center', marginTop: 40 }}>
-            Say hi — messages sync in realtime.
+            Say hi — text & photos sync in realtime.
           </Text>
         }
         renderItem={({ item }) => {
@@ -123,7 +141,14 @@ export function ChatScreen({ navigation, route }: Props) {
                 },
               ]}
             >
-              <Text style={{ color: mine ? '#fff' : colors.text }}>{item.text}</Text>
+              {item.imageUrl ? (
+                <Pressable onPress={() => setPreview(item.imageUrl!)}>
+                  <Image source={{ uri: item.imageUrl }} style={styles.msgImage} />
+                </Pressable>
+              ) : null}
+              {item.text && item.text !== '📷 Photo' ? (
+                <Text style={{ color: mine ? '#fff' : colors.text }}>{item.text}</Text>
+              ) : null}
             </View>
           );
         }}
@@ -139,6 +164,12 @@ export function ChatScreen({ navigation, route }: Props) {
           },
         ]}
       >
+        <Pressable
+          onPress={() => void sendImage()}
+          style={[styles.imgBtn, { borderColor: colors.border }]}
+        >
+          <ImageIcon size={20} color={colors.primarySoft} />
+        </Pressable>
         <AppTextInput
           value={text}
           onChangeText={setText}
@@ -147,11 +178,17 @@ export function ChatScreen({ navigation, route }: Props) {
         />
         <PrimaryButton
           label={sending ? '…' : 'Send'}
-          onPress={send}
+          onPress={() => void send()}
           disabled={sending || !text.trim()}
           style={{ minWidth: 88 }}
         />
       </View>
+
+      {preview ? (
+        <Pressable style={styles.preview} onPress={() => setPreview(null)}>
+          <Image source={{ uri: preview }} style={styles.previewImg} />
+        </Pressable>
+      ) : null}
     </KeyboardAvoidingView>
   );
 }
@@ -182,7 +219,9 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     marginBottom: 8,
     borderWidth: StyleSheet.hairlineWidth,
+    gap: 6,
   },
+  msgImage: { width: 180, height: 140, borderRadius: 10 },
   composer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -191,4 +230,20 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
+  imgBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  preview: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.9)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 20,
+  },
+  previewImg: { width: '90%', height: '70%', resizeMode: 'contain', borderRadius: 12 },
 });

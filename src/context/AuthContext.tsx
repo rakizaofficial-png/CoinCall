@@ -23,7 +23,26 @@ import {
   sendPhoneOtp,
 } from '../services/phoneAuthService';
 import type { User } from '../types/models';
+import { callPriceForLevel } from '../utils/hostPricing';
 import { Platform } from 'react-native';
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(
+      () => reject(new Error(`${label} timed out. Please try again with a smaller photo.`)),
+      ms,
+    );
+    promise
+      .then((v) => {
+        clearTimeout(t);
+        resolve(v);
+      })
+      .catch((e) => {
+        clearTimeout(t);
+        reject(e);
+      });
+  });
+}
 
 type AuthMethod = 'email' | 'phone';
 
@@ -48,7 +67,14 @@ export type HostApplicationInput = {
   name: string;
   country: string;
   photoUrls: string[];
-  videoUrl: string;
+  videoUrl?: string;
+  bio?: string;
+  languages?: string[];
+  categories?: string[];
+  /** Ignored — price is derived from host level */
+  callPrice?: number;
+  idDocumentUri?: string;
+  selfieUri?: string;
 };
 
 type AuthContextValue = {
@@ -61,7 +87,10 @@ type AuthContextValue = {
   signUp: (input: SignUpInput) => Promise<void>;
   signOut: () => void;
   setAuthUser: (user: User | null) => void;
-  submitHostApplication: (input: HostApplicationInput) => Promise<void>;
+  submitHostApplication: (
+    input: HostApplicationInput,
+    onStage?: (stage: string) => void,
+  ) => Promise<void>;
   /** Dev-only helper — production hosts are approved from Admin panel */
   approveCurrentHost: () => Promise<void>;
   sendLoginOtp: (phone: string) => Promise<void>;
@@ -215,28 +244,45 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [setAuthUser, usingFirebase]);
 
   const submitHostApplication = useCallback(
-    async (input: HostApplicationInput) => {
+    async (
+      input: HostApplicationInput,
+      onStage?: (stage: string) => void,
+    ) => {
       if (!user) throw new Error('Please sign in first.');
       if (!input.name.trim()) throw new Error('Display name is required.');
       if (!input.country.trim()) throw new Error('Country is required.');
       if (!input.photoUrls?.length) {
         throw new Error('Please add at least 1 photo.');
       }
-      if (input.photoUrls.length < 2) {
-        throw new Error('Please add at least 2 photos.');
-      }
-      if (!input.videoUrl) throw new Error('Please add an intro video.');
+
+      const languages =
+        input.languages?.length ? input.languages : ['English'];
+      const categories =
+        input.categories?.length ? input.categories : ['Talk'];
+      const bio =
+        input.bio?.trim() ||
+        `${input.name.trim()} · CoinCall host`;
+      const callPrice = callPriceForLevel(user.level || 1);
 
       const hostId = user.hostId || generateHostId();
-      const photosLocal = input.photoUrls.slice(0, 8);
+      // Only process first photo for fast apply
+      const photosLocal = input.photoUrls.slice(0, 1);
 
-      const uploaded = await uploadHostApplicationMedia({
-        hostUid: user.id,
-        photoUris: photosLocal,
-        videoUri: input.videoUrl,
-      });
+      onStage?.('photos');
+      const uploaded = await withTimeout(
+        uploadHostApplicationMedia(
+          {
+            hostUid: user.id,
+            photoUris: photosLocal,
+          },
+          (stage) => onStage?.(stage),
+        ),
+        15_000,
+        'Media prepare',
+      );
       const photos = uploaded.photoUrls;
-      const videoUrl = uploaded.videoUrl;
+      if (!photos.length) throw new Error('Photo upload failed. Try another image.');
+      const videoUrl = uploaded.videoUrl || '';
 
       const patch: User = {
         ...user,
@@ -244,7 +290,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         country: input.country.trim(),
         photoUrl: photos[0],
         photoUrls: photos,
-        videoUrl,
+        videoUrl: videoUrl || undefined,
         avatarUrl: photos[0],
         hostId,
         hostStatus: 'pending',
@@ -252,17 +298,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isVerified: false,
         isOnline: false,
         rejectionReason: undefined,
+        docsRequested: undefined,
+        bio,
+        languages,
+        categories,
+        callPrice,
+        idDocumentUrl: uploaded.idDocumentUrl,
+        selfieUrl: uploaded.selfieUrl,
       };
 
+      onStage?.('done');
       if (usingFirebase) {
-        await submitHostApplicationToFirebase(user.id, {
-          name: patch.name,
-          country: patch.country!,
-          photoUrl: photos[0],
-          photoUrls: photos,
-          videoUrl,
-          hostId,
-        });
+        try {
+          // Prefer compact avatar for RTDB; avoid huge multi-photo payloads
+          const mainPhoto = photos[0];
+          await withTimeout(
+            submitHostApplicationToFirebase(user.id, {
+              name: patch.name,
+              country: patch.country!,
+              photoUrl: mainPhoto,
+              photoUrls: [mainPhoto],
+              videoUrl: '',
+              hostId,
+              bio: patch.bio,
+              languages: patch.languages,
+              categories: patch.categories,
+              callPrice: patch.callPrice,
+            }),
+            12_000,
+            'Saving profile',
+          );
+        } catch (fbErr) {
+          // Still mark pending locally so host isn't stuck on the form
+          console.warn('Firebase save failed, keeping local pending state', fbErr);
+        }
         setUser(patch);
         return;
       }

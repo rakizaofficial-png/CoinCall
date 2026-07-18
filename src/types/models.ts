@@ -1,7 +1,14 @@
 export type UserRole = 'user' | 'host' | 'admin';
 
 /** Host application gate — main app only when approved */
-export type HostStatus = 'none' | 'pending' | 'approved' | 'rejected';
+export type HostStatus =
+  | 'none'
+  | 'pending'
+  | 'under_review'
+  | 'approved'
+  | 'rejected'
+  | 'suspended'
+  | 'banned';
 
 export interface User {
   id: string;
@@ -27,6 +34,21 @@ export interface User {
   videoUrl?: string;
   applicationSubmittedAt?: number;
   rejectionReason?: string;
+  docsRequested?: string;
+  bio?: string;
+  languages?: string[];
+  categories?: string[];
+  callPrice?: number;
+  idDocumentUrl?: string;
+  selfieUrl?: string;
+  banned?: boolean;
+  suspended?: boolean;
+  callsEnabled?: boolean;
+  videoCallsEnabled?: boolean;
+  voiceCallsEnabled?: boolean;
+  giftsEnabled?: boolean;
+  withdrawalsAllowed?: boolean;
+  walletFrozen?: boolean;
 }
 
 export interface Host {

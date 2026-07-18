@@ -1,4 +1,4 @@
-import { Phone, Users, Zap } from 'lucide-react-native';
+import { Phone, Zap } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -11,8 +11,6 @@ export function Waiting1v1Panel({ navigation }: { navigation?: any }) {
     hostOnline,
     setHostOnline,
     hostPresenceStatus,
-    setWorkspaceMode,
-    enterPartyRoom,
     incomingBridgeCall,
     callsToday,
     myTodayMinutes,
@@ -77,26 +75,7 @@ export function Waiting1v1Panel({ navigation }: { navigation?: any }) {
       <View style={styles.quickRow}>
         <Pressable
           style={styles.quickCard}
-          onPress={() => {
-            enterPartyRoom();
-            setWorkspaceMode('party_room');
-            navigation?.navigate?.('Party');
-          }}
-        >
-          <LinearGradient
-            colors={[`${colors.primary}40`, colors.bgElevated]}
-            style={styles.quickGrad}
-          >
-            <Users size={22} color={colors.primary} />
-            <Text style={[styles.quickTitle, { color: colors.text }]}>Party Room</Text>
-            <Text style={[styles.quickSub, { color: colors.textSecondary }]}>
-              Multi-host seats
-            </Text>
-          </LinearGradient>
-        </Pressable>
-        <Pressable
-          style={styles.quickCard}
-          onPress={() => navigation?.navigate?.('GoLive', { mode: 'solo' })}
+          onPress={() => navigation?.navigate?.('GoLive')}
         >
           <LinearGradient
             colors={[`${colors.accent}38`, colors.bgElevated]}

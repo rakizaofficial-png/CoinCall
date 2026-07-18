@@ -1,3 +1,4 @@
+import { ResizeMode, Video } from 'expo-av';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   BadgeCheck,
@@ -37,13 +38,19 @@ export function ProfileScreen({ navigation }: { navigation: any }) {
   const { todayLiveGiftCoins, liveSeconds } = useLiveStudio();
   const { signOut } = useAuth();
 
-  const gallery =
+  const gallery = (
     user.photoUrls?.length
       ? user.photoUrls
-      : [user.avatarUrl, user.photoUrl || user.avatarUrl].filter(Boolean);
+      : [user.avatarUrl, user.photoUrl || user.avatarUrl].filter(Boolean)
+  ).filter((uri): uri is string => Boolean(uri));
 
-  const languages = ['English', 'Arabic', 'Urdu'];
-  const categories = ['Beauty', 'Chat', 'Lifestyle'];
+  const languages =
+    user.languages?.length ? user.languages : ['English', 'Arabic', 'Urdu'];
+  const categories =
+    user.categories?.length ? user.categories : ['Beauty', 'Chat', 'Lifestyle'];
+  const bioText =
+    user.bio?.trim() ||
+    `Professional live host · ${user.country || 'Worldwide'} · ID ${user.hostId || '—'}`;
 
   return (
     <Screen
@@ -79,10 +86,7 @@ export function ProfileScreen({ navigation }: { navigation: any }) {
             <Text style={styles.badgeText}>Rank #{myRank}</Text>
           </View>
         </View>
-        <Text style={[styles.bio, { color: colors.textSecondary }]}>
-          Professional live host · {user.country || 'Worldwide'} · ID{' '}
-          {user.hostId || '—'}
-        </Text>
+        <Text style={[styles.bio, { color: colors.textSecondary }]}>{bioText}</Text>
       </LinearGradient>
 
       <View style={styles.stats}>
@@ -101,20 +105,40 @@ export function ProfileScreen({ navigation }: { navigation: any }) {
 
       <Text style={[styles.section, { color: colors.text }]}>Gallery</Text>
       <View style={styles.gallery}>
-        {gallery.slice(0, 6).map((uri, i) => (
-          <Image key={`${uri}_${i}`} source={{ uri }} style={styles.gImg} />
-        ))}
+        {gallery.length === 0 ? (
+          <Text style={{ color: colors.textMuted, marginBottom: 8 }}>
+            No photos yet — add them when you apply or update your profile.
+          </Text>
+        ) : (
+          gallery.slice(0, 6).map((uri, i) => (
+            <Image
+              key={`${uri}_${i}`}
+              source={{ uri }}
+              style={styles.gImg}
+              resizeMode="cover"
+            />
+          ))
+        )}
       </View>
 
       {user.videoUrl ? (
         <>
           <Text style={[styles.section, { color: colors.text }]}>Intro video</Text>
-          <GlassCard>
-            <Text style={{ color: colors.textSecondary }}>Video linked</Text>
-            <Text style={{ color: colors.textMuted, fontSize: 12 }} numberOfLines={1}>
-              {user.videoUrl}
-            </Text>
-          </GlassCard>
+          <View
+            style={[
+              styles.videoWrap,
+              { backgroundColor: colors.bgCard, borderColor: colors.border },
+            ]}
+          >
+            <Video
+              source={{ uri: user.videoUrl }}
+              style={styles.video}
+              useNativeControls
+              resizeMode={ResizeMode.CONTAIN}
+              isLooping
+              shouldPlay={false}
+            />
+          </View>
         </>
       ) : null}
 
@@ -193,7 +217,13 @@ const styles = StyleSheet.create({
   },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 },
   name: { fontSize: 26, fontWeight: '900' },
-  badges: { flexDirection: 'row', gap: 8, marginTop: 10, flexWrap: 'wrap', justifyContent: 'center' },
+  badges: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 10,
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+  },
   badge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -215,6 +245,13 @@ const styles = StyleSheet.create({
   section: { fontWeight: '900', fontSize: 17, marginBottom: 10, marginTop: 8 },
   gallery: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
   gImg: { width: '31%', aspectRatio: 1, borderRadius: radii.md },
+  videoWrap: {
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  video: { width: '100%', height: 220, backgroundColor: '#000' },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
   chip: {
     flexDirection: 'row',

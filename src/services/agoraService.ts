@@ -3,17 +3,73 @@ import { Platform } from 'react-native';
 import { env } from '../config/env';
 
 export function isAgoraConfigured() {
-  // App ID comes from token API — only need API base
   return Boolean(env.apiBaseUrl);
+}
+
+/** Snapchat-style beauty presets — applied to the published video track */
+export type BeautyPreset = 'off' | 'natural' | 'glamour' | 'snap';
+
+export const BEAUTY_PRESETS: Record<
+  Exclude<BeautyPreset, 'off'>,
+  {
+    lighteningContrastLevel: 0 | 1 | 2;
+    lighteningLevel: number;
+    smoothnessLevel: number;
+    sharpnessLevel: number;
+    rednessLevel: number;
+  }
+> = {
+  // Soft daily look
+  natural: {
+    lighteningContrastLevel: 1,
+    lighteningLevel: 0.55,
+    smoothnessLevel: 0.55,
+    sharpnessLevel: 0.35,
+    rednessLevel: 0.12,
+  },
+  // Full glam — soft skin, bright, rosy
+  glamour: {
+    lighteningContrastLevel: 1,
+    lighteningLevel: 0.78,
+    smoothnessLevel: 0.88,
+    sharpnessLevel: 0.42,
+    rednessLevel: 0.28,
+  },
+  // Snapchat / live-app “world beauty”
+  snap: {
+    lighteningContrastLevel: 2,
+    lighteningLevel: 0.82,
+    smoothnessLevel: 0.92,
+    sharpnessLevel: 0.48,
+    rednessLevel: 0.32,
+  },
+};
+
+/** CSS for local PiP preview (little host window) */
+export function beautyCssFilter(preset: BeautyPreset): string {
+  if (preset === 'off') return 'none';
+  if (preset === 'natural') {
+    return 'brightness(1.08) contrast(1.04) saturate(1.12) blur(0.25px)';
+  }
+  if (preset === 'glamour') {
+    return 'brightness(1.14) contrast(1.06) saturate(1.22) blur(0.4px)';
+  }
+  // snap — strongest soft-glow
+  return 'brightness(1.18) contrast(1.08) saturate(1.28) blur(0.55px)';
 }
 
 type LiveSession = {
   client: IAgoraRTCClient;
   mic: IMicrophoneAudioTrack | null;
   cam: ICameraVideoTrack | null;
+  beautyProcessor: any | null;
+  beautyPreset: BeautyPreset;
 };
 
 let session: LiveSession | null = null;
+let beautyRegistered = false;
+let beautyExtension: any = null;
+let currentPreset: BeautyPreset = 'snap';
 
 function apiRoot() {
   const raw = (env.apiBaseUrl || 'https://coincall-api.onrender.com/api').replace(
@@ -57,6 +113,61 @@ function prepVideoEl(el: HTMLElement) {
   el.replaceChildren();
 }
 
+function applyLocalCssBeauty(preset: BeautyPreset) {
+  const el =
+    document.getElementById('agora-local') || document.getElementById('live-local');
+  if (!el || !('style' in el)) return;
+  const node = el as HTMLElement;
+  node.style.filter = beautyCssFilter(preset);
+  // Slight “little face” slim on self-view (Snapchat feel)
+  node.style.transform =
+    preset === 'off' ? 'scaleX(-1)' : 'scaleX(-1) scale(0.96)';
+  node.style.transformOrigin = 'center center';
+}
+
+async function ensureBeautyProcessor(AgoraRTC: any) {
+  try {
+    const BeautyExtension = (await import('agora-extension-beauty-effect')).default;
+    if (!beautyExtension) beautyExtension = new BeautyExtension();
+    if (!beautyRegistered) {
+      AgoraRTC.registerExtensions([beautyExtension]);
+      beautyRegistered = true;
+    }
+    return beautyExtension.createProcessor();
+  } catch (e) {
+    console.warn('Beauty extension unavailable', e);
+    return null;
+  }
+}
+
+async function pipeBeauty(
+  cam: ICameraVideoTrack,
+  processor: any,
+  preset: BeautyPreset,
+) {
+  if (!processor || !cam) return;
+  try {
+    cam.pipe(processor).pipe(cam.processorDestination);
+    if (preset === 'off') {
+      await processor.disable?.();
+      return;
+    }
+    const opts = BEAUTY_PRESETS[preset];
+    processor.setOptions(opts);
+    await processor.enable();
+  } catch (e) {
+    console.warn('Beauty pipe failed', e);
+  }
+}
+
+async function createMicAndCam(AgoraRTC: any, encoder: string, facingMode?: string) {
+  const videoConfig: any = { encoderConfig: encoder };
+  if (facingMode) videoConfig.facingMode = facingMode;
+  return AgoraRTC.createMicrophoneAndCameraTracks({}, videoConfig) as Promise<
+    [IMicrophoneAudioTrack, ICameraVideoTrack]
+  >;
+}
+
 /**
  * Web-only Agora join. Prefer passing token/appId from /calls/:id/token.
  */
@@ -67,6 +178,7 @@ export async function startAgoraCall(options: {
   uid?: number;
   token?: string;
   appId?: string;
+  beauty?: BeautyPreset;
 }) {
   if (Platform.OS !== 'web') {
     throw new Error('Phone video needs a Dev Build. Use web for live calls.');
@@ -112,20 +224,24 @@ export async function startAgoraCall(options: {
     tokenPayload.uid ?? options.uid ?? 0,
   );
 
-  // Catch peers who published before our listener
   for (const user of client.remoteUsers) {
     if (user.hasVideo) await playRemote(user, 'video');
     if (user.hasAudio) await playRemote(user, 'audio');
   }
 
-  const [mic, cam] = await AgoraRTC.createMicrophoneAndCameraTracks(
-    {},
-    { encoderConfig: '480p_1' },
-  );
-  cam.play(options.localVideoEl, { fit: 'cover' });
+  const [mic, cam] = await createMicAndCam(AgoraRTC, '720p_1', 'user');
+  const preset = options.beauty ?? currentPreset;
+  const beautyProcessor = await ensureBeautyProcessor(AgoraRTC);
+  if (beautyProcessor) {
+    await pipeBeauty(cam, beautyProcessor, preset);
+  }
+
+  cam.play(options.localVideoEl, { fit: 'cover', mirror: true });
+  applyLocalCssBeauty(preset);
   await client.publish([mic, cam]);
 
-  session = { client, mic, cam };
+  session = { client, mic, cam, beautyProcessor, beautyPreset: preset };
+  currentPreset = preset;
   return session;
 }
 
@@ -168,7 +284,7 @@ export async function startAgoraSilentMonitor(options: {
     adminUid,
   );
 
-  session = { client, mic: null, cam: null };
+  session = { client, mic: null, cam: null, beautyProcessor: null, beautyPreset: 'off' };
   return session;
 }
 
@@ -184,7 +300,6 @@ export async function setAgoraCameraOff(off: boolean) {
 
 export async function switchAgoraCamera() {
   if (!session?.cam) return;
-  // Agora web camera track supports setDevice / facing mode via recreate
   const devices = await (await import('agora-rtc-sdk-ng')).default.getCameras();
   if (devices.length < 2) return;
   const current = session.cam.getTrackLabel?.() || '';
@@ -194,23 +309,50 @@ export async function switchAgoraCamera() {
   }
 }
 
-export async function setAgoraBeauty(enabled: boolean) {
+/** Enable/disable Snapchat-style beauty on the live published track */
+export async function setAgoraBeauty(
+  enabledOrPreset: boolean | BeautyPreset,
+) {
+  const preset: BeautyPreset =
+    typeof enabledOrPreset === 'boolean'
+      ? enabledOrPreset
+        ? 'snap'
+        : 'off'
+      : enabledOrPreset;
+
+  currentPreset = preset;
+  applyLocalCssBeauty(preset);
+
   if (!session?.cam) return;
-  const el = document.getElementById('agora-local') || document.getElementById('live-local');
-  if (el && 'style' in el) {
-    (el as HTMLElement).style.filter = enabled
-      ? 'brightness(1.1) contrast(1.06) saturate(1.2) blur(0.35px)'
-      : 'none';
+  const processor = session.beautyProcessor;
+  if (!processor) {
+    // CSS-only fallback already applied
+    session.beautyPreset = preset;
+    return;
+  }
+
+  try {
+    if (preset === 'off') {
+      await processor.disable();
+    } else {
+      processor.setOptions(BEAUTY_PRESETS[preset]);
+      await processor.enable();
+    }
+    session.beautyPreset = preset;
+  } catch (e) {
+    console.warn('setAgoraBeauty failed', e);
   }
 }
 
-/**
- * Start a LIVE broadcast (host publishes camera+mic into live_{id} channel).
- */
+export function getAgoraBeautyPreset(): BeautyPreset {
+  return session?.beautyPreset ?? currentPreset;
+}
+
 export async function startAgoraLiveBroadcast(options: {
   channel: string;
   localVideoEl: HTMLElement;
   uid?: number;
+  beauty?: BeautyPreset;
 }) {
   if (Platform.OS !== 'web') {
     throw new Error('Live broadcast runs on the web host studio. Open coincall-host in Chrome.');
@@ -231,20 +373,25 @@ export async function startAgoraLiveBroadcast(options: {
     tokenPayload.uid ?? options.uid ?? 0,
   );
 
-  const [mic, cam] = await AgoraRTC.createMicrophoneAndCameraTracks(
-    {},
-    { encoderConfig: '720p_2', facingMode: 'user' },
-  );
-  cam.play(options.localVideoEl, { fit: 'cover' });
+  const [mic, cam] = await createMicAndCam(AgoraRTC, '720p_2', 'user');
+  const preset = options.beauty ?? currentPreset;
+  const beautyProcessor = await ensureBeautyProcessor(AgoraRTC);
+  if (beautyProcessor) {
+    await pipeBeauty(cam, beautyProcessor, preset);
+  }
+
+  cam.play(options.localVideoEl, { fit: 'cover', mirror: true });
+  applyLocalCssBeauty(preset);
   await client.publish([mic, cam]);
-  session = { client, mic, cam };
+  session = { client, mic, cam, beautyProcessor, beautyPreset: preset };
+  currentPreset = preset;
   return session;
 }
 
-/**
- * Camera-only preview before going live (getUserMedia, no channel yet).
- */
-export async function startCameraPreview(videoEl: HTMLVideoElement, facing: 'user' | 'environment' = 'user') {
+export async function startCameraPreview(
+  videoEl: HTMLVideoElement,
+  facing: 'user' | 'environment' = 'user',
+) {
   if (Platform.OS !== 'web') {
     throw new Error('Camera preview is available on web host studio.');
   }
@@ -260,6 +407,9 @@ export async function startCameraPreview(videoEl: HTMLVideoElement, facing: 'use
   videoEl.srcObject = stream;
   videoEl.muted = true;
   videoEl.playsInline = true;
+  videoEl.style.filter = beautyCssFilter(currentPreset);
+  videoEl.style.transform =
+    facing === 'user' ? 'scaleX(-1) scale(0.96)' : 'none';
   await videoEl.play();
   return stream;
 }
@@ -284,9 +434,17 @@ export async function flipPreviewCamera(
 
 export async function stopAgoraCall() {
   if (!session) return;
-  const { client, mic, cam } = session;
+  const { client, mic, cam, beautyProcessor } = session;
   session = null;
   try {
+    if (beautyProcessor) {
+      try {
+        await beautyProcessor.disable?.();
+        cam?.unpipe?.();
+      } catch {
+        /* ignore */
+      }
+    }
     if (mic) {
       mic.stop();
       mic.close();

@@ -50,7 +50,20 @@ export type LiveComment = {
   userName: string;
   text: string;
   createdAt: number;
-  kind: 'comment' | 'join' | 'leave' | 'follow' | 'system';
+  kind: 'comment' | 'join' | 'leave' | 'follow' | 'system' | 'recharge' | 'image';
+  imageUrl?: string;
+  /** Coins recharged when kind === 'recharge' */
+  rechargeCoins?: number;
+};
+
+export type LockedLivePhoto = {
+  id: string;
+  url: string;
+  caption: string;
+  /** Minimum gift coins required to unlock */
+  unlockCoins: number;
+  unlockedBy: Record<string, boolean>;
+  createdAt: number;
 };
 
 export type LiveGiftEvent = {
@@ -96,37 +109,53 @@ export async function endLiveRoom(roomId: string, hostId: string) {
 }
 
 export function listenLiveRooms(onRooms: (rooms: LiveRoom[]) => void): Unsubscribe {
-  if (!isFirebaseReady()) {
-    // Poll API fallback
-    let dead = false;
-    const tick = async () => {
-      try {
-        const res = await fetch(`${api()}/live/rooms`);
-        const data = (await res.json()) as { rooms?: LiveRoom[] };
-        if (!dead) onRooms((data.rooms || []).filter((r) => r.isLive));
-      } catch {
-        if (!dead) onRooms([]);
-      }
-    };
-    void tick();
-    const t = setInterval(() => void tick(), 4000);
-    return () => {
-      dead = true;
-      clearInterval(t);
-    };
-  }
-  return onValue(ref(getFirebaseDb(), 'liveRooms'), (snap) => {
-    if (!snap.exists()) {
-      onRooms([]);
-      return;
+  let dead = false;
+  let fromFb: LiveRoom[] = [];
+  let fromApi: LiveRoom[] = [];
+
+  const emit = () => {
+    if (dead) return;
+    const map = new Map<string, LiveRoom>();
+    for (const r of [...fromApi, ...fromFb]) {
+      if (!r?.id || !r.isLive) continue;
+      map.set(r.id, r);
     }
-    const val = snap.val() as Record<string, LiveRoom>;
-    onRooms(
-      Object.values(val)
-        .filter((r) => r.isLive)
-        .sort((a, b) => b.viewers - a.viewers),
-    );
-  });
+    onRooms([...map.values()].sort((a, b) => (b.viewers || 0) - (a.viewers || 0)));
+  };
+
+  const pollApi = async () => {
+    try {
+      const res = await fetch(`${api()}/live/rooms`);
+      const data = (await res.json()) as { rooms?: LiveRoom[] };
+      fromApi = (data.rooms || []).filter((r) => r.isLive);
+      emit();
+    } catch {
+      // keep last
+    }
+  };
+
+  void pollApi();
+  const pollTimer = setInterval(() => void pollApi(), 4000);
+
+  let unsubFb: Unsubscribe | undefined;
+  if (isFirebaseReady()) {
+    unsubFb = onValue(ref(getFirebaseDb(), 'liveRooms'), (snap) => {
+      if (!snap.exists()) {
+        fromFb = [];
+        emit();
+        return;
+      }
+      const val = snap.val() as Record<string, LiveRoom>;
+      fromFb = Object.values(val).filter((r) => r.isLive);
+      emit();
+    });
+  }
+
+  return () => {
+    dead = true;
+    clearInterval(pollTimer);
+    unsubFb?.();
+  };
 }
 
 export function listenRoomComments(
@@ -218,6 +247,78 @@ export async function updatePartySeats(roomId: string, seats: PartySeatPublic[])
 export async function pinAnnouncement(roomId: string, announcement: string) {
   if (!isFirebaseReady()) return;
   await update(ref(getFirebaseDb(), `liveRooms/${roomId}`), { announcement });
+}
+
+export async function updateRoomTitle(roomId: string, title: string) {
+  const next = title.trim().slice(0, 48);
+  if (!next) return;
+  if (isFirebaseReady()) {
+    await update(ref(getFirebaseDb(), `liveRooms/${roomId}`), { title: next });
+  }
+  await fetch(`${api()}/live/rooms/${encodeURIComponent(roomId)}/title`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: next }),
+  }).catch(() => undefined);
+}
+
+export async function announceRoomRecharge(
+  roomId: string,
+  input: { userId: string; userName: string; coins: number },
+) {
+  const { sendRealtime } = await import('./realtimeWs');
+  sendRealtime({
+    type: 'live:recharge',
+    payload: { roomId, ...input },
+  });
+}
+
+export function listenLockedPhotos(
+  roomId: string,
+  onPhotos: (items: LockedLivePhoto[]) => void,
+): Unsubscribe {
+  if (!isFirebaseReady()) {
+    onPhotos([]);
+    return () => undefined;
+  }
+  return onValue(ref(getFirebaseDb(), `liveRooms/${roomId}/lockedPhotos`), (snap) => {
+    if (!snap.exists()) {
+      onPhotos([]);
+      return;
+    }
+    const val = snap.val() as Record<string, Omit<LockedLivePhoto, 'id'>>;
+    onPhotos(
+      Object.entries(val)
+        .map(([id, row]) => ({ id, unlockedBy: row.unlockedBy || {}, ...row }))
+        .sort((a, b) => b.createdAt - a.createdAt),
+    );
+  });
+}
+
+export async function addLockedPhoto(
+  roomId: string,
+  photo: Omit<LockedLivePhoto, 'id' | 'unlockedBy'>,
+) {
+  if (!isFirebaseReady()) return null;
+  const r = push(ref(getFirebaseDb(), `liveRooms/${roomId}/lockedPhotos`));
+  const row: Omit<LockedLivePhoto, 'id'> = {
+    ...photo,
+    unlockedBy: {},
+  };
+  await set(r, row);
+  return r.key;
+}
+
+export async function unlockLivePhoto(
+  roomId: string,
+  photoId: string,
+  userId: string,
+) {
+  if (!isFirebaseReady()) return;
+  await update(
+    ref(getFirebaseDb(), `liveRooms/${roomId}/lockedPhotos/${photoId}/unlockedBy`),
+    { [userId]: true },
+  );
 }
 
 export async function removeLiveRoom(roomId: string) {

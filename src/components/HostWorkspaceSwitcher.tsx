@@ -7,23 +7,15 @@ import { useTheme } from '../theme/ThemeContext';
 
 const MODES: { key: HostWorkspaceMode; label: string }[] = [
   { key: 'waiting_1v1', label: '1v1 Wait' },
-  { key: 'party_room', label: 'Party Room' },
   { key: 'solo_calling', label: 'On Call' },
 ];
 
 export function HostWorkspaceSwitcher() {
   const { colors } = useTheme();
-  const {
-    workspaceMode,
-    setWorkspaceMode,
-    enterPartyRoom,
-    hostPresenceStatus,
-    call,
-  } = useApp();
+  const { workspaceMode, setWorkspaceMode, hostPresenceStatus, call } = useApp();
 
   const onSelect = (mode: HostWorkspaceMode) => {
     if (mode === 'solo_calling' && !call) return;
-    if (mode === 'party_room') enterPartyRoom();
     setWorkspaceMode(mode);
   };
 
