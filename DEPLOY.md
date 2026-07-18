@@ -1,52 +1,58 @@
-# Deploy CoinCall (GitHub + Render)
+# Deploy on Render (API + Host + Admin + Luma user)
 
-## What Render hosts
-| Service | URL after deploy | Purpose |
-|---------|------------------|---------|
-| `coincall-api` | `https://coincall-api.onrender.com` | Agora tokens + admin login |
-| `coincall-admin` | `https://coincall-admin.onrender.com` | Web admin panel |
+## Live URLs (after Blueprint deploy)
+| Service | URL | Role |
+|---------|-----|------|
+| `coincall-api` | https://coincall-api.onrender.com | Backend (tokens + call bridge) |
+| `coincall-host` | https://coincall-host.onrender.com | Host web app |
+| `coincall-admin` | https://coincall-admin.onrender.com | Admin panel |
+| `luma-user` | https://luma-user.onrender.com | Fan / user app |
 
-The Expo host mobile/web app runs locally / EAS. Point it at the Render API URL.
+## 1) Deploy CoinCall (API + Host + Admin)
+1. Open https://dashboard.render.com/blueprints/new
+2. Connect GitHub repo **CoinCall** (`rakizaofficial-png/CoinCall`)
+3. Confirm `render.yaml` → **Deploy Blueprint**
+4. Fill secrets when prompted:
 
-## 1) GitHub
-Already pushed if you used the agent push. Otherwise:
-```bash
-git push -u origin main
-```
-
-## 2) Render Blueprint
-1. Open https://dashboard.render.com
-2. **New** → **Blueprint**
-3. Connect the GitHub repo `CoinCall`
-4. Apply `render.yaml`
-5. Fill secret env vars when prompted
-
-### API (`coincall-api`) env
+### coincall-api
 ```
 AGORA_APP_ID=...
 AGORA_APP_CERTIFICATE=...
 ADMIN_API_KEY=coincall-admin
 ```
 
-### Admin (`coincall-admin`) env (build-time)
+### coincall-host (same public Firebase + Agora App ID as local `.env`)
 ```
-VITE_API_BASE_URL=https://coincall-api.onrender.com/api
+EXPO_PUBLIC_FIREBASE_API_KEY=...
+EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=...
+EXPO_PUBLIC_FIREBASE_PROJECT_ID=...
+EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET=...
+EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=...
+EXPO_PUBLIC_FIREBASE_APP_ID=...
+EXPO_PUBLIC_FIREBASE_DATABASE_URL=...
+EXPO_PUBLIC_AGORA_APP_ID=...
+EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY=...
+```
+`EXPO_PUBLIC_API_BASE_URL` is already set to `https://coincall-api.onrender.com/api`.
+
+### coincall-admin
+```
 VITE_ADMIN_KEY=coincall-admin
-VITE_FIREBASE_API_KEY=...
-VITE_FIREBASE_AUTH_DOMAIN=...
-VITE_FIREBASE_PROJECT_ID=...
-VITE_FIREBASE_STORAGE_BUCKET=...
-VITE_FIREBASE_MESSAGING_SENDER_ID=...
-VITE_FIREBASE_APP_ID=...
-VITE_FIREBASE_DATABASE_URL=...
+VITE_FIREBASE_*=...
 VITE_AGORA_APP_ID=...
 ```
+`VITE_API_BASE_URL` is already set.
 
-## 3) Host app `.env`
-```
-EXPO_PUBLIC_API_BASE_URL=https://coincall-api.onrender.com/api
-```
-(Keep the same Firebase + Agora App ID values.)
+## 2) Deploy Luma user app
+1. Blueprint → connect **luma-coincall-user**
+2. Deploy `render.yaml`
+3. `NEXT_PUBLIC_API_BASE_URL` points at the CoinCall API
 
-## Free plan note
-Render free web services sleep after idle. First request may take ~30s to wake.
+## 3) Test
+1. Open host URL → log in → **Go Online**
+2. Open Luma → **1v1** → call the live host
+3. Accept on host → video connects (Agora)
+
+## Notes
+- Free services sleep after idle (~30s cold start).
+- Never put `AGORA_APP_CERTIFICATE` in host/user/admin — API only.

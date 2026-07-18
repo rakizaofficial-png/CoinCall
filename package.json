@@ -35,6 +35,7 @@
     "android": "__UNSAFE_EXPO_HOME_DIRECTORY=$PWD/.expo-home expo start --android",
     "ios": "__UNSAFE_EXPO_HOME_DIRECTORY=$PWD/.expo-home expo start --ios",
     "web": "__UNSAFE_EXPO_HOME_DIRECTORY=$PWD/.expo-home expo start --web",
+    "export:web": "npx expo export --platform web",
     "server": "npm --prefix server run dev",
     "admin": "npm --prefix admin run dev"
   }
