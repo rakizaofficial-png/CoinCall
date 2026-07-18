@@ -10,7 +10,6 @@ import React, {
 import { COIN_PACKAGES, MOCK_HOSTS, MOCK_NEWS, MOCK_ROOMS } from '../data/mockData';
 import {
   type BridgeCall,
-  isCallBridgeConfigured,
   listenIncomingCalls,
   publishHostPresence,
 } from '../services/callBridge';
@@ -236,25 +235,32 @@ export function AppProvider({
     setHostOnlineState(v);
     setUser((u) => ({ ...u, isOnline: v }));
     void syncHostPresence(user.id, { isOnline: v });
-    if (isCallBridgeConfigured()) {
-      void publishHostPresence({
-        id: user.id,
-        name: user.name,
-        avatarUrl: user.avatarUrl,
-        country: user.country,
-        ratePerMinute: 80,
-        isOnline: v,
-        isLive: false,
-        isOnCall: Boolean(callRef.current?.status === 'active'),
-      }).catch(() => {
+    // Always try production bridge — never skip when online
+    void publishHostPresence({
+      id: user.id,
+      name: user.name,
+      avatarUrl: user.avatarUrl,
+      country: user.country,
+      ratePerMinute: 80,
+      isOnline: v,
+      isLive: false,
+      isOnCall: Boolean(callRef.current?.status === 'active'),
+    })
+      .then(() => {
         if (v && !opts?.silent) {
           notify(
-            'Bridge offline',
-            'Could not reach CoinCall API. Start server on :4000',
+            'Visible to Luma users',
+            'You are listed on the user app for 1v1 calls.',
           );
         }
+      })
+      .catch((err: unknown) => {
+        if (v && !opts?.silent) {
+          const msg =
+            err instanceof Error ? err.message : 'Could not reach CoinCall API';
+          notify('Bridge offline', msg.slice(0, 120));
+        }
       });
-    }
     if (!opts?.silent) {
       notify(
         v ? 'You are Online' : 'You are Offline',
@@ -267,7 +273,7 @@ export function AppProvider({
 
   // Heartbeat + SSE so Luma users can find & ring this host
   useEffect(() => {
-    if (!hostOnline || !isCallBridgeConfigured()) return;
+    if (!hostOnline) return;
 
     const beat = () => {
       void publishHostPresence({
@@ -277,11 +283,14 @@ export function AppProvider({
         country: user.country,
         ratePerMinute: 80,
         isOnline: true,
-        isOnCall: Boolean(callRef.current?.status === 'active') || Boolean(incomingBridgeCall),
+        isOnCall:
+          Boolean(callRef.current?.status === 'active') ||
+          Boolean(incomingBridgeCall),
       }).catch(() => undefined);
     };
     beat();
-    const timer = setInterval(beat, 15_000);
+    // Frequent heartbeat so free-tier API wake + TTL stay fresh
+    const timer = setInterval(beat, 8_000);
     const stopListen = listenIncomingCalls(user.id, (bridgeCall) => {
       if (bridgeCall.status !== 'ringing') return;
       setIncomingBridgeCall(bridgeCall);

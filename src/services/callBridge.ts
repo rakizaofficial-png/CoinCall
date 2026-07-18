@@ -1,7 +1,5 @@
 import { env } from '../config/env';
 
-const base = () => env.apiBaseUrl.replace(/\/$/, '');
-
 export type BridgeHost = {
   id: string;
   name: string;
@@ -27,8 +25,28 @@ export type BridgeCall = {
   userUidAgora: number;
 };
 
+/** Always resolve at call-time so web host never sticks to localhost */
+function apiBase() {
+  const raw = (env.apiBaseUrl || 'https://coincall-api.onrender.com/api').replace(
+    /\/$/,
+    '',
+  );
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    if (
+      (host.includes('onrender.com') || host.includes('coincall-host')) &&
+      raw.includes('localhost')
+    ) {
+      return 'https://coincall-api.onrender.com/api';
+    }
+  }
+  return raw || 'https://coincall-api.onrender.com/api';
+}
+
+const base = () => apiBase();
+
 export function isCallBridgeConfigured() {
-  return Boolean(env.apiBaseUrl);
+  return Boolean(apiBase());
 }
 
 export async function publishHostPresence(input: {
@@ -41,7 +59,6 @@ export async function publishHostPresence(input: {
   isLive?: boolean;
   isOnCall?: boolean;
 }) {
-  if (!isCallBridgeConfigured()) return null;
   const res = await fetch(`${base()}/hosts/presence`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -91,13 +108,12 @@ export async function fetchCallToken(callId: string, role: 'host' | 'user') {
 
 /**
  * SSE listener for incoming user calls on this host.
- * Falls back to polling if EventSource is unavailable.
  */
 export function listenIncomingCalls(
   hostId: string,
   onCall: (call: BridgeCall) => void,
 ) {
-  if (!isCallBridgeConfigured() || !hostId) return () => undefined;
+  if (!hostId) return () => undefined;
 
   let stopped = false;
   let es: EventSource | null = null;
@@ -105,7 +121,9 @@ export function listenIncomingCalls(
 
   const startSse = () => {
     try {
-      es = new EventSource(`${base()}/hosts/${encodeURIComponent(hostId)}/stream`);
+      es = new EventSource(
+        `${base()}/hosts/${encodeURIComponent(hostId)}/stream`,
+      );
       es.addEventListener('incoming_call', (ev) => {
         try {
           onCall(JSON.parse((ev as MessageEvent).data) as BridgeCall);
@@ -116,24 +134,17 @@ export function listenIncomingCalls(
       es.onerror = () => {
         es?.close();
         es = null;
-        if (!stopped) startPoll();
+        if (!stopped) {
+          setTimeout(() => {
+            if (!stopped) startSse();
+          }, 3000);
+        }
       };
     } catch {
-      startPoll();
-    }
-  };
-
-  const startPoll = () => {
-    if (pollTimer) return;
-    pollTimer = setInterval(async () => {
-      try {
-        // Re-open SSE periodically; presence endpoint already keeps host listed.
-        // Lightweight: hit health is enough heartbeat companion.
-        await fetch(`${base().replace(/\/api$/, '')}/api/health`);
-      } catch {
-        // offline
+      if (!pollTimer) {
+        pollTimer = setInterval(() => undefined, 20000);
       }
-    }, 20000);
+    }
   };
 
   startSse();

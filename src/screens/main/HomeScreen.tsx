@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useEffect, useState } from 'react';
 import {
   FlatList,
   Image,
@@ -9,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { env } from '../../config/env';
 import { useApp } from '../../context/AppContext';
 import type { Host } from '../../types/models';
 import { colors } from '../../theme/colors';
@@ -45,6 +47,35 @@ export function HomeScreen({ navigation }: { navigation: any }) {
     workingHosts,
     liveHosts,
   } = useApp();
+  const [bridgeOk, setBridgeOk] = useState<boolean | null>(null);
+  const [listed, setListed] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const base = env.apiBaseUrl.replace(/\/$/, '') || 'https://coincall-api.onrender.com/api';
+        const health = await fetch(`${base.replace(/\/api$/, '')}/api/health`);
+        const hostsRes = await fetch(`${base}/hosts`);
+        const hostsJson = (await hostsRes.json()) as {
+          hosts?: { id: string }[];
+        };
+        if (cancelled) return;
+        const hosts = hostsJson.hosts || [];
+        setListed(hosts.length);
+        const meVisible = hosts.some((h) => h.id === user.id);
+        setBridgeOk(health.ok && (!hostOnline || meVisible));
+      } catch {
+        if (!cancelled) setBridgeOk(false);
+      }
+    };
+    void check();
+    const t = setInterval(() => void check(), 8000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [hostOnline, user.id]);
 
   const top3 = competition.slice(0, 3);
   const rival = competition.find((c) => !c.isMe && c.rank < myRank) ?? competition[0];
@@ -73,6 +104,25 @@ export function HomeScreen({ navigation }: { navigation: any }) {
           />
           <Text style={styles.onlineText}>{hostOnline ? 'Online' : 'Offline'}</Text>
         </Pressable>
+      </View>
+
+      <View
+        style={[
+          styles.bridgeBanner,
+          bridgeOk === false
+            ? styles.bridgeBad
+            : bridgeOk
+              ? styles.bridgeGood
+              : styles.bridgeWait,
+        ]}
+      >
+        <Text style={styles.bridgeText}>
+          {bridgeOk === false
+            ? 'Not visible on Luma — tap Online again'
+            : bridgeOk
+              ? `Visible on Luma · ${listed} host(s) listed`
+              : 'Connecting to Luma bridge…'}
+        </Text>
       </View>
 
       <LinearGradient colors={[colors.primary, colors.primarySoft]} style={styles.raceCard}>
@@ -236,6 +286,26 @@ const styles = StyleSheet.create({
   onlineOff: { backgroundColor: colors.bgCard, borderColor: colors.border },
   dot: { width: 8, height: 8, borderRadius: 4 },
   onlineText: { color: colors.text, fontWeight: '700', fontSize: 13 },
+  bridgeBanner: {
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 12,
+    borderWidth: 1,
+  },
+  bridgeGood: {
+    backgroundColor: 'rgba(61,214,140,0.12)',
+    borderColor: 'rgba(61,214,140,0.4)',
+  },
+  bridgeBad: {
+    backgroundColor: 'rgba(255,80,80,0.12)',
+    borderColor: 'rgba(255,80,80,0.35)',
+  },
+  bridgeWait: {
+    backgroundColor: colors.bgCard,
+    borderColor: colors.border,
+  },
+  bridgeText: { color: colors.text, fontWeight: '700', fontSize: 12 },
   raceCard: {
     borderRadius: 22,
     padding: 16,

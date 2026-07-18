@@ -2,12 +2,33 @@
  * Public client config only.
  * Secrets (Agora certificate, Stripe secret, DB URL) stay on the backend.
  */
+const PRODUCTION_API = 'https://coincall-api.onrender.com/api';
+
 const read = (key: string, fallback = '') =>
   (process.env[key] ?? fallback).trim();
 
+function resolveApiBaseUrl() {
+  const fromEnv = read('EXPO_PUBLIC_API_BASE_URL').replace(/\/$/, '');
+  // Hosted web must never use localhost — Luma users hit the public API
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    if (
+      host.includes('onrender.com') ||
+      host.includes('coincall-host') ||
+      (!host.includes('localhost') && !host.includes('127.0.0.1'))
+    ) {
+      // Prefer env if it already points at Render; otherwise force production API
+      if (fromEnv.includes('onrender.com')) return fromEnv;
+      return PRODUCTION_API;
+    }
+  }
+  if (fromEnv) return fromEnv;
+  return PRODUCTION_API;
+}
+
 export const env = {
   appEnv: read('EXPO_PUBLIC_APP_ENV', 'development'),
-  apiBaseUrl: read('EXPO_PUBLIC_API_BASE_URL'),
+  apiBaseUrl: resolveApiBaseUrl(),
 
   firebase: {
     apiKey: read('EXPO_PUBLIC_FIREBASE_API_KEY'),

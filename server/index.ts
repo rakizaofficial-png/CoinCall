@@ -27,7 +27,7 @@ const APP_ID = process.env.AGORA_APP_ID || '';
 const APP_CERT = process.env.AGORA_APP_CERTIFICATE || '';
 const PORT = Number(process.env.PORT || 4000);
 const ADMIN_KEY = process.env.ADMIN_API_KEY || 'coincall-admin';
-const HOST_TTL_MS = 45_000;
+const HOST_TTL_MS = 90_000;
 
 type HostPresence = {
   id: string;
