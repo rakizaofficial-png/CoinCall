@@ -160,10 +160,23 @@ app.post('/api/hosts/presence', (req, res) => {
     return;
   }
 
+  // blob: / data: avatars only work inside the host browser — drop them for Luma
+  let safeAvatar = avatarUrl ? String(avatarUrl) : undefined;
+  if (
+    safeAvatar &&
+    (safeAvatar.startsWith('blob:') ||
+      safeAvatar.startsWith('data:') ||
+      safeAvatar.length > 500)
+  ) {
+    safeAvatar = undefined;
+  }
+
   const record: HostPresence = {
     id: String(id),
     name: String(name),
-    avatarUrl: avatarUrl ? String(avatarUrl) : undefined,
+    avatarUrl:
+      safeAvatar ||
+      `https://i.pravatar.cc/150?u=${encodeURIComponent(String(id))}`,
     country: country ? String(country) : undefined,
     ratePerMinute: Number(ratePerMinute) || 80,
     isOnline: Boolean(isOnline),
