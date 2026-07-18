@@ -1,16 +1,7 @@
 /**
- * ============================================================================
- * COINCALL HOST CLIENT — PRODUCTION ENV
- * ============================================================================
- *
- * STEP-BY-STEP KEY SETUP
- * 1) API: EXPO_PUBLIC_API_BASE_URL=https://YOUR-API/api
- * 2) Agora: EXPO_PUBLIC_AGORA_APP_ID= (certificate on API only)
- * 3) Firebase: EXPO_PUBLIC_FIREBASE_* from Firebase Console Web app
- * 4) Payouts: merchant secrets live on API (EASYPAISA_*, JAZZCASH_*) — NOT here
- * ============================================================================
+ * Public client config only.
+ * Secrets (Agora certificate, Stripe secret, DB URL) stay on the backend.
  */
-
 const PRODUCTION_API = 'https://coincall-api.onrender.com/api';
 
 const read = (key: string, fallback = '') =>
@@ -18,6 +9,7 @@ const read = (key: string, fallback = '') =>
 
 function resolveApiBaseUrl() {
   const fromEnv = read('EXPO_PUBLIC_API_BASE_URL').replace(/\/$/, '');
+  // Hosted web must never use localhost — Luma users hit the public API
   if (typeof window !== 'undefined') {
     const host = window.location.hostname;
     if (
@@ -25,6 +17,7 @@ function resolveApiBaseUrl() {
       host.includes('coincall-host') ||
       (!host.includes('localhost') && !host.includes('127.0.0.1'))
     ) {
+      // Prefer env if it already points at Render; otherwise force production API
       if (fromEnv.includes('onrender.com')) return fromEnv;
       return PRODUCTION_API;
     }
@@ -34,7 +27,7 @@ function resolveApiBaseUrl() {
 }
 
 export const env = {
-  appEnv: read('EXPO_PUBLIC_APP_ENV', 'production'),
+  appEnv: read('EXPO_PUBLIC_APP_ENV', 'development'),
   apiBaseUrl: resolveApiBaseUrl(),
 
   firebase: {
@@ -55,27 +48,19 @@ export const env = {
   stripe: {
     publishableKey: read('EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY'),
   },
-
-  /** Host auth token storage key — JWT from /api/auth/login */
-  authTokenKey: 'coincall_host_token',
 } as const;
 
 export function getMissingProductionKeys(): string[] {
   const missing: string[] = [];
   if (!env.apiBaseUrl) missing.push('EXPO_PUBLIC_API_BASE_URL');
+  if (!env.firebase.apiKey) missing.push('EXPO_PUBLIC_FIREBASE_API_KEY');
+  if (!env.firebase.projectId) missing.push('EXPO_PUBLIC_FIREBASE_PROJECT_ID');
+  if (!env.firebase.appId) missing.push('EXPO_PUBLIC_FIREBASE_APP_ID');
   if (!env.agora.appId) missing.push('EXPO_PUBLIC_AGORA_APP_ID');
+  if (!env.stripe.publishableKey) missing.push('EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY');
   return missing;
 }
 
 export function isConfigured() {
   return getMissingProductionKeys().length === 0;
-}
-
-export function getHostAuthToken(): string {
-  if (typeof localStorage === 'undefined') return '';
-  return (
-    localStorage.getItem(env.authTokenKey) ||
-    localStorage.getItem('coincall_user_token') ||
-    ''
-  );
 }

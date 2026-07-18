@@ -884,52 +884,53 @@ export function AppProvider({
     return () => clearInterval(interval);
   }, [myRoomId, myRoom?.isLive]);
 
-  const requestPayout = useCallback(() => {
+  const requestPayout = useCallback(async () => {
     const amount = user.coinBalance;
     if (amount < 100) {
       notify(
         'Withdraw',
-        'You need at least 100 coins to withdraw. Take more calls first 💕',
+        'You need at least 100 coins to withdraw. Take more calls first.',
       );
       return;
     }
-    // Production: open Earnings destination form — default EasyPaisa path
-    void (async () => {
-      const { requestHostPayout } = await import('../services/payouts');
-      const { getHostAuthToken } = await import('../config/env');
-      const token = getHostAuthToken() || user.id;
-      const result = await requestHostPayout(
-        {
-          method: 'easypaisa',
-          amountCoins: amount,
-          destination: {
-            accountName: user.name,
-            accountNumber: user.phone || user.hostId || user.id,
-          },
-        },
-        token,
-      );
+    try {
+      const { requestHostWithdrawal } = await import('../services/withdrawalService');
+      const result = await requestHostWithdrawal({
+        hostId: user.id,
+        amountCoins: amount,
+        gateway: 'easypaisa',
+        accountName: user.name,
+        accountNumber: user.phone || user.hostId || user.id,
+      });
       if (!result.ok) {
-        notify('Cash-Out failed', result.error);
+        notify('Cash-Out failed', result.error || 'Gateway rejected payout');
         return;
       }
-      setUser((u) => ({ ...u, coinBalance: 0 }));
+      setUser((u) => ({
+        ...u,
+        coinBalance: result.wallet?.coinBalance ?? 0,
+      }));
       setHostEarnings({ call: 0, gift: 0, task: 0, invite: 0, managed: 0 });
       setTransactions((txs) => [
         {
           id: `tx_${Date.now()}`,
           type: 'payout',
           amount,
-          label: `Cash-Out ${result.payoutId} · EasyPaisa`,
+          label: `Cash-Out ${result.withdrawal?.id || ''} · EasyPaisa`,
           timestamp: Date.now(),
         },
         ...txs,
       ]);
       notify(
-        'Cash-Out requested 💸',
-        `${amount} coins queued (${result.status}). EasyPaisa / JazzCash settlement via API.`,
+        'Cash-Out submitted',
+        `${amount} coins → EasyPaisa (status: ${result.withdrawal?.status || 'pending'})`,
       );
-    })();
+    } catch (e: unknown) {
+      notify(
+        'Cash-Out error',
+        e instanceof Error ? e.message : 'Network error',
+      );
+    }
   }, [user.coinBalance, user.hostId, user.id, user.name, user.phone]);
 
   const refreshList = useCallback(() => {
