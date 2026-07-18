@@ -669,8 +669,8 @@ export function AppProvider({
       ...txs,
     ]);
     notify(
-      'Withdraw requested 💖',
-      `${amount} coins submitted. We'll process your payout soon.`,
+      'Cash-Out requested 💸',
+      `${amount} coins → EasyPaisa / JazzCash / bank. We'll process your payout soon.`,
     );
   }, [user.coinBalance]);
 

@@ -14,6 +14,7 @@ import { env } from '../../config/env';
 import { useApp } from '../../context/AppContext';
 import type { Host } from '../../types/models';
 import { colors } from '../../theme/colors';
+import { notify } from '../../utils/notify';
 
 function formatClock(totalSeconds: number) {
   const m = Math.floor(totalSeconds / 60)
@@ -29,6 +30,12 @@ function statusLabel(h: Host) {
   if (h.isOnline) return 'Waiting for calls';
   return 'Offline';
 }
+
+const STORY_PREVIEWS = [
+  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&h=320&fit=crop',
+  'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=200&h=320&fit=crop',
+  'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=200&h=320&fit=crop',
+];
 
 export function HomeScreen({ navigation }: { navigation: any }) {
   const insets = useSafeAreaInsets();
@@ -46,15 +53,29 @@ export function HomeScreen({ navigation }: { navigation: any }) {
     myLongestCallSeconds,
     workingHosts,
     liveHosts,
+    hostEarnings,
+    requestPayout,
   } = useApp();
   const [bridgeOk, setBridgeOk] = useState<boolean | null>(null);
   const [listed, setListed] = useState(0);
+  const [pkMatching, setPkMatching] = useState(false);
+  const [pkProgress, setPkProgress] = useState(0);
+
+  const todayEarn =
+    hostEarnings.call +
+    hostEarnings.gift +
+    hostEarnings.task +
+    hostEarnings.invite +
+    hostEarnings.managed;
+  const localCash = Math.round(todayEarn * 2.5);
 
   useEffect(() => {
     let cancelled = false;
     const check = async () => {
       try {
-        const base = env.apiBaseUrl.replace(/\/$/, '') || 'https://coincall-api.onrender.com/api';
+        const base =
+          env.apiBaseUrl.replace(/\/$/, '') ||
+          'https://coincall-api.onrender.com/api';
         const health = await fetch(`${base.replace(/\/api$/, '')}/api/health`);
         const hostsRes = await fetch(`${base}/hosts`);
         const hostsJson = (await hostsRes.json()) as {
@@ -77,9 +98,33 @@ export function HomeScreen({ navigation }: { navigation: any }) {
     };
   }, [hostOnline, user.id]);
 
+  useEffect(() => {
+    if (!pkMatching) return;
+    setPkProgress(0);
+    const t = setInterval(() => {
+      setPkProgress((p) => {
+        if (p >= 100) {
+          clearInterval(t);
+          setPkMatching(false);
+          notify(
+            'PK Match found 🔥',
+            'Host competitor ready. Winner gets 30 min discovery boost.',
+          );
+          return 100;
+        }
+        return p + 8;
+      });
+    }, 280);
+    return () => clearInterval(t);
+  }, [pkMatching]);
+
   const top3 = competition.slice(0, 3);
-  const rival = competition.find((c) => !c.isMe && c.rank < myRank) ?? competition[0];
-  const beatTarget = Math.max(0, (rival?.todayMinutes ?? myTodayMinutes + 5) - myTodayMinutes + 1);
+  const rival =
+    competition.find((c) => !c.isMe && c.rank < myRank) ?? competition[0];
+  const beatTarget = Math.max(
+    0,
+    (rival?.todayMinutes ?? myTodayMinutes + 5) - myTodayMinutes + 1,
+  );
 
   const filters: { key: typeof homeFilter; label: string }[] = [
     { key: 'working', label: 'Working' },
@@ -88,23 +133,57 @@ export function HomeScreen({ navigation }: { navigation: any }) {
     { key: 'prime', label: 'VIP' },
   ];
 
-  return (
-    <View style={[styles.container, { paddingTop: insets.top + 8 }]}>
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.hello}>Hi {user.name.split(' ')[0]} 💕</Text>
-          <Text style={styles.title}>Host race</Text>
+  const ListHeader = (
+    <View>
+      {/* Blueprint: sticky earnings + EasyPaisa cash-out */}
+      <LinearGradient
+        colors={['#1a1020', '#2a1830']}
+        style={styles.earnHeader}
+      >
+        <View style={{ flex: 1 }}>
+          <Text style={styles.earnLabel}>Today earnings</Text>
+          <Text style={styles.earnGold}>Rs. {localCash.toLocaleString()}</Text>
+          <Text style={styles.earnCoins}>{todayEarn} coins · live ticker</Text>
         </View>
-        <Pressable
-          style={[styles.onlineBtn, hostOnline ? styles.onlineOn : styles.onlineOff]}
-          onPress={() => setHostOnline(!hostOnline)}
+        <Pressable style={styles.cashOutBtn} onPress={requestPayout}>
+          <Text style={styles.cashOutText}>💸 Cash-Out</Text>
+          <Text style={styles.cashOutSub}>EasyPaisa</Text>
+        </Pressable>
+      </LinearGradient>
+
+      {/* Blueprint: massive Go Live switcher */}
+      <Pressable
+        onPress={() => setHostOnline(!hostOnline)}
+        style={styles.statusWrap}
+      >
+        <LinearGradient
+          colors={
+            hostOnline
+              ? ['#1a3a28', '#0d2818']
+              : ['#4a1020', '#2a0810']
+          }
+          style={[
+            styles.statusOrb,
+            hostOnline ? styles.statusOrbOn : styles.statusOrbOff,
+          ]}
         >
           <View
-            style={[styles.dot, { backgroundColor: hostOnline ? colors.online : colors.textMuted }]}
-          />
-          <Text style={styles.onlineText}>{hostOnline ? 'Online' : 'Offline'}</Text>
-        </Pressable>
-      </View>
+            style={[
+              styles.statusRing,
+              {
+                borderColor: hostOnline ? colors.online : colors.danger,
+              },
+            ]}
+          >
+            <Text style={styles.statusTitle}>
+              {hostOnline ? 'Go Offline' : 'Go Live to Earn'}
+            </Text>
+            <Text style={styles.statusSub}>
+              {hostOnline ? 'Ruby offline' : 'Neon green · accepting calls'}
+            </Text>
+          </View>
+        </LinearGradient>
+      </Pressable>
 
       <View
         style={[
@@ -118,14 +197,98 @@ export function HomeScreen({ navigation }: { navigation: any }) {
       >
         <Text style={styles.bridgeText}>
           {bridgeOk === false
-            ? 'Not visible on Luma — tap Online again'
+            ? 'Not visible on Luma — tap Go Live again'
             : bridgeOk
               ? `Visible on Luma · ${listed} host(s) listed`
               : 'Connecting to Luma bridge…'}
         </Text>
       </View>
 
-      <LinearGradient colors={[colors.primary, colors.primarySoft]} style={styles.raceCard}>
+      {/* Blueprint: PK Battle Arena */}
+      <LinearGradient colors={['#2a1838', '#1a1028']} style={styles.pkCard}>
+        <Text style={styles.pkTitle}>🔥 EARN NOW: Host PK Battle Arena</Text>
+        <Text style={styles.pkSub}>
+          Idle? Challenge another host. Winner gets 30 min boost on Luma feed.
+        </Text>
+        <Pressable
+          style={styles.pkBtn}
+          onPress={() => {
+            if (!hostOnline) {
+              notify('Go Live first', 'Turn Online to enter PK Battle.');
+              return;
+            }
+            setPkMatching(true);
+          }}
+          disabled={pkMatching}
+        >
+          <Text style={styles.pkBtnText}>
+            {pkMatching
+              ? `Finding competitor… ${pkProgress}%`
+              : 'Find Host Competitor'}
+          </Text>
+        </Pressable>
+        {pkMatching ? (
+          <View style={styles.pkBarTrack}>
+            <View style={[styles.pkBarFill, { width: `${pkProgress}%` }]} />
+          </View>
+        ) : null}
+      </LinearGradient>
+
+      {/* Blueprint: Voice Coach */}
+      <Pressable
+        style={styles.coachCard}
+        onPress={() =>
+          notify(
+            'Audio Coach 🎙️',
+            'Smile to camera, say hi in 3 seconds, keep energy high — users stay longer.',
+          )
+        }
+      >
+        <View style={styles.coachWave}>
+          {[0, 1, 2, 3, 4].map((i) => (
+            <View
+              key={i}
+              style={[styles.coachBar, { height: 8 + ((i * 7) % 18) }]}
+            />
+          ))}
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.coachTitle}>Audio Coach</Text>
+          <Text style={styles.coachSub}>
+            Tap to hear how to attract more users right now
+          </Text>
+        </View>
+        <Ionicons name="play-circle" size={28} color={colors.accent} />
+      </Pressable>
+
+      {/* Blueprint: Story reel creator */}
+      <Text style={styles.section}>Quick Story Reels · 15s teasers</Text>
+      <View style={styles.storyRow}>
+        <Pressable
+          style={styles.storyAdd}
+          onPress={() =>
+            notify('Story upload', '15s teaser clip ready — premium lock applied.')
+          }
+        >
+          <Ionicons name="add" size={28} color={colors.accent} />
+          <Text style={styles.storyAddText}>New</Text>
+        </Pressable>
+        {STORY_PREVIEWS.map((uri, i) => (
+          <View key={uri} style={styles.storyThumbWrap}>
+            <Image source={{ uri }} style={styles.storyThumb} />
+            {i > 0 ? (
+              <View style={styles.storyLock}>
+                <Ionicons name="lock-closed" size={14} color="#fff" />
+              </View>
+            ) : null}
+          </View>
+        ))}
+      </View>
+
+      <LinearGradient
+        colors={[colors.primary, colors.primarySoft]}
+        style={styles.raceCard}
+      >
         <Text style={styles.raceRank}>Your rank #{myRank}</Text>
         <Text style={styles.raceTitle}>
           {myRank === 1
@@ -138,7 +301,9 @@ export function HomeScreen({ navigation }: { navigation: any }) {
             <Text style={styles.raceStatLabel}>Today</Text>
           </View>
           <View>
-            <Text style={styles.raceStatValue}>{formatClock(myLongestCallSeconds)}</Text>
+            <Text style={styles.raceStatValue}>
+              {formatClock(myLongestCallSeconds)}
+            </Text>
             <Text style={styles.raceStatLabel}>Longest</Text>
           </View>
           <View>
@@ -155,7 +320,10 @@ export function HomeScreen({ navigation }: { navigation: any }) {
       <Text style={styles.section}>Today competition</Text>
       <View style={styles.podium}>
         {top3.map((entry) => (
-          <View key={entry.id} style={[styles.podiumItem, entry.isMe && styles.podiumMe]}>
+          <View
+            key={entry.id}
+            style={[styles.podiumItem, entry.isMe && styles.podiumMe]}
+          >
             <Text style={styles.podiumRank}>#{entry.rank}</Text>
             <Image source={{ uri: entry.avatarUrl }} style={styles.podiumAvatar} />
             <Text style={styles.podiumName} numberOfLines={1}>
@@ -171,16 +339,6 @@ export function HomeScreen({ navigation }: { navigation: any }) {
         ))}
       </View>
 
-      {!hostOnline ? (
-        <LinearGradient colors={['#5A1638', '#2A1020']} style={styles.banner}>
-          <Text style={styles.bannerTitle}>You're offline</Text>
-          <Text style={styles.bannerSub}>Go Online to race other hosts and earn</Text>
-          <Pressable style={styles.bannerBtn} onPress={() => setHostOnline(true)}>
-            <Text style={styles.bannerBtnText}>Go Online</Text>
-          </Pressable>
-        </LinearGradient>
-      ) : null}
-
       <View style={styles.filterRow}>
         {filters.map((f) => (
           <Pressable
@@ -188,7 +346,9 @@ export function HomeScreen({ navigation }: { navigation: any }) {
             style={[styles.chip, homeFilter === f.key && styles.chipOn]}
             onPress={() => setHomeFilter(f.key)}
           >
-            <Text style={[styles.chipText, homeFilter === f.key && styles.chipTextOn]}>
+            <Text
+              style={[styles.chipText, homeFilter === f.key && styles.chipTextOn]}
+            >
               {f.label}
             </Text>
           </Pressable>
@@ -199,18 +359,35 @@ export function HomeScreen({ navigation }: { navigation: any }) {
       </View>
 
       <Text style={styles.section}>Hosts working now</Text>
+    </View>
+  );
+
+  return (
+    <View style={[styles.container, { paddingTop: insets.top + 8 }]}>
+      <View style={styles.header}>
+        <View>
+          <Text style={styles.hello}>Hi {user.name.split(' ')[0]}</Text>
+          <Text style={styles.title}>Host HQ</Text>
+        </View>
+        <Pressable onPress={() => navigation.navigate('Earnings')}>
+          <Text style={styles.walletLink}>{user.coinBalance} 🪙</Text>
+        </Pressable>
+      </View>
 
       <FlatList
         data={filteredHosts}
         keyExtractor={(item) => item.id}
+        ListHeaderComponent={ListHeader}
         contentContainerStyle={{ paddingBottom: 28 }}
         ListEmptyComponent={
-          <Text style={styles.empty}>No hosts here yet. Stay Online ✨</Text>
+          <Text style={styles.empty}>No hosts here yet. Go Live to Earn ✨</Text>
         }
         renderItem={({ item }) => (
           <Pressable
             style={styles.card}
-            onPress={() => navigation.navigate('HostProfile', { hostId: item.id })}
+            onPress={() =>
+              navigation.navigate('HostProfile', { hostId: item.id })
+            }
           >
             <View>
               <Image source={{ uri: item.avatarUrl }} style={styles.avatar} />
@@ -233,7 +410,8 @@ export function HomeScreen({ navigation }: { navigation: any }) {
               <Text style={styles.name}>{item.name}</Text>
               <Text style={styles.meta}>{statusLabel(item)}</Text>
               <Text style={styles.comp}>
-                {item.todayMinutes}m today · best {formatClock(item.longestCallSeconds)}
+                {item.todayMinutes}m today · best{' '}
+                {formatClock(item.longestCallSeconds)}
               </Text>
             </View>
             <Pressable
@@ -242,7 +420,9 @@ export function HomeScreen({ navigation }: { navigation: any }) {
                 item.isLive && styles.liveBtn,
                 item.isOnCall && styles.onCallBtn,
               ]}
-              onPress={() => navigation.navigate('HostProfile', { hostId: item.id })}
+              onPress={() =>
+                navigation.navigate('HostProfile', { hostId: item.id })
+              }
             >
               <Ionicons
                 name={item.isLive ? 'radio' : 'videocam'}
@@ -266,26 +446,61 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   hello: { color: colors.textSecondary, fontSize: 14 },
   title: { color: colors.text, fontSize: 28, fontWeight: '800', marginTop: 2 },
-  onlineBtn: {
+  walletLink: { color: colors.accent, fontWeight: '800', fontSize: 16 },
+  earnHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
     borderRadius: 20,
+    padding: 16,
+    marginBottom: 14,
     borderWidth: 1,
+    borderColor: 'rgba(255,184,0,0.35)',
   },
-  onlineOn: {
-    backgroundColor: 'rgba(61,214,140,0.12)',
-    borderColor: 'rgba(61,214,140,0.4)',
+  earnLabel: { color: colors.textSecondary, fontSize: 12, fontWeight: '700' },
+  earnGold: {
+    color: colors.cyberGold,
+    fontSize: 32,
+    fontWeight: '900',
+    marginTop: 2,
   },
-  onlineOff: { backgroundColor: colors.bgCard, borderColor: colors.border },
-  dot: { width: 8, height: 8, borderRadius: 4 },
-  onlineText: { color: colors.text, fontWeight: '700', fontSize: 13 },
+  earnCoins: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
+  cashOutBtn: {
+    backgroundColor: colors.cyberGold,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  cashOutText: { color: '#1a1020', fontWeight: '900', fontSize: 13 },
+  cashOutSub: { color: '#3a2810', fontSize: 10, fontWeight: '700', marginTop: 2 },
+  statusWrap: { alignItems: 'center', marginBottom: 14 },
+  statusOrb: {
+    width: '100%',
+    borderRadius: 28,
+    padding: 6,
+  },
+  statusOrbOn: {
+    shadowColor: colors.online,
+    shadowOpacity: 0.55,
+    shadowRadius: 16,
+  },
+  statusOrbOff: {
+    shadowColor: colors.danger,
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+  },
+  statusRing: {
+    borderWidth: 3,
+    borderRadius: 24,
+    paddingVertical: 22,
+    alignItems: 'center',
+  },
+  statusTitle: { color: '#fff', fontWeight: '900', fontSize: 20 },
+  statusSub: { color: 'rgba(255,255,255,0.75)', marginTop: 4, fontSize: 12 },
   bridgeBanner: {
     borderRadius: 14,
     paddingHorizontal: 12,
@@ -306,6 +521,82 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   bridgeText: { color: colors.text, fontWeight: '700', fontSize: 12 },
+  pkCard: {
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,42,122,0.35)',
+  },
+  pkTitle: { color: '#fff', fontWeight: '900', fontSize: 15 },
+  pkSub: { color: colors.textSecondary, marginTop: 6, fontSize: 12, lineHeight: 17 },
+  pkBtn: {
+    marginTop: 12,
+    backgroundColor: colors.primary,
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  pkBtnText: { color: '#fff', fontWeight: '800', fontSize: 13 },
+  pkBarTrack: {
+    marginTop: 10,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    overflow: 'hidden',
+  },
+  pkBarFill: {
+    height: 6,
+    backgroundColor: colors.accent,
+  },
+  coachCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: colors.bgCard,
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  coachWave: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 3,
+    width: 36,
+    height: 28,
+  },
+  coachBar: {
+    width: 4,
+    borderRadius: 2,
+    backgroundColor: colors.accent,
+  },
+  coachTitle: { color: colors.text, fontWeight: '800', fontSize: 14 },
+  coachSub: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
+  storyRow: { flexDirection: 'row', gap: 10, marginBottom: 14 },
+  storyAdd: {
+    width: 72,
+    height: 110,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.accent,
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.bgCard,
+  },
+  storyAddText: { color: colors.accent, fontWeight: '800', fontSize: 11, marginTop: 4 },
+  storyThumbWrap: { position: 'relative' },
+  storyThumb: { width: 72, height: 110, borderRadius: 14 },
+  storyLock: {
+    position: 'absolute',
+    right: 6,
+    top: 6,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderRadius: 10,
+    padding: 4,
+  },
   raceCard: {
     borderRadius: 22,
     padding: 16,
@@ -344,7 +635,7 @@ const styles = StyleSheet.create({
   },
   podiumMe: {
     borderColor: colors.primarySoft,
-    backgroundColor: 'rgba(232,90,140,0.15)',
+    backgroundColor: 'rgba(255,42,122,0.15)',
   },
   podiumRank: { color: colors.accent, fontWeight: '800', fontSize: 12 },
   podiumAvatar: { width: 40, height: 40, borderRadius: 20, marginTop: 6 },
@@ -362,22 +653,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     fontSize: 10,
   },
-  banner: {
-    borderRadius: 18,
-    padding: 16,
-    marginBottom: 12,
-  },
-  bannerTitle: { color: '#fff', fontWeight: '800', fontSize: 16 },
-  bannerSub: { color: 'rgba(255,255,255,0.9)', marginTop: 6 },
-  bannerBtn: {
-    marginTop: 12,
-    alignSelf: 'flex-start',
-    backgroundColor: '#fff',
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: 12,
-  },
-  bannerBtnText: { color: colors.primary, fontWeight: '800' },
   filterRow: {
     flexDirection: 'row',
     alignItems: 'center',

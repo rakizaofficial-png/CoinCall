@@ -33,7 +33,7 @@ export function EarningsScreen() {
 
         <Pressable style={styles.withdrawBtn} onPress={requestPayout}>
           <Ionicons name="arrow-down-circle" size={22} color={colors.primary} />
-          <Text style={styles.withdrawText}>Withdraw</Text>
+          <Text style={styles.withdrawText}>Cash-Out · EasyPaisa</Text>
         </Pressable>
       </LinearGradient>
 
