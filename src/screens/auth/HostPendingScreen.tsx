@@ -100,11 +100,22 @@ export function HostPendingScreen() {
           </Text>
         </View>
 
-        <PrimaryButton
-          label="Approve Host ID (admin demo)"
-          onPress={onApproveDemo}
-          style={{ marginTop: 22, width: '100%' }}
-        />
+        {__DEV__ ? (
+          <PrimaryButton
+            label="Approve Host ID (admin demo)"
+            onPress={onApproveDemo}
+            style={{ marginTop: 22, width: '100%' }}
+          />
+        ) : (
+          <Text
+            style={[
+              styles.waitText,
+              { color: colors.textMuted, marginTop: 18, textAlign: 'center' },
+            ]}
+          >
+            Approval is handled by CoinCall admin. Keep this app open after approval.
+          </Text>
+        )}
 
         <Pressable style={styles.signOut} onPress={signOut} accessibilityRole="button">
           <Text style={[styles.signOutText, { color: colors.textMuted }]}>Sign out</Text>

@@ -96,7 +96,7 @@ function MicPulse({ active }: { active: boolean }) {
 export function CallScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
-  const { getHost, call, endCall, user, reportUser, blockUser } = useApp();
+  const { getHost, call, endCall, user, reportUser, blockUser, beautyOn } = useApp();
   const bridgeCallId = route.params.bridgeCallId;
   const isBridge = Boolean(bridgeCallId);
   const peerHost = !isBridge ? getHost(route.params.hostId) : undefined;
@@ -356,7 +356,12 @@ export function CallScreen({ navigation, route }: Props) {
               if (el && remoteRef.current) setSurfacesReady(true);
             }}
             id="agora-local"
-            style={webLocalStyle}
+            style={{
+              ...webLocalStyle,
+              filter: beautyOn
+                ? 'brightness(1.08) contrast(1.05) saturate(1.15) blur(0.2px)'
+                : 'none',
+            }}
           />
         ) : cameraOff ? (
           <VideoOff size={28} color="#fff" />

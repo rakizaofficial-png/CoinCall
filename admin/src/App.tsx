@@ -5,20 +5,28 @@ import {
   approveHost,
   banHost,
   endCallRemote,
+  fetchAdminReports,
+  fetchAdminWithdrawals,
   fetchMonitorToken,
   listenActiveCalls,
   listenHosts,
+  listenReports,
   rejectHost,
+  resolveAdminReport,
+  resolveFirebaseReport,
   sendControl,
   setHostCoins,
   setHostOnline,
+  setWithdrawalStatus,
   type ActiveCall,
   type HostRow,
+  type ReportAdminRow,
+  type WithdrawalRow,
 } from './api';
 import { adminKey, agoraAppId, firebaseReady } from './firebase';
 import './styles.css';
 
-type Tab = 'dashboard' | 'pending' | 'hosts' | 'calls' | 'control';
+type Tab = 'dashboard' | 'pending' | 'hosts' | 'calls' | 'control' | 'payouts' | 'reports';
 
 function formatClock(sec = 0) {
   const m = Math.floor(sec / 60).toString().padStart(2, '0');
@@ -36,6 +44,8 @@ export default function App() {
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected' | 'online'>('all');
   const [monitor, setMonitor] = useState<ActiveCall | null>(null);
   const [monitorStatus, setMonitorStatus] = useState('');
+  const [withdrawals, setWithdrawals] = useState<WithdrawalRow[]>([]);
+  const [reports, setReports] = useState<ReportAdminRow[]>([]);
   const clientRef = useRef<IAgoraRTCClient | null>(null);
   const hostVideoRef = useRef<HTMLDivElement>(null);
   const peerVideoRef = useRef<HTMLDivElement>(null);
@@ -44,11 +54,49 @@ export default function App() {
     if (!authed || !firebaseReady) return;
     const u1 = listenHosts(setHosts);
     const u2 = listenActiveCalls(setCalls);
+    const u3 = listenReports(setReports);
     return () => {
       u1();
       u2();
+      u3();
     };
   }, [authed]);
+
+  useEffect(() => {
+    if (!authed || tab !== 'payouts') return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const data = await fetchAdminWithdrawals();
+        if (!cancelled) setWithdrawals(data.withdrawals || []);
+      } catch {
+        if (!cancelled) setWithdrawals([]);
+      }
+    };
+    void load();
+    const t = setInterval(() => void load(), 8000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [authed, tab]);
+
+  useEffect(() => {
+    if (!authed || tab !== 'reports') return;
+    void fetchAdminReports()
+      .then((data) => {
+        if (data.reports?.length) {
+          setReports((prev) => {
+            const map = new Map<string, ReportAdminRow>();
+            [...prev, ...data.reports].forEach((r) => map.set(r.id, r));
+            return Array.from(map.values()).sort(
+              (a, b) => (b.createdAt || 0) - (a.createdAt || 0),
+            );
+          });
+        }
+      })
+      .catch(() => undefined);
+  }, [authed, tab]);
 
   useEffect(() => {
     if (!monitor) return;
@@ -163,6 +211,8 @@ export default function App() {
             ['pending', `Approvals (${stats.pending})`],
             ['hosts', 'All Hosts'],
             ['calls', `Live 1:1 (${stats.liveCalls})`],
+            ['payouts', `Payouts (${withdrawals.filter((w) => w.status !== 'paid').length})`],
+            ['reports', `Reports (${reports.filter((r) => r.status !== 'resolved').length})`],
             ['control', 'Remote Control'],
           ] as [Tab, string][]
         ).map(([id, label]) => (
@@ -341,6 +391,131 @@ export default function App() {
                 </div>
               </div>
             ) : null}
+          </>
+        ) : null}
+
+        {tab === 'payouts' ? (
+          <>
+            <h2>Host payouts</h2>
+            <p className="sub">Review cash-outs · mark paid / failed</p>
+            <div className="list">
+              {withdrawals.length === 0 ? (
+                <div className="card">No withdrawal requests yet.</div>
+              ) : (
+                withdrawals.map((w) => (
+                  <div className="card" key={w.id} style={{ gridTemplateColumns: '1fr auto' }}>
+                    <div>
+                      <h3>
+                        {w.amountCoins} coins · {w.gateway}
+                      </h3>
+                      <div className="meta">
+                        Host {w.hostId} · {w.accountName} · {w.accountNumber}
+                        <br />
+                        Status <strong>{w.status}</strong>
+                        {w.providerRef ? ` · ${w.providerRef}` : ''}
+                        <br />
+                        {new Date(w.createdAt).toLocaleString()}
+                        {w.error ? ` · ${w.error}` : ''}
+                      </div>
+                    </div>
+                    <div className="actions">
+                      <button
+                        type="button"
+                        className="btn-gold"
+                        onClick={() =>
+                          void setWithdrawalStatus(w.id, 'processing').then(() =>
+                            fetchAdminWithdrawals().then((d) =>
+                              setWithdrawals(d.withdrawals || []),
+                            ),
+                          )
+                        }
+                      >
+                        Processing
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-green"
+                        onClick={() =>
+                          void setWithdrawalStatus(w.id, 'paid').then(() =>
+                            fetchAdminWithdrawals().then((d) =>
+                              setWithdrawals(d.withdrawals || []),
+                            ),
+                          )
+                        }
+                      >
+                        Mark paid
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-red"
+                        onClick={() =>
+                          void setWithdrawalStatus(w.id, 'failed').then(() =>
+                            fetchAdminWithdrawals().then((d) =>
+                              setWithdrawals(d.withdrawals || []),
+                            ),
+                          )
+                        }
+                      >
+                        Fail / refund
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </>
+        ) : null}
+
+        {tab === 'reports' ? (
+          <>
+            <h2>Reports</h2>
+            <p className="sub">Host-submitted abuse / spam reports</p>
+            <div className="list">
+              {reports.length === 0 ? (
+                <div className="card">No reports.</div>
+              ) : (
+                reports.map((r) => (
+                  <div className="card" key={r.id} style={{ gridTemplateColumns: '1fr auto' }}>
+                    <div>
+                      <h3>
+                        {r.reason} · {r.status}
+                      </h3>
+                      <div className="meta">
+                        From {r.reporterName || r.reporterId} → target {r.targetId}
+                        <br />
+                        {r.details || 'No details'}
+                        <br />
+                        {new Date(r.createdAt).toLocaleString()}
+                      </div>
+                    </div>
+                    <div className="actions">
+                      {r.status !== 'resolved' ? (
+                        <button
+                          type="button"
+                          className="btn-green"
+                          onClick={() =>
+                            void (async () => {
+                              try {
+                                await resolveFirebaseReport(r.id);
+                              } catch {
+                                await resolveAdminReport(r.id);
+                              }
+                              setReports((list) =>
+                                list.map((x) =>
+                                  x.id === r.id ? { ...x, status: 'resolved' } : x,
+                                ),
+                              );
+                            })()
+                          }
+                        >
+                          Resolve
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </>
         ) : null}
 

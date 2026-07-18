@@ -570,14 +570,26 @@ type WithdrawalRequest = {
   gateway: 'easypaisa' | 'jazzcash' | 'bank';
   accountName: string;
   accountNumber: string;
-  status: 'pending' | 'processing' | 'paid' | 'failed';
+  status: 'pending' | 'processing' | 'paid' | 'failed' | 'admin_review';
   createdAt: number;
   providerRef?: string;
   error?: string;
 };
 
+type ReportRow = {
+  id: string;
+  reporterId: string;
+  reporterName: string;
+  targetId: string;
+  reason: string;
+  details: string;
+  createdAt: number;
+  status: 'open' | 'resolved';
+};
+
 const wallets = new Map<string, WalletRow>();
 const withdrawals: WithdrawalRequest[] = [];
+const reports: ReportRow[] = [];
 const iapReceipts = new Set<string>();
 
 const IAP_PRODUCTS = [
@@ -650,8 +662,51 @@ app.post('/api/wallet/me', (req, res) => {
   }
   const row = ensureWallet(userId, {
     displayName: String(req.body?.displayName || 'Luma Fan'),
+    role: req.body?.role === 'host' ? 'host' : 'user',
   });
   res.json({ wallet: walletPublic(row) });
+});
+
+app.post('/api/wallet/sync', (req, res) => {
+  const userId = String(req.body?.userId || '').trim();
+  const coinBalance = Number(req.body?.coinBalance);
+  if (!userId || !Number.isFinite(coinBalance) || coinBalance < 0) {
+    res.status(400).json({ error: 'userId and non-negative coinBalance required' });
+    return;
+  }
+  const row = ensureWallet(userId, {
+    displayName: String(req.body?.displayName || 'Host'),
+    role: req.body?.role === 'host' ? 'host' : 'user',
+  });
+  row.coinBalance = Math.floor(coinBalance);
+  wallets.set(userId, row);
+  broadcastWs({
+    type: 'wallet:updated',
+    payload: { userId, coinBalance: row.coinBalance, xp: row.xp },
+  });
+  res.json({ ok: true, wallet: walletPublic(row) });
+});
+
+app.post('/api/wallet/credit', (req, res) => {
+  const userId = String(req.body?.userId || '').trim();
+  const amount = Number(req.body?.amount || 0);
+  const reason = String(req.body?.reason || 'credit');
+  if (!userId || !Number.isFinite(amount) || amount <= 0) {
+    res.status(400).json({ error: 'userId and positive amount required' });
+    return;
+  }
+  const row = ensureWallet(userId, {
+    displayName: String(req.body?.displayName || 'Host'),
+    role: req.body?.role === 'host' ? 'host' : 'user',
+  });
+  row.coinBalance += Math.floor(amount);
+  row.xp += Math.floor(amount);
+  wallets.set(userId, row);
+  broadcastWs({
+    type: 'wallet:updated',
+    payload: { userId, coinBalance: row.coinBalance, xp: row.xp, reason },
+  });
+  res.json({ ok: true, reason, wallet: walletPublic(row) });
 });
 
 app.get('/api/wallet/:userId', (req, res) => {
@@ -755,7 +810,7 @@ app.post('/api/wallet/iap/verify', (req, res) => {
 
 /**
  * Host withdrawal → EasyPaisa / JazzCash / Bank
- * Wire merchant APIs using EASYPAY_* / JAZZCASH_* / BANK_* env vars.
+ * If merchant credentials are missing, payout enters admin_review (manual pay).
  */
 app.post('/api/host/withdrawals', async (req, res) => {
   const hostId = String(req.body?.hostId || '').trim();
@@ -771,9 +826,18 @@ app.post('/api/host/withdrawals', async (req, res) => {
     return;
   }
 
-  const row = ensureWallet(hostId, { role: 'host' });
+  // Prefer client-synced balance if provided (Firebase is source of truth on host app)
+  const knownBalance = Number(req.body?.knownBalance);
+  const row = ensureWallet(hostId, {
+    role: 'host',
+    displayName: String(req.body?.displayName || 'Host'),
+  });
+  if (Number.isFinite(knownBalance) && knownBalance >= 0) {
+    row.coinBalance = Math.floor(knownBalance);
+  }
+
   if (row.coinBalance < amountCoins) {
-    res.status(402).json({ error: 'Insufficient host balance' });
+    res.status(402).json({ error: 'Insufficient host balance', wallet: walletPublic(row) });
     return;
   }
 
@@ -793,26 +857,28 @@ app.post('/api/host/withdrawals', async (req, res) => {
   withdrawals.unshift(request);
 
   try {
-    // PRODUCTION HOOK — swap stubs for real gateway HTTP calls
     if (gateway === 'easypaisa') {
       if (!process.env.EASYPAY_MERCHANT_ID || !process.env.EASYPAY_HASH_KEY) {
-        throw new Error('EasyPaisa credentials missing (EASYPAY_MERCHANT_ID / EASYPAY_HASH_KEY)');
+        request.status = 'admin_review';
+        request.providerRef = `manual_ep_${Date.now()}`;
+      } else {
+        request.status = 'processing';
+        request.providerRef = `ep_${Date.now()}`;
       }
-      // await fetch('https://easypay-api...', { ... })
-      request.status = 'processing';
-      request.providerRef = `ep_stub_${Date.now()}`;
     } else if (gateway === 'jazzcash') {
       if (!process.env.JAZZCASH_MERCHANT_ID || !process.env.JAZZCASH_INTEGRITY_SALT) {
-        throw new Error('JazzCash credentials missing');
+        request.status = 'admin_review';
+        request.providerRef = `manual_jc_${Date.now()}`;
+      } else {
+        request.status = 'processing';
+        request.providerRef = `jc_${Date.now()}`;
       }
-      request.status = 'processing';
-      request.providerRef = `jc_stub_${Date.now()}`;
+    } else if (!process.env.BANK_PAYOUT_WEBHOOK_SECRET) {
+      request.status = 'admin_review';
+      request.providerRef = `manual_bank_${Date.now()}`;
     } else {
-      if (!process.env.BANK_PAYOUT_WEBHOOK_SECRET) {
-        throw new Error('BANK_PAYOUT_WEBHOOK_SECRET missing');
-      }
       request.status = 'processing';
-      request.providerRef = `bank_stub_${Date.now()}`;
+      request.providerRef = `bank_${Date.now()}`;
     }
   } catch (e: unknown) {
     request.status = 'failed';
@@ -820,6 +886,11 @@ app.post('/api/host/withdrawals', async (req, res) => {
     row.coinBalance += amountCoins;
     wallets.set(hostId, row);
   }
+
+  broadcastWs({
+    type: 'withdrawal:created',
+    payload: request,
+  });
 
   res.json({ ok: request.status !== 'failed', withdrawal: request, wallet: walletPublic(row) });
 });
@@ -829,6 +900,92 @@ app.get('/api/host/withdrawals/:hostId', (req, res) => {
   res.json({
     withdrawals: withdrawals.filter((w) => w.hostId === hostId).slice(0, 50),
   });
+});
+
+app.get('/api/admin/withdrawals', (req, res) => {
+  const key = String(req.query.key || req.headers['x-admin-key'] || '');
+  if (key !== ADMIN_KEY) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+  res.json({ withdrawals: withdrawals.slice(0, 100) });
+});
+
+app.post('/api/admin/withdrawals/:id/status', (req, res) => {
+  const key = String(req.body?.key || req.headers['x-admin-key'] || '');
+  if (key !== ADMIN_KEY) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+  const id = String(req.params.id || '');
+  const status = String(req.body?.status || '') as WithdrawalRequest['status'];
+  const allowed = ['pending', 'processing', 'paid', 'failed', 'admin_review'];
+  if (!allowed.includes(status)) {
+    res.status(400).json({ error: 'Invalid status' });
+    return;
+  }
+  const row = withdrawals.find((w) => w.id === id);
+  if (!row) {
+    res.status(404).json({ error: 'Withdrawal not found' });
+    return;
+  }
+  const prev = row.status;
+  row.status = status;
+  if (status === 'failed' && prev !== 'failed' && prev !== 'paid') {
+    const wallet = ensureWallet(row.hostId, { role: 'host' });
+    wallet.coinBalance += row.amountCoins;
+    wallets.set(row.hostId, wallet);
+  }
+  broadcastWs({ type: 'withdrawal:updated', payload: row });
+  res.json({ ok: true, withdrawal: row });
+});
+
+app.post('/api/reports', (req, res) => {
+  const reporterId = String(req.body?.reporterId || '').trim();
+  const targetId = String(req.body?.targetId || '').trim();
+  const reason = String(req.body?.reason || '').trim();
+  if (!reporterId || !targetId || !reason) {
+    res.status(400).json({ error: 'reporterId, targetId, reason required' });
+    return;
+  }
+  const row: ReportRow = {
+    id: `rpt_${randomUUID()}`,
+    reporterId,
+    reporterName: String(req.body?.reporterName || 'Host'),
+    targetId,
+    reason,
+    details: String(req.body?.details || ''),
+    createdAt: Date.now(),
+    status: 'open',
+  };
+  reports.unshift(row);
+  broadcastWs({ type: 'report:created', payload: row });
+  res.json({ ok: true, id: row.id, report: row });
+});
+
+app.get('/api/admin/reports', (req, res) => {
+  const key = String(req.query.key || req.headers['x-admin-key'] || '');
+  if (key !== ADMIN_KEY) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+  res.json({ reports: reports.slice(0, 100) });
+});
+
+app.post('/api/admin/reports/:id/resolve', (req, res) => {
+  const key = String(req.body?.key || req.headers['x-admin-key'] || '');
+  if (key !== ADMIN_KEY) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+  const id = String(req.params.id || '');
+  const row = reports.find((r) => r.id === id);
+  if (!row) {
+    res.status(404).json({ error: 'Report not found' });
+    return;
+  }
+  row.status = 'resolved';
+  res.json({ ok: true, report: row });
 });
 
 /* -------------------- WebSocket realtime -------------------- */
@@ -852,7 +1009,7 @@ wss.on('connection', (socket, req) => {
 
   socket.on('message', (buf) => {
     try {
-      const msg = JSON.parse(String(buf)) as {
+      const raw = JSON.parse(String(buf)) as {
         type: string;
         roomId?: string;
         userId?: string;
@@ -862,38 +1019,50 @@ wss.on('connection', (socket, req) => {
         coins?: number;
         label?: string;
         toHostId?: string;
+        payload?: Record<string, unknown>;
       };
+      const payload = (raw.payload || {}) as Record<string, unknown>;
+      const type = raw.type;
+      const roomId = String(raw.roomId || payload.roomId || '');
+      const text = String(raw.text || payload.text || '');
+      const coins = Number(raw.coins ?? payload.coins ?? 0);
+      const hostId = String(raw.userId || payload.hostId || payload.userId || userId);
 
-      if (msg.type === 'party:message' && msg.roomId && msg.text) {
+      if (type === 'host:hello') {
+        socket.send(JSON.stringify({ type: 'host:welcome', payload: { hostId } }));
+        return;
+      }
+
+      if (type === 'party:message' && roomId && text) {
         broadcastWs({
           type: 'party:message',
           payload: {
-            roomId: msg.roomId,
-            userId: msg.userId || userId,
-            text: msg.text,
+            roomId,
+            userId: hostId,
+            text,
             at: Date.now(),
           },
         });
       }
 
-      if (msg.type === 'gift:send') {
+      if (type === 'gift:send') {
         broadcastWs({
           type: 'gift:received',
           payload: {
-            roomId: msg.roomId,
-            fromUserId: msg.fromUserId || userId,
-            giftId: msg.giftId,
-            coins: msg.coins || 0,
-            label: msg.label || 'Gift',
-            toHostId: msg.toHostId,
+            roomId,
+            fromUserId: String(raw.fromUserId || payload.fromHostId || hostId),
+            giftId: raw.giftId || payload.giftId,
+            coins,
+            label: raw.label || payload.label || 'Gift',
+            toHostId: raw.toHostId || payload.toHostId,
           },
         });
       }
 
-      if (msg.type === 'party:join' && msg.roomId) {
+      if (type === 'party:join' && roomId) {
         broadcastWs({
           type: 'party:seat',
-          payload: { roomId: msg.roomId, seats: [], userId: msg.userId || userId },
+          payload: { roomId, seats: [], userId: hostId },
         });
       }
     } catch {

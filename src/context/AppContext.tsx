@@ -120,6 +120,12 @@ type AppContextValue = {
   startPartyLive: () => void;
   endPartyLive: () => void;
   requestPayout: () => void;
+  applyPayout: (
+    amount: number,
+    gateway: string,
+    withdrawalId: string,
+    nextBalance: number,
+  ) => void;
   runHostTool: (key: HostToolKey) => void;
   refreshList: () => void;
   getHost: (id: string) => Host | undefined;
@@ -283,6 +289,9 @@ export function AppProvider({
     setHostOnlineState(true);
     setUser((u) => ({ ...u, isOnline: true }));
     setWorkspaceModeState('party_room');
+    void import('../services/realtimeWs').then(({ joinPartyChannel }) => {
+      joinPartyChannel(`party_${user.id}`, user.id);
+    });
 
     setPartySeats((seats) => {
       const peers = MOCK_HOSTS.filter((h) => h.isOnline).slice(0, 4);
@@ -670,10 +679,71 @@ export function AppProvider({
     }, 300);
     const tip =
       secs >= 5 * 60
-        ? 'Great long call! You climbed the competition 🏆'
-        : 'Stay longer next time to beat other hosts 💕';
+        ? 'Great long call! You climbed the competition'
+        : 'Stay longer next time to beat other hosts';
     notify('Call ended', `You earned ${earned} coins. ${tip}`);
-  }, []);
+
+    if (earned > 0) {
+      void import('../services/walletSyncService').then(({ creditHostEarnings, syncHostWalletBalance }) => {
+        const next = user.coinBalance; // already includes call ticks
+        void syncHostWalletBalance({
+          hostId: user.id,
+          coinBalance: next,
+          displayName: user.name,
+        });
+        void creditHostEarnings({
+          hostId: user.id,
+          amount: 0, // balance already local; sync is enough
+          reason: 'call_end_sync',
+          displayName: user.name,
+        }).catch(() => undefined);
+      });
+      void import('../services/notificationInboxService').then(({ pushHostNotification }) => {
+        void pushHostNotification(user.id, {
+          type: 'call',
+          title: 'Call earnings',
+          body: `You earned ${earned} coins from your last call.`,
+        });
+      });
+    }
+  }, [user.coinBalance, user.id, user.name]);
+
+  // Keep server wallet aligned whenever local balance changes after earnings
+  useEffect(() => {
+    const t = setTimeout(() => {
+      void import('../services/walletSyncService').then(({ syncHostWalletBalance }) => {
+        void syncHostWalletBalance({
+          hostId: user.id,
+          coinBalance: user.coinBalance,
+          displayName: user.name,
+        });
+      });
+    }, 800);
+    return () => clearTimeout(t);
+  }, [user.coinBalance, user.id, user.name]);
+
+  // Realtime WS for party gifts / wallet events
+  useEffect(() => {
+    let unsub: (() => void) | undefined;
+    void import('../services/realtimeWs').then(({ connectHostRealtime, subscribeRealtime }) => {
+      connectHostRealtime({
+        hostId: user.id,
+        name: user.name,
+        avatarUrl: user.avatarUrl,
+      });
+      unsub = subscribeRealtime((event) => {
+        if (event.type === 'gift:received' && event.payload?.coins) {
+          const coins = Number(event.payload.coins) || 0;
+          if (coins > 0) {
+            addEarn(setUser, setHostEarnings, setTransactions, coins, 'gift', 'Live gift (realtime)');
+          }
+        }
+      });
+    });
+    return () => {
+      unsub?.();
+    };
+  }, [user.avatarUrl, user.id, user.name]);
 
   // Admin remote control (end call, force offline, ban message)
   useEffect(() => {
@@ -765,9 +835,24 @@ export function AppProvider({
     notify('Blocked', 'This user will no longer appear in your list.');
   }, []);
 
-  const reportUser = useCallback((_hostId: string, reason: string) => {
-    notify('Report submitted', `Thanks. We received: "${reason}".`);
-  }, []);
+  const reportUser = useCallback(
+    (hostId: string, reason: string) => {
+      void import('../services/reportService')
+        .then(({ submitUserReport }) =>
+          submitUserReport({
+            reporterId: user.id,
+            reporterName: user.name,
+            targetId: hostId,
+            reason,
+          }),
+        )
+        .then(() => notify('Report submitted', `Thanks. We received: "${reason}".`))
+        .catch((e) =>
+          notify('Report failed', e instanceof Error ? e.message : 'Could not submit report'),
+        );
+    },
+    [user.id, user.name],
+  );
 
   const markNewsRead = useCallback((id: string) => {
     setNews((items) =>
@@ -884,6 +969,24 @@ export function AppProvider({
     return () => clearInterval(interval);
   }, [myRoomId, myRoom?.isLive]);
 
+  const applyPayout = useCallback(
+    (amount: number, gateway: string, withdrawalId: string, nextBalance: number) => {
+      setUser((u) => ({ ...u, coinBalance: nextBalance }));
+      setHostEarnings({ call: 0, gift: 0, task: 0, invite: 0, managed: 0 });
+      setTransactions((txs) => [
+        {
+          id: `tx_${Date.now()}`,
+          type: 'payout',
+          amount,
+          label: `Cash-Out ${withdrawalId} · ${gateway}`,
+          timestamp: Date.now(),
+        },
+        ...txs,
+      ]);
+    },
+    [],
+  );
+
   const requestPayout = useCallback(async () => {
     const amount = user.coinBalance;
     if (amount < 100) {
@@ -894,6 +997,13 @@ export function AppProvider({
       return;
     }
     try {
+      await import('../services/walletSyncService').then(({ syncHostWalletBalance }) =>
+        syncHostWalletBalance({
+          hostId: user.id,
+          coinBalance: user.coinBalance,
+          displayName: user.name,
+        }),
+      );
       const { requestHostWithdrawal } = await import('../services/withdrawalService');
       const result = await requestHostWithdrawal({
         hostId: user.id,
@@ -901,26 +1011,19 @@ export function AppProvider({
         gateway: 'easypaisa',
         accountName: user.name,
         accountNumber: user.phone || user.hostId || user.id,
+        knownBalance: user.coinBalance,
+        displayName: user.name,
       });
       if (!result.ok) {
         notify('Cash-Out failed', result.error || 'Gateway rejected payout');
         return;
       }
-      setUser((u) => ({
-        ...u,
-        coinBalance: result.wallet?.coinBalance ?? 0,
-      }));
-      setHostEarnings({ call: 0, gift: 0, task: 0, invite: 0, managed: 0 });
-      setTransactions((txs) => [
-        {
-          id: `tx_${Date.now()}`,
-          type: 'payout',
-          amount,
-          label: `Cash-Out ${result.withdrawal?.id || ''} · EasyPaisa`,
-          timestamp: Date.now(),
-        },
-        ...txs,
-      ]);
+      applyPayout(
+        amount,
+        'easypaisa',
+        result.withdrawal?.id || '',
+        result.wallet?.coinBalance ?? 0,
+      );
       notify(
         'Cash-Out submitted',
         `${amount} coins → EasyPaisa (status: ${result.withdrawal?.status || 'pending'})`,
@@ -931,7 +1034,7 @@ export function AppProvider({
         e instanceof Error ? e.message : 'Network error',
       );
     }
-  }, [user.coinBalance, user.hostId, user.id, user.name, user.phone]);
+  }, [applyPayout, user.coinBalance, user.hostId, user.id, user.name, user.phone]);
 
   const refreshList = useCallback(() => {
     setHosts((list) => [...list].sort(() => Math.random() - 0.5));
@@ -1000,11 +1103,17 @@ export function AppProvider({
           break;
         case 'invite':
           if (hostEarnings.invite > 0) {
-            notify('Invite', 'Code HOST2026 copied. Invite reward already claimed.');
+            void import('../services/phoneAuthService').then(({ copyInviteCode }) =>
+              copyInviteCode(user.hostId || 'HOST2026'),
+            );
+            notify('Invite', `Code ${user.hostId || 'HOST2026'} copied. Invite reward already claimed.`);
             break;
           }
+          void import('../services/phoneAuthService').then(({ copyInviteCode }) =>
+            copyInviteCode(user.hostId || 'HOST2026'),
+          );
           addEarn(setUser, setHostEarnings, setTransactions, 100, 'invite', 'Invite reward claimed');
-          notify('Invite', 'Code HOST2026 copied. +100 invite coins (one-time).');
+          notify('Invite', `Code ${user.hostId || 'HOST2026'} copied. +100 invite coins (one-time).`);
           break;
         case 'props':
           setUser((u) => ({ ...u, gems: Number((u.gems + 1).toFixed(2)) }));
@@ -1213,6 +1322,7 @@ export function AppProvider({
       startPartyLive,
       endPartyLive,
       requestPayout,
+      applyPayout,
       runHostTool,
       refreshList,
       getHost,
@@ -1279,6 +1389,7 @@ export function AppProvider({
       startPartyLive,
       endPartyLive,
       requestPayout,
+      applyPayout,
       runHostTool,
       refreshList,
       getHost,

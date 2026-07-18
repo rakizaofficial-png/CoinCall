@@ -156,3 +156,87 @@ export async function fetchMonitorToken(channel: string, uid: number) {
   if (!res.ok) throw new Error(await res.text());
   return res.json() as Promise<{ token: string; appId: string; uid: number; channel: string }>;
 }
+
+export type WithdrawalRow = {
+  id: string;
+  hostId: string;
+  amountCoins: number;
+  gateway: string;
+  accountName: string;
+  accountNumber: string;
+  status: string;
+  createdAt: number;
+  providerRef?: string;
+  error?: string;
+};
+
+export type ReportAdminRow = {
+  id: string;
+  reporterId: string;
+  reporterName: string;
+  targetId: string;
+  reason: string;
+  details: string;
+  createdAt: number;
+  status: string;
+};
+
+function adminKeyHeader() {
+  return localStorage.getItem('cc_admin_key') || adminKey;
+}
+
+export async function fetchAdminWithdrawals() {
+  const res = await fetch(
+    `${apiBaseUrl}/admin/withdrawals?key=${encodeURIComponent(adminKeyHeader())}`,
+  );
+  if (!res.ok) throw new Error('Could not load withdrawals');
+  return (await res.json()) as { withdrawals: WithdrawalRow[] };
+}
+
+export async function setWithdrawalStatus(id: string, status: string) {
+  const res = await fetch(`${apiBaseUrl}/admin/withdrawals/${encodeURIComponent(id)}/status`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key: adminKeyHeader(), status }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function fetchAdminReports() {
+  const res = await fetch(
+    `${apiBaseUrl}/admin/reports?key=${encodeURIComponent(adminKeyHeader())}`,
+  );
+  if (!res.ok) throw new Error('Could not load reports');
+  return (await res.json()) as { reports: ReportAdminRow[] };
+}
+
+export async function resolveAdminReport(id: string) {
+  const res = await fetch(`${apiBaseUrl}/admin/reports/${encodeURIComponent(id)}/resolve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key: adminKeyHeader() }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export function listenReports(cb: (rows: ReportAdminRow[]) => void) {
+  const database = requireDb();
+  return onValue(ref(database, 'reports'), (snap) => {
+    if (!snap.exists()) {
+      cb([]);
+      return;
+    }
+    const val = snap.val() as Record<string, Omit<ReportAdminRow, 'id'>>;
+    cb(
+      Object.entries(val)
+        .map(([id, row]) => ({ id, ...row }))
+        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)),
+    );
+  });
+}
+
+export async function resolveFirebaseReport(id: string) {
+  await update(ref(requireDb(), `reports/${id}`), { status: 'resolved', resolvedAt: Date.now() });
+}

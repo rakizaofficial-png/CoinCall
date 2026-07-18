@@ -21,7 +21,7 @@ type Props = NativeStackScreenProps<AuthStackParamList, 'Login'>;
 type AuthMethod = 'email' | 'phone';
 
 export function LoginScreen({ navigation }: Props) {
-  const { signIn, usingFirebase } = useAuth();
+  const { signIn, usingFirebase, sendLoginOtp } = useAuth();
   const { colors } = useTheme();
   const [method, setMethod] = useState<AuthMethod>('email');
   const [email, setEmail] = useState('');
@@ -32,13 +32,21 @@ export function LoginScreen({ navigation }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const handleSendOtp = () => {
+  const handleSendOtp = async () => {
     setError(null);
     if (!phone.trim()) {
       setError('Enter a phone number first.');
       return;
     }
-    setOtpSent(true);
+    setLoading(true);
+    try {
+      await sendLoginOtp(phone.trim());
+      setOtpSent(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not send OTP.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleLogin = async () => {

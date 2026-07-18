@@ -113,6 +113,25 @@ export function ProfileScreen({ navigation }: { navigation: any }) {
 
       <Text style={[styles.section, { color: colors.text }]}>Settings</Text>
       <GlassCard style={{ paddingHorizontal: 4, paddingVertical: 4 }}>
+        <Pressable style={styles.row} onPress={() => navigation.navigate('Settings')}>
+          <View style={styles.rowLeft}>
+            {isDark ? (
+              <Moon size={20} color={colors.primarySoft} />
+            ) : (
+              <Sun size={20} color={colors.accent} />
+            )}
+            <View>
+              <Text style={[styles.rowTitle, { color: colors.text }]}>App settings</Text>
+              <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
+                Theme, payouts, alerts · {themeLabel}
+              </Text>
+            </View>
+          </View>
+          <ChevronRight size={18} color={colors.textMuted} />
+        </Pressable>
+
+        <View style={[styles.divider, { backgroundColor: colors.border }]} />
+
         <Pressable style={styles.row} onPress={cycleTheme}>
           <View style={styles.rowLeft}>
             {isDark ? (

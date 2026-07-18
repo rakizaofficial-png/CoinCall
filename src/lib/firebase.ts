@@ -1,11 +1,13 @@
 import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
 import { getAuth, type Auth } from 'firebase/auth';
 import { getDatabase, type Database } from 'firebase/database';
+import { getStorage, type FirebaseStorage } from 'firebase/storage';
 import { env } from '../config/env';
 
 let app: FirebaseApp | null = null;
 let auth: Auth | null = null;
 let db: Database | null = null;
+let storage: FirebaseStorage | null = null;
 
 export function isFirebaseReady() {
   return Boolean(
@@ -46,4 +48,9 @@ export function getFirebaseAuth() {
 export function getFirebaseDb() {
   if (!db) db = getDatabase(getFirebaseApp());
   return db;
+}
+
+export function getFirebaseStorage() {
+  if (!storage) storage = getStorage(getFirebaseApp());
+  return storage;
 }

@@ -14,6 +14,7 @@ import { CallScreen } from '../screens/call/CallScreen';
 import { ChatScreen } from '../screens/main/ChatScreen';
 import { HostProfileScreen } from '../screens/main/HostProfileScreen';
 import { NotificationsScreen } from '../screens/main/NotificationsScreen';
+import { SettingsScreen } from '../screens/main/SettingsScreen';
 import { useTheme } from '../theme/ThemeContext';
 import { AuthNavigator } from './AuthNavigator';
 import { MainTabNavigator } from './MainTabNavigator';
@@ -50,6 +51,7 @@ function AuthenticatedApp() {
         <Stack.Screen name="Call" component={CallScreen} />
         <Stack.Screen name="Chat" component={ChatScreen} />
         <Stack.Screen name="Notifications" component={NotificationsScreen} />
+        <Stack.Screen name="Settings" component={SettingsScreen} />
       </Stack.Navigator>
       <BridgeIncomingLayer />
     </AppProvider>

@@ -26,4 +26,5 @@ export type RootStackParamList = {
   };
   Chat: { hostId: string };
   Notifications: undefined;
+  Settings: undefined;
 };

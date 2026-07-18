@@ -17,7 +17,13 @@ import {
   listenAuth,
   submitHostApplicationToFirebase,
 } from '../services/authService';
+import { uploadHostApplicationMedia } from '../services/mediaUploadService';
+import {
+  confirmPhoneOtp,
+  sendPhoneOtp,
+} from '../services/phoneAuthService';
 import type { User } from '../types/models';
+import { Platform } from 'react-native';
 
 type AuthMethod = 'email' | 'phone';
 
@@ -56,8 +62,9 @@ type AuthContextValue = {
   signOut: () => void;
   setAuthUser: (user: User | null) => void;
   submitHostApplication: (input: HostApplicationInput) => Promise<void>;
-  /** Demo / admin: approve current host so app unlocks */
+  /** Dev-only helper — production hosts are approved from Admin panel */
   approveCurrentHost: () => Promise<void>;
+  sendLoginOtp: (phone: string) => Promise<void>;
 };
 
 const STORAGE_KEY = 'coincall_host_user_v1';
@@ -125,7 +132,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signIn = useCallback(async (input: SignInInput) => {
     if (input.method === 'phone') {
-      throw new Error('Phone OTP comes after Agora setup. Use Email for now.');
+      if (!usingFirebase) {
+        throw new Error('Phone login requires Firebase configuration.');
+      }
+      if (!input.phone?.trim() || !input.otp?.trim()) {
+        throw new Error('Phone number and OTP are required.');
+      }
+      const profile = await confirmPhoneOtp(input.otp);
+      setUser(profile);
+      return;
     }
     if (!input.email?.trim() || !input.password?.trim()) {
       throw new Error('Email and password are required.');
@@ -148,13 +163,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setAuthUser(next);
   }, [setAuthUser, usingFirebase]);
 
+  const sendLoginOtp = useCallback(async (phone: string) => {
+    if (!usingFirebase) {
+      throw new Error('Phone OTP requires Firebase.');
+    }
+    if (Platform.OS !== 'web') {
+      throw new Error('Phone OTP is available on the web host app. Use email on mobile builds.');
+    }
+    await sendPhoneOtp(phone);
+  }, [usingFirebase]);
+
   const signUp = useCallback(async (input: SignUpInput) => {
     if (!input.name.trim()) throw new Error('Name is required.');
     if (!input.isAgeVerified) {
       throw new Error('You must confirm you are 18 or older.');
     }
     if (input.method === 'phone') {
-      throw new Error('Phone OTP comes later. Use Email for now.');
+      throw new Error('Use Login → Phone to verify OTP after sending the code from Login.');
     }
     if (!input.email?.trim() || !input.password?.trim()) {
       throw new Error('Email and password are required.');
@@ -203,14 +228,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!input.videoUrl) throw new Error('Please add an intro video.');
 
       const hostId = user.hostId || generateHostId();
-      const photos = input.photoUrls.slice(0, 8);
+      const photosLocal = input.photoUrls.slice(0, 8);
+
+      const uploaded = await uploadHostApplicationMedia({
+        hostUid: user.id,
+        photoUris: photosLocal,
+        videoUri: input.videoUrl,
+      });
+      const photos = uploaded.photoUrls;
+      const videoUrl = uploaded.videoUrl;
+
       const patch: User = {
         ...user,
         name: input.name.trim(),
         country: input.country.trim(),
         photoUrl: photos[0],
         photoUrls: photos,
-        videoUrl: input.videoUrl,
+        videoUrl,
         avatarUrl: photos[0],
         hostId,
         hostStatus: 'pending',
@@ -226,7 +260,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           country: patch.country!,
           photoUrl: photos[0],
           photoUrls: photos,
-          videoUrl: patch.videoUrl!,
+          videoUrl,
           hostId,
         });
         setUser(patch);
@@ -239,6 +273,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const approveCurrentHost = useCallback(async () => {
+    if (!__DEV__) {
+      throw new Error('Self-approve is disabled. Wait for admin approval.');
+    }
     if (!user) throw new Error('Please sign in first.');
     if (usingFirebase) {
       await approveHostInFirebase(user.id);
@@ -276,6 +313,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setAuthUser,
       submitHostApplication,
       approveCurrentHost,
+      sendLoginOtp,
     }),
     [
       user,
@@ -287,6 +325,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setAuthUser,
       submitHostApplication,
       approveCurrentHost,
+      sendLoginOtp,
     ],
   );
 

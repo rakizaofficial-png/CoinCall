@@ -22,6 +22,8 @@ export type WithdrawalPayload = {
   gateway: WithdrawalGateway;
   accountName: string;
   accountNumber: string;
+  knownBalance?: number;
+  displayName?: string;
 };
 
 export type WithdrawalResult = {

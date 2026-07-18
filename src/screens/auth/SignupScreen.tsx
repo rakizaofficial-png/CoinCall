@@ -21,23 +21,42 @@ type Props = NativeStackScreenProps<AuthStackParamList, 'Signup'>;
 type AuthMethod = 'email' | 'phone';
 
 export function SignupScreen({ navigation }: Props) {
-  const { signUp, usingFirebase } = useAuth();
+  const { signUp, signIn, sendLoginOtp, usingFirebase } = useAuth();
   const { colors } = useTheme();
   const [method, setMethod] = useState<AuthMethod>('email');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [phone, setPhone] = useState('');
+  const [otp, setOtp] = useState('');
+  const [otpSent, setOtpSent] = useState(false);
   const [isAgeVerified, setIsAgeVerified] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const handleSignup = async () => {
     setError(null);
+    if (!isAgeVerified) {
+      setError('You must confirm you are 18 or older.');
+      return;
+    }
+    if (!name.trim()) {
+      setError('Name is required.');
+      return;
+    }
     setLoading(true);
     try {
+      if (method === 'phone') {
+        if (!otpSent) {
+          await sendLoginOtp(phone.trim());
+          setOtpSent(true);
+          return;
+        }
+        await signIn({ method: 'phone', phone: phone.trim(), otp: otp.trim() });
+        return;
+      }
       await signUp({
-        method,
+        method: 'email',
         name,
         email,
         password,
@@ -76,6 +95,7 @@ export function SignupScreen({ navigation }: Props) {
           onChange={(m) => {
             setMethod(m);
             setError(null);
+            setOtpSent(false);
           }}
           options={[
             { key: 'email', label: 'Email' },
@@ -114,6 +134,17 @@ export function SignupScreen({ navigation }: Props) {
                 onChangeText={setPhone}
                 placeholder="+971…"
               />
+              {otpSent ? (
+                <>
+                  <Text style={[styles.label, { color: colors.text }]}>OTP code</Text>
+                  <AppTextInput
+                    keyboardType="number-pad"
+                    value={otp}
+                    onChangeText={setOtp}
+                    placeholder="6-digit code"
+                  />
+                </>
+              ) : null}
             </>
           )}
         </View>
@@ -140,23 +171,26 @@ export function SignupScreen({ navigation }: Props) {
           </Text>
         </Pressable>
 
-        {error ? <Text style={{ color: colors.danger, marginTop: 12 }}>{error}</Text> : null}
+        {error ? <Text style={[styles.error, { color: colors.danger }]}>{error}</Text> : null}
 
         <PrimaryButton
-          label="Create host account"
+          label={
+            loading
+              ? 'Please wait…'
+              : method === 'phone'
+                ? otpSent
+                  ? 'Verify & continue'
+                  : 'Send OTP'
+                : 'Create account'
+          }
           onPress={handleSignup}
           loading={loading}
-          style={{ marginTop: 22 }}
         />
 
-        <Pressable
-          onPress={() => navigation.navigate('Login')}
-          style={styles.footer}
-          accessibilityRole="link"
-        >
+        <Pressable onPress={() => navigation.navigate('Login')} style={styles.link}>
           <Text style={{ color: colors.textSecondary }}>
             Already have an account?{' '}
-            <Text style={{ color: colors.primarySoft, fontWeight: '800' }}>Log in</Text>
+            <Text style={{ color: colors.primarySoft, fontWeight: '800' }}>Sign in</Text>
           </Text>
         </Pressable>
       </KeyboardAvoidingView>
@@ -165,27 +199,27 @@ export function SignupScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
-  brand: { ...typography.hero, marginTop: 8 },
-  subtitle: { marginTop: 8, marginBottom: 10, lineHeight: 22 },
-  mode: { fontWeight: '700', fontSize: 12, marginBottom: 18 },
-  form: { marginTop: 18, gap: 8 },
-  label: { fontWeight: '700', marginTop: 8, fontSize: 13 },
+  brand: { ...typography.hero, marginTop: 12 },
+  subtitle: { marginTop: 8, marginBottom: 8, lineHeight: 22 },
+  mode: { fontWeight: '700', marginBottom: 16 },
+  form: { marginTop: 16, gap: 4 },
+  label: { fontWeight: '700', marginTop: 10, marginBottom: 6 },
   checkboxRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-    marginTop: 22,
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 18,
     minHeight: 44,
   },
   checkbox: {
-    width: 24,
-    height: 24,
-    borderRadius: 8,
-    borderWidth: 1.5,
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 2,
   },
-  checkboxLabel: { flex: 1, lineHeight: 20, fontSize: 14 },
-  footer: { marginTop: 22, alignItems: 'center', minHeight: 44, justifyContent: 'center' },
+  checkboxLabel: { flex: 1, fontWeight: '600' },
+  error: { marginTop: 12, fontWeight: '600' },
+  link: { marginTop: 18, alignItems: 'center', minHeight: 44, justifyContent: 'center' },
 });

@@ -1,38 +1,38 @@
-import { Bell, ChevronLeft, Phone, Radio, Wallet } from 'lucide-react-native';
+import { Bell, CheckCheck, ChevronLeft, Phone, Radio, Trash2, Wallet } from 'lucide-react-native';
+import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GlassCard } from '../../components/ui/GlassCard';
 import { Screen } from '../../components/ui/Screen';
+import { useApp } from '../../context/AppContext';
+import {
+  clearNotification,
+  listenHostNotifications,
+  markAllNotificationsRead,
+  markNotificationRead,
+  type InboxNotification,
+} from '../../services/notificationInboxService';
 import { radii } from '../../theme/colors';
 import { useTheme } from '../../theme/ThemeContext';
 
-const ITEMS = [
-  {
-    id: '1',
-    icon: Phone,
-    title: 'Incoming call alerts',
-    body: 'Get notified when a viewer requests a 1:1 call.',
-    time: 'System',
-  },
-  {
-    id: '2',
-    icon: Radio,
-    title: 'Go live reminder',
-    body: 'Hosts who go live in the evening earn more gifts.',
-    time: 'Tip',
-  },
-  {
-    id: '3',
-    icon: Wallet,
-    title: 'Withdraw ready',
-    body: 'Your wallet balance can be cashed out via EasyPaisa.',
-    time: 'Wallet',
-  },
-];
+function iconFor(type: string) {
+  if (type === 'call') return Phone;
+  if (type === 'payout') return Wallet;
+  if (type === 'live') return Radio;
+  return Bell;
+}
 
 export function NotificationsScreen({ navigation }: { navigation: any }) {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
+  const { user } = useApp();
+  const [items, setItems] = useState<InboxNotification[]>([]);
+
+  useEffect(() => {
+    return listenHostNotifications(user.id, setItems);
+  }, [user.id]);
+
+  const unread = items.filter((i) => !i.read);
 
   return (
     <Screen scroll contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 40 }}>
@@ -47,42 +47,70 @@ export function NotificationsScreen({ navigation }: { navigation: any }) {
           <ChevronLeft size={28} color={colors.text} />
         </Pressable>
         <Text style={[styles.title, { color: colors.text }]}>Notifications</Text>
-        <View style={{ width: 44 }} />
+        <Pressable
+          onPress={() => markAllNotificationsRead(user.id, unread.map((i) => i.id))}
+          hitSlop={8}
+          accessibilityLabel="Mark all read"
+        >
+          <CheckCheck size={22} color={colors.primarySoft} />
+        </Pressable>
       </View>
 
       <Text style={[styles.sub, { color: colors.textSecondary }]}>
-        Call alerts, live tips, and wallet updates
+        {unread.length} unread · synced from your host inbox
       </Text>
 
-      {ITEMS.map((item) => {
-        const Icon = item.icon;
-        return (
-          <GlassCard key={item.id} style={styles.card}>
-            <View
-              style={[
-                styles.iconWrap,
-                { backgroundColor: `${colors.primary}22` },
-              ]}
+      {items.length === 0 ? (
+        <View style={[styles.emptyHint, { borderColor: colors.border }]}>
+          <Bell size={18} color={colors.textMuted} />
+          <Text style={[styles.emptyText, { color: colors.textMuted }]}>
+            No notifications yet. Call alerts, payouts, and chat messages appear here.
+          </Text>
+        </View>
+      ) : (
+        items.map((item) => {
+          const Icon = iconFor(item.type);
+          return (
+            <Pressable
+              key={item.id}
+              onPress={() => markNotificationRead(user.id, item.id)}
             >
-              <Icon size={20} color={colors.primarySoft} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.itemTitle, { color: colors.text }]}>{item.title}</Text>
-              <Text style={[styles.itemBody, { color: colors.textSecondary }]}>
-                {item.body}
-              </Text>
-              <Text style={[styles.itemTime, { color: colors.textMuted }]}>{item.time}</Text>
-            </View>
-          </GlassCard>
-        );
-      })}
-
-      <View style={[styles.emptyHint, { borderColor: colors.border }]}>
-        <Bell size={18} color={colors.textMuted} />
-        <Text style={[styles.emptyText, { color: colors.textMuted }]}>
-          Push delivery uses your device notification settings.
-        </Text>
-      </View>
+              <GlassCard
+                style={[
+                  styles.card,
+                  !item.read && { borderColor: colors.primarySoft },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.iconWrap,
+                    { backgroundColor: `${colors.primary}22` },
+                  ]}
+                >
+                  <Icon size={20} color={colors.primarySoft} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.itemTitle, { color: colors.text }]}>{item.title}</Text>
+                  <Text style={[styles.itemBody, { color: colors.textSecondary }]}>
+                    {item.body}
+                  </Text>
+                  <Text style={[styles.itemTime, { color: colors.textMuted }]}>
+                    {new Date(item.createdAt).toLocaleString()}
+                    {!item.read ? ' · Unread' : ''}
+                  </Text>
+                </View>
+                <Pressable
+                  onPress={() => clearNotification(user.id, item.id)}
+                  hitSlop={10}
+                  accessibilityLabel="Delete notification"
+                >
+                  <Trash2 size={18} color={colors.textMuted} />
+                </Pressable>
+              </GlassCard>
+            </Pressable>
+          );
+        })
+      )}
     </Screen>
   );
 }
