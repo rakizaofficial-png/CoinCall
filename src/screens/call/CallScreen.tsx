@@ -19,6 +19,7 @@ import {
   startAgoraCall,
   stopAgoraCall,
 } from '../../services/agoraService';
+import { endBridgeCall, fetchCallToken } from '../../services/callBridge';
 import {
   endActiveCall,
   publishActiveCall,
@@ -39,23 +40,55 @@ function formatTime(totalSeconds: number) {
 
 export function CallScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
-  const { getHost, call, endCall, user, reportUser, blockUser } = useApp();
-  const host = getHost(route.params.hostId);
+  const { getHost, call, endCall, user, reportUser, blockUser } =
+    useApp();
+  const bridgeCallId = route.params.bridgeCallId;
+  const isBridge = Boolean(bridgeCallId);
+  const peerHost = !isBridge ? getHost(route.params.hostId) : undefined;
+  const peerName =
+    route.params.peerName || peerHost?.name || 'Caller';
+  const peerAvatar =
+    route.params.peerAvatar ||
+    peerHost?.avatarUrl ||
+    `https://i.pravatar.cc/300?u=${route.params.hostId}`;
+  const rate =
+    route.params.ratePerMinute || peerHost?.ratePerMinute || 80;
+  const channel =
+    route.params.channel || (peerHost ? `call_${peerHost.id}` : '');
+
   const [muted, setMuted] = useState(false);
   const [cameraOff, setCameraOff] = useState(false);
   const [videoStatus, setVideoStatus] = useState('Starting camera...');
+  const [bridgeSeconds, setBridgeSeconds] = useState(0);
+  const [bridgeCoins, setBridgeCoins] = useState(rate);
   const agoraReady = isAgoraConfigured() && Platform.OS === 'web';
   const activeCallIdRef = useRef<string | null>(null);
-  const channel = host ? `call_${host.id}` : '';
 
+  // Legacy host↔host demo call: ensure session exists
   useEffect(() => {
+    if (isBridge) return;
     if (!call || call.status === 'ended') {
       navigation.goBack();
     }
-  }, [call, navigation]);
+  }, [call, isBridge, navigation]);
 
   useEffect(() => {
-    if (!call || !host || call.status !== 'active') return;
+    if (!isBridge) return;
+    const t = setInterval(() => {
+      setBridgeSeconds((s) => {
+        const next = s + 1;
+        if (next > 0 && next % 60 === 0) {
+          setBridgeCoins((c) => c + rate);
+        }
+        return next;
+      });
+    }, 1000);
+    return () => clearInterval(t);
+  }, [isBridge, rate]);
+
+  useEffect(() => {
+    if (isBridge) return;
+    if (!call || call.status !== 'active' || !peerHost) return;
     let cancelled = false;
     (async () => {
       const record = await publishActiveCall({
@@ -63,8 +96,8 @@ export function CallScreen({ navigation, route }: Props) {
         hostUid: user.id,
         hostName: user.name,
         hostAvatar: user.avatarUrl,
-        peerId: host.id,
-        peerName: host.name,
+        peerId: peerHost.id,
+        peerName: peerHost.name,
       });
       if (!cancelled && record) activeCallIdRef.current = record.id;
     })();
@@ -74,18 +107,28 @@ export function CallScreen({ navigation, route }: Props) {
       activeCallIdRef.current = null;
       void endActiveCall(id);
     };
-  }, [call?.status, channel, host?.id, host?.name, user.avatarUrl, user.id, user.name]);
+  }, [
+    call?.status,
+    channel,
+    isBridge,
+    peerHost?.id,
+    peerHost?.name,
+    user.avatarUrl,
+    user.id,
+    user.name,
+  ]);
 
   useEffect(() => {
-    if (!call || !activeCallIdRef.current) return;
+    if (isBridge || !call || !activeCallIdRef.current) return;
     void updateActiveCall(activeCallIdRef.current, {
       seconds: call.seconds,
       coinsEarned: call.coinsSpent,
     });
-  }, [call?.seconds, call?.coinsSpent]);
+  }, [call?.seconds, call?.coinsSpent, isBridge]);
 
   useEffect(() => {
-    if (!agoraReady || !call || !host) return;
+    if (!agoraReady || !channel) return;
+    if (!isBridge && (!call || !peerHost)) return;
 
     let active = true;
     (async () => {
@@ -96,12 +139,27 @@ export function CallScreen({ navigation, route }: Props) {
           setVideoStatus('Video containers missing');
           return;
         }
+
+        let uid: number | undefined;
+        if (isBridge && bridgeCallId) {
+          const tokenPayload = await fetchCallToken(bridgeCallId, 'host');
+          uid = tokenPayload.uid;
+          setVideoStatus('Connected to Luma user · live');
+        }
+
         await startAgoraCall({
           channel,
           localVideoEl: localEl,
           remoteVideoEl: remoteEl,
+          uid,
         });
-        if (active) setVideoStatus('Live · admin can monitor silently');
+        if (active) {
+          setVideoStatus(
+            isBridge
+              ? 'Live with Luma user'
+              : 'Live · admin can monitor silently',
+          );
+        }
       } catch (e: any) {
         if (active) {
           setVideoStatus(e?.message || 'Could not start video');
@@ -118,19 +176,35 @@ export function CallScreen({ navigation, route }: Props) {
       active = false;
       void stopAgoraCall();
     };
-  }, [agoraReady, call?.hostId, channel, host?.id]);
+  }, [
+    agoraReady,
+    bridgeCallId,
+    call?.hostId,
+    channel,
+    isBridge,
+    peerHost?.id,
+  ]);
+
+  const displaySeconds = isBridge ? bridgeSeconds : call?.seconds ?? 0;
+  const displayCoins = isBridge ? bridgeCoins : call?.coinsSpent ?? 0;
 
   const minutesEarned = useMemo(() => {
-    if (!call || !host) return 0;
-    return Math.floor(call.coinsSpent / (host.ratePerMinute || 1));
-  }, [call, host]);
+    return Math.floor(displayCoins / (rate || 1));
+  }, [displayCoins, rate]);
 
-  if (!host || !call) {
+  if (!isBridge && (!peerHost || !call)) {
     return <View style={styles.container} />;
   }
 
   const hangUp = async () => {
     await stopAgoraCall();
+    if (bridgeCallId) {
+      try {
+        await endBridgeCall(bridgeCallId);
+      } catch {
+        // ignore
+      }
+    }
     const id = activeCallIdRef.current;
     activeCallIdRef.current = null;
     await endActiveCall(id);
@@ -143,18 +217,21 @@ export function CallScreen({ navigation, route }: Props) {
       {agoraReady ? (
         <div id="agora-remote" style={webRemoteStyle} />
       ) : (
-        <Image source={{ uri: host.avatarUrl }} style={styles.remote} />
+        <Image source={{ uri: peerAvatar }} style={styles.remote} />
       )}
       <View style={styles.overlay} pointerEvents="none" />
 
       <View style={styles.topBar}>
-        <Text style={styles.timer}>{formatTime(call.seconds)}</Text>
+        <Text style={styles.timer}>{formatTime(displaySeconds)}</Text>
         <Text style={styles.coins}>
-          Earned {call.coinsSpent} · {host.ratePerMinute}/min
+          {isBridge ? 'User call' : 'Earned'} {displayCoins} · {rate}/min
           {minutesEarned ? ` · ~${minutesEarned}m` : ''}
         </Text>
+        <Text style={styles.peer}>{peerName}</Text>
         <Text style={styles.videoStatus}>
-          {agoraReady ? videoStatus : 'Demo video (add Agora App ID for real camera)'}
+          {agoraReady
+            ? videoStatus
+            : 'Demo video (add Agora App ID for real camera)'}
         </Text>
       </View>
 
@@ -204,8 +281,14 @@ export function CallScreen({ navigation, route }: Props) {
           style={styles.controlBtn}
           onPress={() =>
             promptChoices('Report', 'Reason?', [
-              { label: 'Abuse', onPress: () => reportUser(host.id, 'Abuse') },
-              { label: 'Spam', onPress: () => reportUser(host.id, 'Spam') },
+              {
+                label: 'Abuse',
+                onPress: () => reportUser(route.params.hostId, 'Abuse'),
+              },
+              {
+                label: 'Spam',
+                onPress: () => reportUser(route.params.hostId, 'Spam'),
+              },
             ])
           }
         >
@@ -216,17 +299,21 @@ export function CallScreen({ navigation, route }: Props) {
         </Pressable>
       </View>
 
-      <Text style={styles.spent}>Call earnings: {call.coinsSpent} coins</Text>
-      <Pressable
-        style={styles.blockLink}
-        onPress={async () => {
-          blockUser(host.id);
-          await hangUp();
-          navigation.popToTop();
-        }}
-      >
-        <Text style={styles.blockText}>Block user</Text>
-      </Pressable>
+      <Text style={styles.spent}>
+        {isBridge ? 'Connected via CoinCall bridge' : `Call earnings: ${displayCoins} coins`}
+      </Text>
+      {!isBridge && (
+        <Pressable
+          style={styles.blockLink}
+          onPress={async () => {
+            blockUser(route.params.hostId);
+            await hangUp();
+            navigation.popToTop();
+          }}
+        >
+          <Text style={styles.blockText}>Block user</Text>
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -257,6 +344,7 @@ const styles = StyleSheet.create({
   topBar: { alignItems: 'center', marginTop: 12, zIndex: 2 },
   timer: { color: colors.text, fontSize: 34, fontWeight: '800' },
   coins: { color: colors.accent, marginTop: 6, fontWeight: '700' },
+  peer: { color: colors.text, marginTop: 4, fontWeight: '700', fontSize: 16 },
   videoStatus: {
     color: colors.primarySoft,
     marginTop: 6,

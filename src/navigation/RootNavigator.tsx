@@ -1,7 +1,8 @@
 import { ActivityIndicator, View } from 'react-native';
 import { NavigationContainer, DarkTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { AppProvider } from '../context/AppContext';
+import { IncomingCallModal } from '../components/IncomingCallModal';
+import { AppProvider, useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { HostApplyScreen } from '../screens/auth/HostApplyScreen';
 import { HostPendingScreen } from '../screens/auth/HostPendingScreen';
@@ -31,13 +32,21 @@ function HostGate() {
   const { user } = useAuth();
   if (!user) return null;
 
-  // Waiting for admin — show Host ID only, no hosting app
   if (user.hostStatus === 'pending') {
     return <HostPendingScreen />;
   }
 
-  // Not submitted yet, or rejected → application form
   return <HostApplyScreen />;
+}
+
+function BridgeIncomingLayer() {
+  const { incomingBridgeCall, clearIncomingBridgeCall } = useApp();
+  return (
+    <IncomingCallModal
+      call={incomingBridgeCall}
+      onClear={clearIncomingBridgeCall}
+    />
+  );
 }
 
 function AuthenticatedApp() {
@@ -52,6 +61,7 @@ function AuthenticatedApp() {
         <Stack.Screen name="Call" component={CallScreen} />
         <Stack.Screen name="Chat" component={ChatScreen} />
       </Stack.Navigator>
+      <BridgeIncomingLayer />
     </AppProvider>
   );
 }
@@ -61,7 +71,14 @@ export function RootNavigator() {
 
   if (!authReady) {
     return (
-      <View style={{ flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' }}>
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: colors.bg,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
         <ActivityIndicator color={colors.primarySoft} size="large" />
       </View>
     );

@@ -8,6 +8,12 @@ import React, {
   useState,
 } from 'react';
 import { COIN_PACKAGES, MOCK_HOSTS, MOCK_NEWS, MOCK_ROOMS } from '../data/mockData';
+import {
+  type BridgeCall,
+  isCallBridgeConfigured,
+  listenIncomingCalls,
+  publishHostPresence,
+} from '../services/callBridge';
 import { listenHostControl, syncHostPresence } from '../services/realtimeService';
 import type {
   CallSession,
@@ -116,6 +122,9 @@ type AppContextValue = {
   filteredNews: NewsItem[];
   filteredRooms: PartyRoom[];
   unreadNewsCount: number;
+  /** Incoming call from Luma / user app */
+  incomingBridgeCall: BridgeCall | null;
+  clearIncomingBridgeCall: () => void;
 };
 
 const AppContext = createContext<AppContextValue | undefined>(undefined);
@@ -214,21 +223,83 @@ export function AppProvider({
   const [callsToday, setCallsToday] = useState(0);
   const [myTodayMinutes, setMyTodayMinutes] = useState(12);
   const [myLongestCallSeconds, setMyLongestCallSeconds] = useState(3 * 60);
+  const [incomingBridgeCall, setIncomingBridgeCall] = useState<BridgeCall | null>(
+    null,
+  );
   const callRef = useRef<CallSession | null>(null);
+
+  const clearIncomingBridgeCall = useCallback(() => {
+    setIncomingBridgeCall(null);
+  }, []);
 
   const setHostOnline = useCallback((v: boolean, opts?: { silent?: boolean }) => {
     setHostOnlineState(v);
     setUser((u) => ({ ...u, isOnline: v }));
     void syncHostPresence(user.id, { isOnline: v });
+    if (isCallBridgeConfigured()) {
+      void publishHostPresence({
+        id: user.id,
+        name: user.name,
+        avatarUrl: user.avatarUrl,
+        country: user.country,
+        ratePerMinute: 80,
+        isOnline: v,
+        isLive: false,
+        isOnCall: Boolean(callRef.current?.status === 'active'),
+      }).catch(() => {
+        if (v && !opts?.silent) {
+          notify(
+            'Bridge offline',
+            'Could not reach CoinCall API. Start server on :4000',
+          );
+        }
+      });
+    }
     if (!opts?.silent) {
       notify(
         v ? 'You are Online' : 'You are Offline',
         v
-          ? 'Users can now call you. Earnings start when a call begins.'
+          ? 'Luma users can now call you. Earnings start when a call begins.'
           : 'You will not receive new calls until you go online again.',
       );
     }
-  }, [user.id]);
+  }, [user.avatarUrl, user.country, user.id, user.name]);
+
+  // Heartbeat + SSE so Luma users can find & ring this host
+  useEffect(() => {
+    if (!hostOnline || !isCallBridgeConfigured()) return;
+
+    const beat = () => {
+      void publishHostPresence({
+        id: user.id,
+        name: user.name,
+        avatarUrl: user.avatarUrl,
+        country: user.country,
+        ratePerMinute: 80,
+        isOnline: true,
+        isOnCall: Boolean(callRef.current?.status === 'active') || Boolean(incomingBridgeCall),
+      }).catch(() => undefined);
+    };
+    beat();
+    const timer = setInterval(beat, 15_000);
+    const stopListen = listenIncomingCalls(user.id, (bridgeCall) => {
+      if (bridgeCall.status !== 'ringing') return;
+      setIncomingBridgeCall(bridgeCall);
+      notify('Incoming call 💕', `${bridgeCall.userName} is calling from Luma`);
+    });
+
+    return () => {
+      clearInterval(timer);
+      stopListen();
+    };
+  }, [
+    hostOnline,
+    incomingBridgeCall,
+    user.avatarUrl,
+    user.country,
+    user.id,
+    user.name,
+  ]);
 
   useEffect(() => {
     callRef.current = call;
@@ -881,6 +952,8 @@ export function AppProvider({
       filteredNews,
       filteredRooms,
       unreadNewsCount,
+      incomingBridgeCall,
+      clearIncomingBridgeCall,
     }),
     [
       user,
@@ -933,6 +1006,8 @@ export function AppProvider({
       filteredNews,
       filteredRooms,
       unreadNewsCount,
+      incomingBridgeCall,
+      clearIncomingBridgeCall,
     ],
   );
 
