@@ -18,7 +18,7 @@ type Props = NativeStackScreenProps<AuthStackParamList, 'Login'>;
 type AuthMethod = 'email' | 'phone';
 
 export function LoginScreen({ navigation }: Props) {
-  const { signIn } = useAuth();
+  const { signIn, usingFirebase } = useAuth();
   const [method, setMethod] = useState<AuthMethod>('email');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -46,8 +46,19 @@ export function LoginScreen({ navigation }: Props) {
           ? { method: 'email', email, password }
           : { method: 'phone', phone, otp },
       );
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Login failed.');
+    } catch (e: any) {
+      const code = e?.code as string | undefined;
+      if (code === 'auth/invalid-credential' || code === 'auth/wrong-password') {
+        setError('Wrong email or password.');
+      } else if (code === 'auth/user-not-found') {
+        setError('No account found. Please sign up first.');
+      } else if (code === 'auth/too-many-requests') {
+        setError('Too many tries. Wait a minute and try again.');
+      } else if (code === 'auth/network-request-failed') {
+        setError('Network error. Check internet and try again.');
+      } else {
+        setError(e instanceof Error ? e.message : 'Login failed.');
+      }
     } finally {
       setLoading(false);
     }
@@ -58,34 +69,27 @@ export function LoginScreen({ navigation }: Props) {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <View style={styles.header}>
-        <Text style={styles.brand}>CoinCall</Text>
-        <Text style={styles.subtitle}>Sign in to continue</Text>
-      </View>
+        <Text style={styles.brand}>CoinCall Beauty</Text>
+      <Text style={styles.subtitle}>Host login · earn with your smile</Text>
+      <Text style={styles.mode}>
+        {usingFirebase ? 'Real Firebase login ON' : 'Demo mode'}
+      </Text>
 
       <View style={styles.methodRow}>
-        <Pressable
-          style={[styles.methodChip, method === 'email' && styles.methodChipActive]}
-          onPress={() => {
-            setMethod('email');
-            setError(null);
-          }}
-        >
-          <Text style={[styles.methodText, method === 'email' && styles.methodTextActive]}>
-            Email
-          </Text>
-        </Pressable>
-        <Pressable
-          style={[styles.methodChip, method === 'phone' && styles.methodChipActive]}
-          onPress={() => {
-            setMethod('phone');
-            setError(null);
-          }}
-        >
-          <Text style={[styles.methodText, method === 'phone' && styles.methodTextActive]}>
-            Phone OTP
-          </Text>
-        </Pressable>
+        {(['email', 'phone'] as const).map((m) => (
+          <Pressable
+            key={m}
+            style={[styles.methodChip, method === m && styles.methodChipActive]}
+            onPress={() => {
+              setMethod(m);
+              setError(null);
+            }}
+          >
+            <Text style={[styles.methodText, method === m && styles.methodTextActive]}>
+              {m === 'email' ? 'Email' : 'Phone OTP'}
+            </Text>
+          </Pressable>
+        ))}
       </View>
 
       {method === 'email' ? (
@@ -96,7 +100,7 @@ export function LoginScreen({ navigation }: Props) {
             autoCapitalize="none"
             keyboardType="email-address"
             placeholder="you@example.com"
-            placeholderTextColor={colors.textSecondary}
+            placeholderTextColor={colors.textMuted}
             value={email}
             onChangeText={setEmail}
           />
@@ -105,7 +109,7 @@ export function LoginScreen({ navigation }: Props) {
             style={styles.input}
             secureTextEntry
             placeholder="Your password"
-            placeholderTextColor={colors.textSecondary}
+            placeholderTextColor={colors.textMuted}
             value={password}
             onChangeText={setPassword}
           />
@@ -117,7 +121,7 @@ export function LoginScreen({ navigation }: Props) {
             style={styles.input}
             keyboardType="phone-pad"
             placeholder="+92 300 1234567"
-            placeholderTextColor={colors.textSecondary}
+            placeholderTextColor={colors.textMuted}
             value={phone}
             onChangeText={setPhone}
           />
@@ -133,7 +137,7 @@ export function LoginScreen({ navigation }: Props) {
                 style={styles.input}
                 keyboardType="number-pad"
                 placeholder="1234"
-                placeholderTextColor={colors.textSecondary}
+                placeholderTextColor={colors.textMuted}
                 value={otp}
                 onChangeText={setOtp}
               />
@@ -168,115 +172,80 @@ export function LoginScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: colors.bg,
     paddingHorizontal: 24,
     paddingTop: 72,
   },
-  header: {
-    marginBottom: 28,
-  },
   brand: {
-    fontSize: 34,
-    fontWeight: '700',
+    fontSize: 36,
+    fontWeight: '800',
     color: colors.text,
-    letterSpacing: -0.5,
   },
   subtitle: {
     marginTop: 8,
     fontSize: 16,
     color: colors.textSecondary,
+    marginBottom: 8,
   },
-  methodRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginBottom: 24,
+  mode: {
+    color: colors.primarySoft,
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 20,
   },
+  methodRow: { flexDirection: 'row', gap: 10, marginBottom: 24 },
   methodChip: {
     paddingVertical: 10,
     paddingHorizontal: 16,
-    borderRadius: 10,
-    backgroundColor: colors.surface,
+    borderRadius: 16,
+    backgroundColor: colors.bgCard,
     borderWidth: 1,
     borderColor: colors.border,
   },
   methodChipActive: {
-    backgroundColor: colors.primaryMuted,
+    backgroundColor: colors.primary,
     borderColor: colors.primary,
   },
-  methodText: {
-    color: colors.textSecondary,
-    fontWeight: '600',
-  },
-  methodTextActive: {
-    color: colors.primary,
-  },
-  form: {
-    gap: 8,
-  },
+  methodText: { color: colors.textSecondary, fontWeight: '700' },
+  methodTextActive: { color: colors.text },
+  form: { gap: 8 },
   label: {
     marginTop: 8,
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '700',
     color: colors.text,
   },
   input: {
-    backgroundColor: colors.surface,
+    backgroundColor: colors.bgCard,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 12,
+    borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 14,
     fontSize: 16,
     color: colors.text,
   },
-  hint: {
-    marginTop: 8,
-    color: colors.textSecondary,
-    fontSize: 13,
-  },
-  error: {
-    marginTop: 16,
-    color: colors.danger,
-    fontSize: 14,
-  },
+  hint: { marginTop: 8, color: colors.textSecondary, fontSize: 13 },
+  error: { marginTop: 16, color: colors.danger, fontSize: 14 },
   primaryButton: {
     marginTop: 24,
     backgroundColor: colors.primary,
-    borderRadius: 12,
+    borderRadius: 16,
     paddingVertical: 16,
     alignItems: 'center',
   },
-  buttonDisabled: {
-    opacity: 0.7,
-  },
-  primaryButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
-  },
+  buttonDisabled: { opacity: 0.7 },
+  primaryButtonText: { color: '#fff', fontSize: 16, fontWeight: '800' },
   secondaryButton: {
     marginTop: 12,
-    borderRadius: 12,
+    borderRadius: 14,
     paddingVertical: 14,
     alignItems: 'center',
     borderWidth: 1,
     borderColor: colors.primary,
-    backgroundColor: colors.surface,
   },
-  secondaryButtonText: {
-    color: colors.primary,
-    fontWeight: '700',
-  },
-  footerLink: {
-    marginTop: 24,
-    alignItems: 'center',
-  },
-  footerText: {
-    color: colors.textSecondary,
-    fontSize: 15,
-  },
-  footerTextBold: {
-    color: colors.primary,
-    fontWeight: '700',
-  },
+  secondaryButtonText: { color: colors.primary, fontWeight: '800' },
+  footerLink: { marginTop: 24, alignItems: 'center' },
+  footerText: { color: colors.textSecondary, fontSize: 15 },
+  footerTextBold: { color: colors.primarySoft, fontWeight: '800' },
 });

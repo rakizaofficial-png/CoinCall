@@ -1,8 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { DiscoverScreen } from '../screens/main/DiscoverScreen';
+import { HomeScreen } from '../screens/main/HomeScreen';
+import { LiveScreen } from '../screens/main/LiveScreen';
+import { EarningsScreen } from '../screens/main/EarningsScreen';
 import { ProfileScreen } from '../screens/main/ProfileScreen';
-import { WalletScreen } from '../screens/main/WalletScreen';
 import { colors } from '../theme/colors';
 import type { MainTabParamList } from './types';
 
@@ -11,29 +12,34 @@ const Tab = createBottomTabNavigator<MainTabParamList>();
 export function MainTabNavigator() {
   return (
     <Tab.Navigator
+      initialRouteName="Home"
       screenOptions={({ route }) => ({
         headerShown: false,
-        tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: colors.textSecondary,
         tabBarStyle: {
-          backgroundColor: colors.surface,
+          backgroundColor: colors.bgElevated,
           borderTopColor: colors.border,
+          height: 68,
+          paddingBottom: 10,
+          paddingTop: 8,
         },
+        tabBarActiveTintColor: colors.tabActive,
+        tabBarInactiveTintColor: colors.tabInactive,
+        tabBarLabelStyle: { fontWeight: '700', fontSize: 11 },
         tabBarIcon: ({ color, size }) => {
-          const iconName =
-            route.name === 'Discover'
-              ? 'grid-outline'
-              : route.name === 'Wallet'
-                ? 'wallet-outline'
-                : 'person-outline';
-
-          return <Ionicons name={iconName} size={size} color={color} />;
+          const map: Record<keyof MainTabParamList, keyof typeof Ionicons.glyphMap> = {
+            Home: 'heart',
+            Live: 'radio',
+            Earnings: 'wallet',
+            Profile: 'sparkles',
+          };
+          return <Ionicons name={map[route.name]} size={size} color={color} />;
         },
       })}
     >
-      <Tab.Screen name="Discover" component={DiscoverScreen} />
-      <Tab.Screen name="Wallet" component={WalletScreen} />
-      <Tab.Screen name="Profile" component={ProfileScreen} />
+      <Tab.Screen name="Home" component={HomeScreen} options={{ title: 'Calls' }} />
+      <Tab.Screen name="Live" component={LiveScreen} options={{ title: 'Go Live' }} />
+      <Tab.Screen name="Earnings" component={EarningsScreen} options={{ title: 'Withdraw' }} />
+      <Tab.Screen name="Profile" component={ProfileScreen} options={{ title: 'Me' }} />
     </Tab.Navigator>
   );
 }

@@ -1,11 +1,23 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
 } from 'react';
-import type { User } from '../types/user';
+import { generateHostId } from '../data/countries';
+import { isFirebaseReady } from '../lib/firebase';
+import {
+  approveHostInFirebase,
+  firebaseEmailSignIn,
+  firebaseEmailSignUp,
+  firebaseSignOut,
+  listenAuth,
+  submitHostApplicationToFirebase,
+} from '../services/authService';
+import type { User } from '../types/models';
 
 type AuthMethod = 'email' | 'phone';
 
@@ -26,107 +38,256 @@ export type SignInInput = {
   method: AuthMethod;
 };
 
+export type HostApplicationInput = {
+  name: string;
+  country: string;
+  photoUrls: string[];
+  videoUrl: string;
+};
+
 type AuthContextValue = {
   user: User | null;
   isAuthenticated: boolean;
+  isHostApproved: boolean;
+  usingFirebase: boolean;
+  authReady: boolean;
   signIn: (input: SignInInput) => Promise<void>;
   signUp: (input: SignUpInput) => Promise<void>;
   signOut: () => void;
+  setAuthUser: (user: User | null) => void;
+  submitHostApplication: (input: HostApplicationInput) => Promise<void>;
+  /** Demo / admin: approve current host so app unlocks */
+  approveCurrentHost: () => Promise<void>;
 };
+
+const STORAGE_KEY = 'coincall_host_user_v1';
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-function createMockUser(partial: Omit<User, 'id' | 'role' | 'coinBalance' | 'isVerified'> & Partial<User>): User {
+function createMockUser(
+  partial: Pick<User, 'name'> & Partial<User>,
+): User {
   return {
-    id: `user_${Date.now()}`,
-    role: 'user',
-    coinBalance: 100,
+    id: `host_${Date.now()}`,
+    coinBalance: 0,
+    diamonds: 0,
+    gems: 0,
+    level: 1,
     isVerified: false,
+    avatarUrl: `https://i.pravatar.cc/300?u=${encodeURIComponent(partial.name)}`,
+    isOnline: false,
+    hostStatus: 'none',
     ...partial,
+    role: 'host',
   };
+}
+
+async function persistMock(user: User | null) {
+  if (user) await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(user));
+  else await AsyncStorage.removeItem(STORAGE_KEY);
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const usingFirebase = isFirebaseReady();
+
+  useEffect(() => {
+    if (usingFirebase) {
+      const unsub = listenAuth((profile) => {
+        setUser(profile);
+        setAuthReady(true);
+      });
+      return unsub;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(STORAGE_KEY);
+        if (!cancelled && raw) {
+          const parsed = JSON.parse(raw) as User;
+          setUser({ ...parsed, hostStatus: parsed.hostStatus || 'none', role: 'host' });
+        }
+      } finally {
+        if (!cancelled) setAuthReady(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [usingFirebase]);
+
+  const setAuthUser = useCallback((next: User | null) => {
+    setUser(next);
+    if (!usingFirebase) void persistMock(next);
+  }, [usingFirebase]);
 
   const signIn = useCallback(async (input: SignInInput) => {
-    if (input.method === 'email') {
-      if (!input.email?.trim() || !input.password?.trim()) {
-        throw new Error('Email and password are required.');
-      }
-      setUser(
-        createMockUser({
-          name: input.email.split('@')[0] || 'User',
-          email: input.email.trim(),
-        }),
-      );
+    if (input.method === 'phone') {
+      throw new Error('Phone OTP comes after Agora setup. Use Email for now.');
+    }
+    if (!input.email?.trim() || !input.password?.trim()) {
+      throw new Error('Email and password are required.');
+    }
+
+    if (usingFirebase) {
+      const profile = await firebaseEmailSignIn({
+        email: input.email,
+        password: input.password,
+      });
+      setUser(profile);
       return;
     }
 
-    if (!input.phone?.trim() || !input.otp?.trim()) {
-      throw new Error('Phone and OTP are required.');
-    }
-    if (input.otp.trim().length < 4) {
-      throw new Error('Enter a valid OTP (any 4+ digits for mock login).');
-    }
-
-    setUser(
-      createMockUser({
-        name: `User ${input.phone.slice(-4)}`,
-        phone: input.phone.trim(),
-      }),
-    );
-  }, []);
+    const next = createMockUser({
+      name: input.email.split('@')[0] || 'Host',
+      email: input.email.trim(),
+      hostStatus: 'none',
+    });
+    setAuthUser(next);
+  }, [setAuthUser, usingFirebase]);
 
   const signUp = useCallback(async (input: SignUpInput) => {
-    if (!input.name.trim()) {
-      throw new Error('Name is required.');
-    }
+    if (!input.name.trim()) throw new Error('Name is required.');
     if (!input.isAgeVerified) {
       throw new Error('You must confirm you are 18 or older.');
     }
+    if (input.method === 'phone') {
+      throw new Error('Phone OTP comes later. Use Email for now.');
+    }
+    if (!input.email?.trim() || !input.password?.trim()) {
+      throw new Error('Email and password are required.');
+    }
+    if (input.password.length < 6) {
+      throw new Error('Password must be at least 6 characters.');
+    }
 
-    if (input.method === 'email') {
-      if (!input.email?.trim() || !input.password?.trim()) {
-        throw new Error('Email and password are required.');
-      }
-      if (input.password.length < 6) {
-        throw new Error('Password must be at least 6 characters.');
-      }
-      setUser(
-        createMockUser({
-          name: input.name.trim(),
-          email: input.email.trim(),
-        }),
-      );
+    if (usingFirebase) {
+      const profile = await firebaseEmailSignUp({
+        name: input.name,
+        email: input.email,
+        password: input.password,
+      });
+      setUser(profile);
       return;
     }
 
-    if (!input.phone?.trim()) {
-      throw new Error('Phone number is required.');
-    }
-
-    setUser(
+    setAuthUser(
       createMockUser({
         name: input.name.trim(),
-        phone: input.phone.trim(),
+        email: input.email.trim(),
+        hostStatus: 'none',
       }),
     );
-  }, []);
+  }, [setAuthUser, usingFirebase]);
 
   const signOut = useCallback(() => {
-    setUser(null);
-  }, []);
+    if (usingFirebase) {
+      void firebaseSignOut();
+    }
+    setAuthUser(null);
+  }, [setAuthUser, usingFirebase]);
+
+  const submitHostApplication = useCallback(
+    async (input: HostApplicationInput) => {
+      if (!user) throw new Error('Please sign in first.');
+      if (!input.name.trim()) throw new Error('Display name is required.');
+      if (!input.country.trim()) throw new Error('Country is required.');
+      if (!input.photoUrls?.length) {
+        throw new Error('Please add at least 1 photo.');
+      }
+      if (input.photoUrls.length < 2) {
+        throw new Error('Please add at least 2 photos.');
+      }
+      if (!input.videoUrl) throw new Error('Please add an intro video.');
+
+      const hostId = user.hostId || generateHostId();
+      const photos = input.photoUrls.slice(0, 8);
+      const patch: User = {
+        ...user,
+        name: input.name.trim(),
+        country: input.country.trim(),
+        photoUrl: photos[0],
+        photoUrls: photos,
+        videoUrl: input.videoUrl,
+        avatarUrl: photos[0],
+        hostId,
+        hostStatus: 'pending',
+        applicationSubmittedAt: Date.now(),
+        isVerified: false,
+        isOnline: false,
+        rejectionReason: undefined,
+      };
+
+      if (usingFirebase) {
+        await submitHostApplicationToFirebase(user.id, {
+          name: patch.name,
+          country: patch.country!,
+          photoUrl: photos[0],
+          photoUrls: photos,
+          videoUrl: patch.videoUrl!,
+          hostId,
+        });
+        setUser(patch);
+        return;
+      }
+
+      setAuthUser(patch);
+    },
+    [setAuthUser, user, usingFirebase],
+  );
+
+  const approveCurrentHost = useCallback(async () => {
+    if (!user) throw new Error('Please sign in first.');
+    if (usingFirebase) {
+      await approveHostInFirebase(user.id);
+      setUser((u) =>
+        u
+          ? {
+              ...u,
+              hostStatus: 'approved',
+              isVerified: true,
+              coinBalance: Math.max(u.coinBalance, 200),
+            }
+          : u,
+      );
+      return;
+    }
+    setAuthUser({
+      ...user,
+      hostStatus: 'approved',
+      isVerified: true,
+      coinBalance: Math.max(user.coinBalance, 200),
+      isOnline: false,
+    });
+  }, [setAuthUser, user, usingFirebase]);
 
   const value = useMemo(
     () => ({
       user,
       isAuthenticated: user !== null,
+      isHostApproved: user?.hostStatus === 'approved',
+      usingFirebase,
+      authReady,
       signIn,
       signUp,
       signOut,
+      setAuthUser,
+      submitHostApplication,
+      approveCurrentHost,
     }),
-    [user, signIn, signUp, signOut],
+    [
+      user,
+      usingFirebase,
+      authReady,
+      signIn,
+      signUp,
+      signOut,
+      setAuthUser,
+      submitHostApplication,
+      approveCurrentHost,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -134,8 +295,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
 export function useAuth() {
   const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider.');
-  }
+  if (!context) throw new Error('useAuth must be used within an AuthProvider.');
   return context;
 }

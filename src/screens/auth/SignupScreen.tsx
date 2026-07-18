@@ -19,7 +19,7 @@ type Props = NativeStackScreenProps<AuthStackParamList, 'Signup'>;
 type AuthMethod = 'email' | 'phone';
 
 export function SignupScreen({ navigation }: Props) {
-  const { signUp } = useAuth();
+  const { signUp, usingFirebase } = useAuth();
   const [method, setMethod] = useState<AuthMethod>('email');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -41,8 +41,17 @@ export function SignupScreen({ navigation }: Props) {
         phone,
         isAgeVerified,
       });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Signup failed.');
+    } catch (e: any) {
+      const code = e?.code as string | undefined;
+      if (code === 'auth/email-already-in-use') {
+        setError('This email is already registered. Please log in.');
+      } else if (code === 'auth/weak-password') {
+        setError('Password should be at least 6 characters.');
+      } else if (code === 'auth/invalid-email') {
+        setError('Please enter a valid email.');
+      } else {
+        setError(e instanceof Error ? e.message : 'Signup failed.');
+      }
     } finally {
       setLoading(false);
     }
@@ -57,34 +66,29 @@ export function SignupScreen({ navigation }: Props) {
         contentContainerStyle={styles.container}
         keyboardShouldPersistTaps="handled"
       >
-        <View style={styles.header}>
-          <Text style={styles.brand}>CoinCall</Text>
-          <Text style={styles.subtitle}>Create your account</Text>
-        </View>
+        <Text style={styles.brand}>Join as Beauty Host</Text>
+        <Text style={styles.subtitle}>
+          Create account → submit photo & video → wait for Host ID approval
+        </Text>
+        <Text style={styles.mode}>
+          {usingFirebase ? 'Real Firebase signup ON' : 'Demo mode'}
+        </Text>
 
         <View style={styles.methodRow}>
-          <Pressable
-            style={[styles.methodChip, method === 'email' && styles.methodChipActive]}
-            onPress={() => {
-              setMethod('email');
-              setError(null);
-            }}
-          >
-            <Text style={[styles.methodText, method === 'email' && styles.methodTextActive]}>
-              Email
-            </Text>
-          </Pressable>
-          <Pressable
-            style={[styles.methodChip, method === 'phone' && styles.methodChipActive]}
-            onPress={() => {
-              setMethod('phone');
-              setError(null);
-            }}
-          >
-            <Text style={[styles.methodText, method === 'phone' && styles.methodTextActive]}>
-              Phone OTP
-            </Text>
-          </Pressable>
+          {(['email', 'phone'] as const).map((m) => (
+            <Pressable
+              key={m}
+              style={[styles.methodChip, method === m && styles.methodChipActive]}
+              onPress={() => {
+                setMethod(m);
+                setError(null);
+              }}
+            >
+              <Text style={[styles.methodText, method === m && styles.methodTextActive]}>
+                {m === 'email' ? 'Email' : 'Phone OTP'}
+              </Text>
+            </Pressable>
+          ))}
         </View>
 
         <View style={styles.form}>
@@ -92,7 +96,7 @@ export function SignupScreen({ navigation }: Props) {
           <TextInput
             style={styles.input}
             placeholder="Your name"
-            placeholderTextColor={colors.textSecondary}
+            placeholderTextColor={colors.textMuted}
             value={name}
             onChangeText={setName}
           />
@@ -105,7 +109,7 @@ export function SignupScreen({ navigation }: Props) {
                 autoCapitalize="none"
                 keyboardType="email-address"
                 placeholder="you@example.com"
-                placeholderTextColor={colors.textSecondary}
+                placeholderTextColor={colors.textMuted}
                 value={email}
                 onChangeText={setEmail}
               />
@@ -114,7 +118,7 @@ export function SignupScreen({ navigation }: Props) {
                 style={styles.input}
                 secureTextEntry
                 placeholder="At least 6 characters"
-                placeholderTextColor={colors.textSecondary}
+                placeholderTextColor={colors.textMuted}
                 value={password}
                 onChangeText={setPassword}
               />
@@ -126,13 +130,10 @@ export function SignupScreen({ navigation }: Props) {
                 style={styles.input}
                 keyboardType="phone-pad"
                 placeholder="+92 300 1234567"
-                placeholderTextColor={colors.textSecondary}
+                placeholderTextColor={colors.textMuted}
                 value={phone}
                 onChangeText={setPhone}
               />
-              <Text style={styles.hint}>
-                Mock signup — no real OTP yet. Phone is stored locally only.
-              </Text>
             </>
           )}
         </View>
@@ -140,13 +141,13 @@ export function SignupScreen({ navigation }: Props) {
         <Pressable
           style={styles.checkboxRow}
           onPress={() => setIsAgeVerified((prev) => !prev)}
-          accessibilityRole="checkbox"
-          accessibilityState={{ checked: isAgeVerified }}
         >
           <View style={[styles.checkbox, isAgeVerified && styles.checkboxChecked]}>
             {isAgeVerified ? <Text style={styles.checkmark}>✓</Text> : null}
           </View>
-          <Text style={styles.checkboxLabel}>I confirm that I am 18 years of age or older</Text>
+          <Text style={styles.checkboxLabel}>
+            I confirm that I am 18 years of age or older
+          </Text>
         </Pressable>
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -159,7 +160,7 @@ export function SignupScreen({ navigation }: Props) {
           {loading ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={styles.primaryButtonText}>Sign Up</Text>
+            <Text style={styles.primaryButtonText}>Join as Host</Text>
           )}
         </Pressable>
 
@@ -174,76 +175,56 @@ export function SignupScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
-  flex: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
+  flex: { flex: 1, backgroundColor: colors.bg },
   container: {
     paddingHorizontal: 24,
     paddingTop: 72,
     paddingBottom: 40,
   },
-  header: {
-    marginBottom: 28,
-  },
-  brand: {
-    fontSize: 34,
-    fontWeight: '700',
-    color: colors.text,
-    letterSpacing: -0.5,
-  },
+  brand: { fontSize: 36, fontWeight: '800', color: colors.text },
   subtitle: {
     marginTop: 8,
     fontSize: 16,
     color: colors.textSecondary,
+    marginBottom: 8,
   },
-  methodRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginBottom: 24,
+  mode: {
+    color: colors.primarySoft,
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 20,
   },
+  methodRow: { flexDirection: 'row', gap: 10, marginBottom: 24 },
   methodChip: {
     paddingVertical: 10,
     paddingHorizontal: 16,
-    borderRadius: 10,
-    backgroundColor: colors.surface,
+    borderRadius: 16,
+    backgroundColor: colors.bgCard,
     borderWidth: 1,
     borderColor: colors.border,
   },
   methodChipActive: {
-    backgroundColor: colors.primaryMuted,
+    backgroundColor: colors.primary,
     borderColor: colors.primary,
   },
-  methodText: {
-    color: colors.textSecondary,
-    fontWeight: '600',
-  },
-  methodTextActive: {
-    color: colors.primary,
-  },
-  form: {
-    gap: 8,
-  },
+  methodText: { color: colors.textSecondary, fontWeight: '700' },
+  methodTextActive: { color: colors.text },
+  form: { gap: 8 },
   label: {
     marginTop: 8,
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '700',
     color: colors.text,
   },
   input: {
-    backgroundColor: colors.surface,
+    backgroundColor: colors.bgCard,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 12,
+    borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 14,
     fontSize: 16,
     color: colors.text,
-  },
-  hint: {
-    marginTop: 8,
-    color: colors.textSecondary,
-    fontSize: 13,
   },
   checkboxRow: {
     flexDirection: 'row',
@@ -257,56 +238,32 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     borderWidth: 1.5,
     borderColor: colors.border,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.bgCard,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 1,
   },
   checkboxChecked: {
     backgroundColor: colors.primary,
     borderColor: colors.primary,
   },
-  checkmark: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '700',
-  },
+  checkmark: { color: '#fff', fontSize: 14, fontWeight: '800' },
   checkboxLabel: {
     flex: 1,
     fontSize: 14,
     lineHeight: 20,
     color: colors.text,
   },
-  error: {
-    marginTop: 16,
-    color: colors.danger,
-    fontSize: 14,
-  },
+  error: { marginTop: 16, color: colors.danger, fontSize: 14 },
   primaryButton: {
     marginTop: 24,
     backgroundColor: colors.primary,
-    borderRadius: 12,
+    borderRadius: 16,
     paddingVertical: 16,
     alignItems: 'center',
   },
-  buttonDisabled: {
-    opacity: 0.7,
-  },
-  primaryButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  footerLink: {
-    marginTop: 24,
-    alignItems: 'center',
-  },
-  footerText: {
-    color: colors.textSecondary,
-    fontSize: 15,
-  },
-  footerTextBold: {
-    color: colors.primary,
-    fontWeight: '700',
-  },
+  buttonDisabled: { opacity: 0.7 },
+  primaryButtonText: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  footerLink: { marginTop: 24, alignItems: 'center' },
+  footerText: { color: colors.textSecondary, fontSize: 15 },
+  footerTextBold: { color: colors.primarySoft, fontWeight: '800' },
 });

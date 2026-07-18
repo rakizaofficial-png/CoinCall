@@ -4,12 +4,16 @@ export type AuthStackParamList = {
 };
 
 export type MainTabParamList = {
-  Discover: undefined;
-  Wallet: undefined;
+  Home: undefined;
+  Live: undefined;
+  Earnings: undefined;
   Profile: undefined;
 };
 
 export type RootStackParamList = {
   Auth: undefined;
-  Main: undefined;
+  MainTabs: undefined;
+  HostProfile: { hostId: string };
+  Call: { hostId: string };
+  Chat: { hostId: string };
 };
