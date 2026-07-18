@@ -294,7 +294,7 @@ export function AppProvider({
     const stopListen = listenIncomingCalls(user.id, (bridgeCall) => {
       if (bridgeCall.status !== 'ringing') return;
       setIncomingBridgeCall(bridgeCall);
-      notify('Incoming call 💕', `${bridgeCall.userName} is calling from Luma`);
+      // No window.alert — IncomingCallModal handles ring UI
     });
 
     return () => {

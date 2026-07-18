@@ -1,11 +1,34 @@
 import { Alert, Platform } from 'react-native';
 
+/**
+ * Non-blocking toast on web (never window.alert — that blocks Attend on incoming calls).
+ * Native still uses Alert for important messages.
+ */
 export function notify(title: string, message?: string) {
-  if (Platform.OS === 'web') {
-    // React Native Alert is unreliable on web
-    window.alert(message ? `${title}\n\n${message}` : title);
+  const text = message ? `${title} · ${message}` : title;
+
+  if (Platform.OS === 'web' && typeof document !== 'undefined') {
+    let host = document.getElementById('coincall-toast-host');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'coincall-toast-host';
+      host.style.cssText =
+        'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:99999;display:flex;flex-direction:column;gap:8px;pointer-events:none;max-width:92vw;';
+      document.body.appendChild(host);
+    }
+    const el = document.createElement('div');
+    el.textContent = text;
+    el.style.cssText =
+      'background:rgba(26,16,40,0.96);color:#fff;padding:12px 16px;border-radius:14px;font:600 13px/1.35 system-ui,sans-serif;border:1px solid rgba(255,255,255,0.12);box-shadow:0 10px 30px rgba(0,0,0,0.35);';
+    host.appendChild(el);
+    setTimeout(() => {
+      el.style.opacity = '0';
+      el.style.transition = 'opacity .25s';
+      setTimeout(() => el.remove(), 280);
+    }, 2400);
     return;
   }
+
   Alert.alert(title, message);
 }
 
