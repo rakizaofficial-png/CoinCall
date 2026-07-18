@@ -7,7 +7,11 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { IncomingCallModal } from '../components/IncomingCallModal';
 import { SplashScreen } from '../components/ui/SplashScreen';
 import { AppProvider, useApp } from '../context/AppContext';
+import { LiveStudioProvider } from '../context/LiveStudioContext';
 import { useAuth } from '../context/AuthContext';
+import { GoLiveScreen } from '../features/live/GoLiveScreen';
+import { LiveRoomScreen } from '../features/live/LiveRoomScreen';
+import { WithdrawScreen } from '../features/wallet/WithdrawScreen';
 import { HostApplyScreen } from '../screens/auth/HostApplyScreen';
 import { HostPendingScreen } from '../screens/auth/HostPendingScreen';
 import { CallScreen } from '../screens/call/CallScreen';
@@ -39,21 +43,30 @@ function BridgeIncomingLayer() {
   );
 }
 
+function GoLiveRoute({ navigation, route }: any) {
+  return <GoLiveScreen navigation={navigation} mode={route.params?.mode || 'solo'} />;
+}
+
 function AuthenticatedApp() {
   const { user } = useAuth();
   if (!user) return null;
 
   return (
     <AppProvider initialUser={user}>
-      <Stack.Navigator screenOptions={{ headerShown: false, animation: 'fade_from_bottom' }}>
-        <Stack.Screen name="MainTabs" component={MainTabNavigator} />
-        <Stack.Screen name="HostProfile" component={HostProfileScreen} />
-        <Stack.Screen name="Call" component={CallScreen} />
-        <Stack.Screen name="Chat" component={ChatScreen} />
-        <Stack.Screen name="Notifications" component={NotificationsScreen} />
-        <Stack.Screen name="Settings" component={SettingsScreen} />
-      </Stack.Navigator>
-      <BridgeIncomingLayer />
+      <LiveStudioProvider>
+        <Stack.Navigator screenOptions={{ headerShown: false, animation: 'fade_from_bottom' }}>
+          <Stack.Screen name="MainTabs" component={MainTabNavigator} />
+          <Stack.Screen name="HostProfile" component={HostProfileScreen} />
+          <Stack.Screen name="Call" component={CallScreen} />
+          <Stack.Screen name="Chat" component={ChatScreen} />
+          <Stack.Screen name="Notifications" component={NotificationsScreen} />
+          <Stack.Screen name="Settings" component={SettingsScreen} />
+          <Stack.Screen name="GoLive" component={GoLiveRoute} />
+          <Stack.Screen name="LiveRoom" component={LiveRoomScreen} />
+          <Stack.Screen name="Withdraw" component={WithdrawScreen} />
+        </Stack.Navigator>
+        <BridgeIncomingLayer />
+      </LiveStudioProvider>
     </AppProvider>
   );
 }

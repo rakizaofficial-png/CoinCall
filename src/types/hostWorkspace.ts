@@ -2,7 +2,6 @@
 export type HostWorkspaceMode =
   | 'waiting_1v1'
   | 'solo_calling'
-  | 'pk_battle'
   | 'party_room';
 
 /** Coarse presence broadcast to the rest of the app */
@@ -21,25 +20,4 @@ export type PartySeat = {
   isMe: boolean;
   isSpeaking: boolean;
   micOn: boolean;
-};
-
-export type PkTeamSide = 'pink' | 'blue';
-
-export type PkBattleState = {
-  active: boolean;
-  mySide: PkTeamSide;
-  pinkPoints: number;
-  bluePoints: number;
-  pinkHost: {
-    id: string;
-    name: string;
-    avatarUrl: string;
-  };
-  blueHost: {
-    id: string;
-    name: string;
-    avatarUrl: string;
-  };
-  secondsLeft: number;
-  engagementTick: number;
 };

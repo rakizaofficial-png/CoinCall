@@ -1,18 +1,17 @@
-import { LinearGradient } from 'expo-linear-gradient';
 import { Phone, Users, Zap } from 'lucide-react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useApp } from '../context/AppContext';
 import { useTheme } from '../theme/ThemeContext';
 
-export function Waiting1v1Panel() {
+export function Waiting1v1Panel({ navigation }: { navigation?: any }) {
   const { colors } = useTheme();
   const {
     hostOnline,
     setHostOnline,
     hostPresenceStatus,
     setWorkspaceMode,
-    enterPkBattle,
     enterPartyRoom,
     incomingBridgeCall,
     callsToday,
@@ -20,12 +19,10 @@ export function Waiting1v1Panel() {
   } = useApp();
 
   const [pulse, setPulse] = useState(0);
-
   useEffect(() => {
     const t = setInterval(() => setPulse((p) => p + 1), 800);
     return () => clearInterval(t);
   }, []);
-
   const ringScale = pulse % 2 === 0 ? 1 : 1.06;
 
   return (
@@ -33,11 +30,11 @@ export function Waiting1v1Panel() {
       colors={[colors.bg, colors.bgElevated, colors.bgSoft]}
       style={[styles.root, { borderColor: `${colors.accent}55` }]}
     >
-      <Text style={[styles.eyebrow, { color: colors.accent }]}>1V1 WAITING SCREEN</Text>
+      <Text style={[styles.eyebrow, { color: colors.accent }]}>1V1 WAITING</Text>
       <Text style={[styles.title, { color: colors.text }]}>Ready for private calls</Text>
       <Text style={[styles.sub, { color: colors.textSecondary }]}>
-        Presence: {hostPresenceStatus.replace('_', ' ').toUpperCase()} ·{' '}
-        {callsToday} calls · {myTodayMinutes}m today
+        {hostPresenceStatus.replace('_', ' ').toUpperCase()} · {callsToday} calls ·{' '}
+        {myTodayMinutes}m today
       </Text>
 
       <Pressable
@@ -50,82 +47,65 @@ export function Waiting1v1Panel() {
               ? ['rgba(61,214,140,0.35)', 'rgba(11,8,19,0.9)']
               : ['rgba(255,42,122,0.35)', 'rgba(11,8,19,0.9)']
           }
-          style={[
-            styles.orb,
-            hostOnline ? styles.orbOn : styles.orbOff,
-          ]}
+          style={styles.orb}
         >
           <View
             style={[
               styles.orbInner,
-              {
-                borderColor: hostOnline ? colors.online : colors.danger,
-              },
+              { borderColor: hostOnline ? colors.online : colors.danger },
             ]}
           >
             <Text style={styles.orbTitle}>
               {hostOnline ? 'ONLINE · WAITING' : 'OFFLINE'}
             </Text>
             <Text style={styles.orbSub}>
-              {hostOnline
-                ? 'Listening for Luma 1v1 incoming…'
-                : 'Tap to go live and earn'}
+              {hostOnline ? 'Listening for incoming 1v1…' : 'Tap to go available'}
             </Text>
           </View>
         </LinearGradient>
       </Pressable>
 
       {incomingBridgeCall ? (
-        <LinearGradient
-          colors={['rgba(255,42,122,0.35)', 'rgba(255,184,0,0.15)']}
-          style={styles.incomingBanner}
-        >
+        <View style={styles.incomingBanner}>
           <Phone size={18} color={colors.accent} />
           <Text style={[styles.incomingText, { color: colors.text }]}>
-            Incoming 1v1 from {incomingBridgeCall.userName} — Attend popup open
+            Incoming from {incomingBridgeCall.userName}
           </Text>
-        </LinearGradient>
-      ) : (
-        <Text style={[styles.idleHint, { color: colors.textMuted }]}>
-          No 1v1 pending — jump into Party Room or PK to stay engaged
-        </Text>
-      )}
+        </View>
+      ) : null}
 
       <View style={styles.quickRow}>
         <Pressable
           style={styles.quickCard}
           onPress={() => {
-            enterPkBattle();
-            setWorkspaceMode('pk_battle');
+            enterPartyRoom();
+            setWorkspaceMode('party_room');
+            navigation?.navigate?.('Party');
           }}
         >
           <LinearGradient
             colors={[`${colors.primary}40`, colors.bgElevated]}
             style={styles.quickGrad}
           >
-            <Zap size={22} color={colors.primary} />
-            <Text style={[styles.quickTitle, { color: colors.text }]}>PK Battle</Text>
+            <Users size={22} color={colors.primary} />
+            <Text style={[styles.quickTitle, { color: colors.text }]}>Party Room</Text>
             <Text style={[styles.quickSub, { color: colors.textSecondary }]}>
-              Split-screen duel
+              Multi-host seats
             </Text>
           </LinearGradient>
         </Pressable>
-
         <Pressable
           style={styles.quickCard}
-          onPress={() => {
-            enterPartyRoom();
-            setWorkspaceMode('party_room');
-          }}
+          onPress={() => navigation?.navigate?.('GoLive', { mode: 'solo' })}
         >
           <LinearGradient
             colors={[`${colors.accent}38`, colors.bgElevated]}
             style={styles.quickGrad}
           >
-            <Users size={22} color={colors.accent} />
-            <Text style={[styles.quickTitle, { color: colors.text }]}>Party Room</Text>
+            <Zap size={22} color={colors.accent} />
+            <Text style={[styles.quickTitle, { color: colors.text }]}>Go Live</Text>
             <Text style={[styles.quickSub, { color: colors.textSecondary }]}>
-              4–6 host seats
+              Open camera
             </Text>
           </LinearGradient>
         </Pressable>
@@ -139,42 +119,13 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     padding: 16,
     borderWidth: 1,
-    shadowOpacity: 0.35,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 8,
     marginBottom: 14,
   },
-  eyebrow: {
-    fontWeight: '800',
-    fontSize: 10,
-    letterSpacing: 1.2,
-  },
-  title: {
-    fontWeight: '900',
-    fontSize: 22,
-    marginTop: 4,
-  },
-  sub: {
-    fontSize: 12,
-    marginTop: 6,
-    marginBottom: 16,
-  },
+  eyebrow: { fontWeight: '800', fontSize: 10, letterSpacing: 1.2 },
+  title: { fontWeight: '900', fontSize: 22, marginTop: 4 },
+  sub: { fontSize: 12, marginTop: 6, marginBottom: 16 },
   orbWrap: { alignItems: 'center', marginBottom: 14 },
-  orb: {
-    width: '100%',
-    borderRadius: 28,
-    padding: 6,
-  },
-  orbOn: {
-    shadowOpacity: 0.65,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 0 },
-  },
-  orbOff: {
-    shadowOpacity: 0.45,
-    shadowRadius: 14,
-  },
+  orb: { width: '100%', borderRadius: 28, padding: 6 },
   orbInner: {
     borderWidth: 3,
     borderRadius: 24,
@@ -182,11 +133,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   orbTitle: { color: '#fff', fontWeight: '900', fontSize: 18 },
-  orbSub: {
-    color: 'rgba(255,255,255,0.75)',
-    marginTop: 6,
-    fontSize: 12,
-  },
+  orbSub: { color: 'rgba(255,255,255,0.75)', marginTop: 6, fontSize: 12 },
   incomingBanner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -197,16 +144,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(108,124,255,0.45)',
   },
-  incomingText: {
-    flex: 1,
-    fontWeight: '700',
-    fontSize: 12,
-  },
-  idleHint: {
-    fontSize: 12,
-    textAlign: 'center',
-    marginBottom: 14,
-  },
+  incomingText: { flex: 1, fontWeight: '700', fontSize: 12 },
   quickRow: { flexDirection: 'row', gap: 10 },
   quickCard: {
     flex: 1,
@@ -215,15 +153,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(108,124,255,0.35)',
   },
-  quickGrad: {
-    padding: 14,
-    minHeight: 110,
-    justifyContent: 'center',
-  },
-  quickTitle: {
-    fontWeight: '900',
-    fontSize: 15,
-    marginTop: 8,
-  },
+  quickGrad: { padding: 14, minHeight: 110, justifyContent: 'center' },
+  quickTitle: { fontWeight: '900', fontSize: 15, marginTop: 8 },
   quickSub: { fontSize: 11, marginTop: 2 },
 });

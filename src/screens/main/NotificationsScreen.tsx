@@ -1,4 +1,14 @@
-import { Bell, CheckCheck, ChevronLeft, Phone, Radio, Trash2, Wallet } from 'lucide-react-native';
+import {
+  Bell,
+  CheckCheck,
+  ChevronLeft,
+  Gift,
+  Phone,
+  Radio,
+  Trash2,
+  UserPlus,
+  Wallet,
+} from 'lucide-react-native';
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -18,7 +28,9 @@ import { useTheme } from '../../theme/ThemeContext';
 function iconFor(type: string) {
   if (type === 'call') return Phone;
   if (type === 'payout') return Wallet;
-  if (type === 'live') return Radio;
+  if (type === 'live' || type === 'room') return Radio;
+  if (type === 'gift') return Gift;
+  if (type === 'follower') return UserPlus;
   return Bell;
 }
 
@@ -64,7 +76,7 @@ export function NotificationsScreen({ navigation }: { navigation: any }) {
         <View style={[styles.emptyHint, { borderColor: colors.border }]}>
           <Bell size={18} color={colors.textMuted} />
           <Text style={[styles.emptyText, { color: colors.textMuted }]}>
-            No notifications yet. Call alerts, payouts, and chat messages appear here.
+            No notifications yet. Gifts, followers, room joins, and withdrawals appear here.
           </Text>
         </View>
       ) : (

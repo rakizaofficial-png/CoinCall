@@ -1,5 +1,5 @@
-import { LinearGradient } from 'expo-linear-gradient';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useApp } from '../context/AppContext';
 import type { HostWorkspaceMode } from '../types/hostWorkspace';
 import { radii } from '../theme/colors';
@@ -7,7 +7,6 @@ import { useTheme } from '../theme/ThemeContext';
 
 const MODES: { key: HostWorkspaceMode; label: string }[] = [
   { key: 'waiting_1v1', label: '1v1 Wait' },
-  { key: 'pk_battle', label: 'PK Arena' },
   { key: 'party_room', label: 'Party Room' },
   { key: 'solo_calling', label: 'On Call' },
 ];
@@ -17,26 +16,14 @@ export function HostWorkspaceSwitcher() {
   const {
     workspaceMode,
     setWorkspaceMode,
-    enterPkBattle,
     enterPartyRoom,
-    leavePkBattle,
     hostPresenceStatus,
     call,
   } = useApp();
 
   const onSelect = (mode: HostWorkspaceMode) => {
-    if (mode === 'solo_calling' && !call) {
-      return;
-    }
-    if (mode === 'pk_battle') {
-      enterPkBattle();
-    }
-    if (mode === 'party_room') {
-      enterPartyRoom();
-    }
-    if (mode === 'waiting_1v1') {
-      leavePkBattle();
-    }
+    if (mode === 'solo_calling' && !call) return;
+    if (mode === 'party_room') enterPartyRoom();
     setWorkspaceMode(mode);
   };
 
@@ -63,8 +50,6 @@ export function HostWorkspaceSwitcher() {
               key={m.key}
               disabled={disabled}
               onPress={() => onSelect(m.key)}
-              accessibilityRole="button"
-              accessibilityState={{ selected: active, disabled }}
               style={[
                 styles.chip,
                 {
@@ -104,11 +89,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 10,
   },
-  statusLabel: {
-    fontWeight: '800',
-    fontSize: 10,
-    letterSpacing: 1.1,
-  },
+  statusLabel: { fontWeight: '800', fontSize: 10, letterSpacing: 1.1 },
   statusPill: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -118,11 +99,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
   },
-  statusDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-  },
+  statusDot: { width: 7, height: 7, borderRadius: 4 },
   statusValue: { fontWeight: '800', fontSize: 11 },
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
@@ -134,8 +111,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   chipDisabled: { opacity: 0.4 },
-  chipText: {
-    fontWeight: '800',
-    fontSize: 12,
-  },
+  chipText: { fontWeight: '800', fontSize: 12 },
 });

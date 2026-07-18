@@ -182,6 +182,106 @@ export async function setAgoraCameraOff(off: boolean) {
   await session.cam.setEnabled(!off);
 }
 
+export async function switchAgoraCamera() {
+  if (!session?.cam) return;
+  // Agora web camera track supports setDevice / facing mode via recreate
+  const devices = await (await import('agora-rtc-sdk-ng')).default.getCameras();
+  if (devices.length < 2) return;
+  const current = session.cam.getTrackLabel?.() || '';
+  const next = devices.find((d) => d.label !== current) || devices[0];
+  if (next?.deviceId) {
+    await session.cam.setDevice(next.deviceId);
+  }
+}
+
+export async function setAgoraBeauty(enabled: boolean) {
+  if (!session?.cam) return;
+  const el = document.getElementById('agora-local') || document.getElementById('live-local');
+  if (el && 'style' in el) {
+    (el as HTMLElement).style.filter = enabled
+      ? 'brightness(1.1) contrast(1.06) saturate(1.2) blur(0.35px)'
+      : 'none';
+  }
+}
+
+/**
+ * Start a LIVE broadcast (host publishes camera+mic into live_{id} channel).
+ */
+export async function startAgoraLiveBroadcast(options: {
+  channel: string;
+  localVideoEl: HTMLElement;
+  uid?: number;
+}) {
+  if (Platform.OS !== 'web') {
+    throw new Error('Live broadcast runs on the web host studio. Open coincall-host in Chrome.');
+  }
+  await stopAgoraCall();
+  prepVideoEl(options.localVideoEl);
+
+  const tokenPayload = await fetchRtcToken(options.channel, options.uid ?? 0, 'publisher');
+  const AgoraRTC = (await import('agora-rtc-sdk-ng')).default;
+  AgoraRTC.setLogLevel(4);
+  const client = AgoraRTC.createClient({ mode: 'live', codec: 'vp8' });
+  await client.setClientRole('host');
+
+  await client.join(
+    tokenPayload.appId || env.agora.appId,
+    tokenPayload.channel || options.channel,
+    tokenPayload.token,
+    tokenPayload.uid ?? options.uid ?? 0,
+  );
+
+  const [mic, cam] = await AgoraRTC.createMicrophoneAndCameraTracks(
+    {},
+    { encoderConfig: '720p_2', facingMode: 'user' },
+  );
+  cam.play(options.localVideoEl, { fit: 'cover' });
+  await client.publish([mic, cam]);
+  session = { client, mic, cam };
+  return session;
+}
+
+/**
+ * Camera-only preview before going live (getUserMedia, no channel yet).
+ */
+export async function startCameraPreview(videoEl: HTMLVideoElement, facing: 'user' | 'environment' = 'user') {
+  if (Platform.OS !== 'web') {
+    throw new Error('Camera preview is available on web host studio.');
+  }
+  stopCameraPreview(videoEl);
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: true,
+    video: {
+      facingMode: facing,
+      width: { ideal: 1280 },
+      height: { ideal: 720 },
+    },
+  });
+  videoEl.srcObject = stream;
+  videoEl.muted = true;
+  videoEl.playsInline = true;
+  await videoEl.play();
+  return stream;
+}
+
+export function stopCameraPreview(videoEl?: HTMLVideoElement | null) {
+  const el = videoEl;
+  const stream = el?.srcObject as MediaStream | null | undefined;
+  stream?.getTracks().forEach((t) => t.stop());
+  if (el) {
+    el.srcObject = null;
+  }
+}
+
+export async function flipPreviewCamera(
+  videoEl: HTMLVideoElement,
+  currentFacing: 'user' | 'environment',
+) {
+  const next = currentFacing === 'user' ? 'environment' : 'user';
+  await startCameraPreview(videoEl, next);
+  return next;
+}
+
 export async function stopAgoraCall() {
   if (!session) return;
   const { client, mic, cam } = session;

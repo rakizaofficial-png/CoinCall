@@ -6,6 +6,7 @@ export type AuthStackParamList = {
 export type MainTabParamList = {
   Home: undefined;
   Live: undefined;
+  Party: undefined;
   Earnings: undefined;
   Profile: undefined;
 };
@@ -16,7 +17,6 @@ export type RootStackParamList = {
   HostProfile: { hostId: string };
   Call: {
     hostId: string;
-    /** When set, this is a live user↔host bridge call */
     bridgeCallId?: string;
     channel?: string;
     peerName?: string;
@@ -27,4 +27,7 @@ export type RootStackParamList = {
   Chat: { hostId: string };
   Notifications: undefined;
   Settings: undefined;
+  GoLive: { mode?: 'solo' | 'party' };
+  LiveRoom: { roomId: string; hostMode?: boolean };
+  Withdraw: undefined;
 };

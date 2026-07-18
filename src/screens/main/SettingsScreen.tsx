@@ -1,4 +1,15 @@
-import { ChevronLeft, LogOut, Moon, Sun, Wallet } from 'lucide-react-native';
+import {
+  ChevronLeft,
+  Eye,
+  Languages,
+  LogOut,
+  Moon,
+  Shield,
+  Sparkles,
+  Sun,
+  Video,
+  Wallet,
+} from 'lucide-react-native';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -7,22 +18,37 @@ import { PrimaryButton } from '../../components/ui/PrimaryButton';
 import { Screen } from '../../components/ui/Screen';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
+import { LIVE_LANGUAGES } from '../../data/gifts';
 import { persistPayoutMethod } from '../../services/walletSyncService';
+import type { WithdrawalGateway } from '../../services/withdrawalService';
 import { radii } from '../../theme/colors';
 import { useTheme } from '../../theme/ThemeContext';
 import { notify } from '../../utils/notify';
-import type { WithdrawalGateway } from '../../services/withdrawalService';
+
+const QUALITIES = ['360p', '480p', '720p', '1080p'] as const;
 
 export function SettingsScreen({ navigation }: { navigation: any }) {
   const insets = useSafeAreaInsets();
   const { colors, isDark, preference, setScheme } = useTheme();
-  const { user, hostOnline, setHostOnline } = useApp();
+  const {
+    user,
+    hostOnline,
+    setHostOnline,
+    beautyOn,
+    runHostTool,
+    blockedIds,
+  } = useApp();
   const { signOut } = useAuth();
   const [gateway, setGateway] = useState<WithdrawalGateway>('easypaisa');
   const [accountName, setAccountName] = useState(user.name);
   const [accountNumber, setAccountNumber] = useState(user.phone || '');
   const [callAlerts, setCallAlerts] = useState(true);
+  const [giftAlerts, setGiftAlerts] = useState(true);
   const [payoutAlerts, setPayoutAlerts] = useState(true);
+  const [roomAlerts, setRoomAlerts] = useState(true);
+  const [quality, setQuality] = useState<(typeof QUALITIES)[number]>('720p');
+  const [appLanguage, setAppLanguage] = useState('English');
+  const [hideOnline, setHideOnline] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const cycleTheme = () => {
@@ -65,6 +91,52 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
         <View style={{ width: 44 }} />
       </View>
 
+      <Text style={[styles.section, { color: colors.text }]}>Beauty</Text>
+      <GlassCard>
+        <View style={styles.row}>
+          <View style={styles.rowLeft}>
+            <Sparkles size={20} color={colors.accent} />
+            <View>
+              <Text style={[styles.rowTitle, { color: colors.text }]}>Beauty filter</Text>
+              <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
+                Soft skin + glow on live preview
+              </Text>
+            </View>
+          </View>
+          <Switch
+            value={beautyOn}
+            onValueChange={() => runHostTool('beauty')}
+            trackColor={{ false: colors.border, true: colors.primarySoft }}
+            thumbColor="#fff"
+          />
+        </View>
+      </GlassCard>
+
+      <Text style={[styles.section, { color: colors.text }]}>Streaming quality</Text>
+      <GlassCard>
+        <View style={styles.chipRow}>
+          {QUALITIES.map((q) => (
+            <Pressable
+              key={q}
+              onPress={() => {
+                setQuality(q);
+                notify('Quality', `Streaming set to ${q}`);
+              }}
+              style={[
+                styles.chip,
+                {
+                  backgroundColor: quality === q ? `${colors.primary}44` : colors.bgSoft,
+                  borderColor: quality === q ? colors.primary : colors.border,
+                },
+              ]}
+            >
+              <Video size={14} color={colors.text} />
+              <Text style={{ color: colors.text, fontWeight: '700', fontSize: 12 }}>{q}</Text>
+            </Pressable>
+          ))}
+        </View>
+      </GlassCard>
+
       <Text style={[styles.section, { color: colors.text }]}>Availability</Text>
       <GlassCard>
         <View style={styles.row}>
@@ -78,7 +150,85 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
         </View>
       </GlassCard>
 
-      <Text style={[styles.section, { color: colors.text }]}>Appearance</Text>
+      <Text style={[styles.section, { color: colors.text }]}>Notifications</Text>
+      <GlassCard>
+        {(
+          [
+            ['Incoming calls', callAlerts, setCallAlerts],
+            ['Gifts received', giftAlerts, setGiftAlerts],
+            ['Room joined', roomAlerts, setRoomAlerts],
+            ['Withdrawal updates', payoutAlerts, setPayoutAlerts],
+          ] as const
+        ).map(([label, value, set], i) => (
+          <View key={label}>
+            {i > 0 ? <View style={[styles.divider, { backgroundColor: colors.border }]} /> : null}
+            <View style={styles.row}>
+              <Text style={[styles.rowTitle, { color: colors.text }]}>{label}</Text>
+              <Switch
+                value={value}
+                onValueChange={set}
+                trackColor={{ false: colors.border, true: colors.primarySoft }}
+                thumbColor="#fff"
+              />
+            </View>
+          </View>
+        ))}
+      </GlassCard>
+
+      <Text style={[styles.section, { color: colors.text }]}>Privacy</Text>
+      <GlassCard>
+        <View style={styles.row}>
+          <View style={styles.rowLeft}>
+            <Eye size={20} color={colors.textSecondary} />
+            <Text style={[styles.rowTitle, { color: colors.text }]}>Hide online status</Text>
+          </View>
+          <Switch
+            value={hideOnline}
+            onValueChange={setHideOnline}
+            trackColor={{ false: colors.border, true: colors.primarySoft }}
+            thumbColor="#fff"
+          />
+        </View>
+      </GlassCard>
+
+      <Text style={[styles.section, { color: colors.text }]}>Blocked users</Text>
+      <GlassCard>
+        {blockedIds.length === 0 ? (
+          <Text style={{ color: colors.textMuted }}>No blocked users</Text>
+        ) : (
+          blockedIds.map((id) => (
+            <View key={id} style={styles.row}>
+              <Shield size={18} color={colors.danger} />
+              <Text style={[styles.rowTitle, { color: colors.text, flex: 1 }]}>{id}</Text>
+            </View>
+          ))
+        )}
+      </GlassCard>
+
+      <Text style={[styles.section, { color: colors.text }]}>Language</Text>
+      <GlassCard>
+        <View style={styles.chipRow}>
+          {LIVE_LANGUAGES.map((l) => (
+            <Pressable
+              key={l}
+              onPress={() => setAppLanguage(l)}
+              style={[
+                styles.chip,
+                {
+                  backgroundColor:
+                    appLanguage === l ? `${colors.primary}44` : colors.bgSoft,
+                  borderColor: appLanguage === l ? colors.primary : colors.border,
+                },
+              ]}
+            >
+              <Languages size={12} color={colors.text} />
+              <Text style={{ color: colors.text, fontWeight: '700', fontSize: 12 }}>{l}</Text>
+            </Pressable>
+          ))}
+        </View>
+      </GlassCard>
+
+      <Text style={[styles.section, { color: colors.text }]}>Dark Mode</Text>
       <GlassCard>
         <Pressable style={styles.row} onPress={cycleTheme}>
           <View style={styles.rowLeft}>
@@ -95,38 +245,15 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
         </Pressable>
       </GlassCard>
 
-      <Text style={[styles.section, { color: colors.text }]}>Notification preferences</Text>
-      <GlassCard>
-        <View style={styles.row}>
-          <Text style={[styles.rowTitle, { color: colors.text }]}>Incoming call alerts</Text>
-          <Switch
-            value={callAlerts}
-            onValueChange={setCallAlerts}
-            trackColor={{ false: colors.border, true: colors.primarySoft }}
-            thumbColor="#fff"
-          />
-        </View>
-        <View style={[styles.divider, { backgroundColor: colors.border }]} />
-        <View style={styles.row}>
-          <Text style={[styles.rowTitle, { color: colors.text }]}>Payout updates</Text>
-          <Switch
-            value={payoutAlerts}
-            onValueChange={setPayoutAlerts}
-            trackColor={{ false: colors.border, true: colors.primarySoft }}
-            thumbColor="#fff"
-          />
-        </View>
-      </GlassCard>
-
       <Text style={[styles.section, { color: colors.text }]}>Payout method</Text>
       <GlassCard>
-        <View style={styles.gateRow}>
+        <View style={styles.chipRow}>
           {(['easypaisa', 'jazzcash', 'bank'] as const).map((g) => (
             <Pressable
               key={g}
               onPress={() => setGateway(g)}
               style={[
-                styles.gateChip,
+                styles.chip,
                 {
                   backgroundColor: gateway === g ? `${colors.primary}33` : colors.bgSoft,
                   borderColor: gateway === g ? colors.primary : colors.border,
@@ -159,23 +286,20 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
         />
         <PrimaryButton
           label={saving ? 'Saving…' : 'Save payout method'}
-          onPress={savePayout}
+          onPress={() => void savePayout()}
           loading={saving}
         />
       </GlassCard>
 
       <Pressable
         style={[styles.linkRow, { borderColor: colors.border }]}
-        onPress={() => navigation.navigate('MainTabs', { screen: 'Earnings' })}
+        onPress={() => navigation.navigate('Withdraw')}
       >
         <Wallet size={18} color={colors.primarySoft} />
-        <Text style={[styles.linkText, { color: colors.text }]}>Open wallet & cash-out</Text>
+        <Text style={[styles.linkText, { color: colors.text }]}>Open withdraw</Text>
       </Pressable>
 
-      <Pressable
-        style={[styles.signOut, { borderColor: colors.danger }]}
-        onPress={signOut}
-      >
+      <Pressable style={[styles.signOut, { borderColor: colors.danger }]} onPress={signOut}>
         <LogOut size={18} color={colors.danger} />
         <Text style={{ color: colors.danger, fontWeight: '800' }}>Sign Out</Text>
       </Pressable>
@@ -199,13 +323,17 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     minHeight: 52,
     paddingVertical: 6,
+    gap: 10,
   },
-  rowLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  rowLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
   rowTitle: { fontWeight: '700', fontSize: 15 },
   rowSub: { fontSize: 12, marginTop: 2 },
   divider: { height: StyleSheet.hairlineWidth },
-  gateRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
-  gateChip: {
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 12,
@@ -216,6 +344,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     paddingHorizontal: 12,
     paddingVertical: 12,
+    marginTop: 10,
     marginBottom: 10,
     minHeight: 48,
   },

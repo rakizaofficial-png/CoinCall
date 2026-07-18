@@ -587,10 +587,40 @@ type ReportRow = {
   status: 'open' | 'resolved';
 };
 
+type LedgerEntry = {
+  id: string;
+  userId: string;
+  amount: number;
+  reason: string;
+  kind: 'credit' | 'spend';
+  at: number;
+};
+
 const wallets = new Map<string, WalletRow>();
+const walletLedger = new Map<string, LedgerEntry[]>();
 const withdrawals: WithdrawalRequest[] = [];
 const reports: ReportRow[] = [];
 const iapReceipts = new Set<string>();
+
+function pushLedger(
+  userId: string,
+  amount: number,
+  reason: string,
+  kind: 'credit' | 'spend',
+) {
+  const entry: LedgerEntry = {
+    id: randomUUID(),
+    userId,
+    amount,
+    reason,
+    kind,
+    at: Date.now(),
+  };
+  const list = walletLedger.get(userId) || [];
+  list.unshift(entry);
+  walletLedger.set(userId, list.slice(0, 100));
+  return entry;
+}
 
 const IAP_PRODUCTS = [
   {
@@ -702,11 +732,47 @@ app.post('/api/wallet/credit', (req, res) => {
   row.coinBalance += Math.floor(amount);
   row.xp += Math.floor(amount);
   wallets.set(userId, row);
+  pushLedger(userId, Math.floor(amount), reason, 'credit');
   broadcastWs({
     type: 'wallet:updated',
     payload: { userId, coinBalance: row.coinBalance, xp: row.xp, reason },
   });
   res.json({ ok: true, reason, wallet: walletPublic(row) });
+});
+
+app.get('/api/wallet/history/:userId', (req, res) => {
+  const userId = String(req.params.userId || '').trim();
+  if (!userId) {
+    res.status(400).json({ error: 'userId required' });
+    return;
+  }
+  ensureWallet(userId);
+  res.json({ history: walletLedger.get(userId) || [] });
+});
+
+app.get('/api/wallet/products', (_req, res) => {
+  res.json({ products: IAP_PRODUCTS });
+});
+
+app.post('/api/wallet/premium', (req, res) => {
+  const userId = String(req.body?.userId || req.headers['x-user-id'] || '').trim();
+  const isPremium = Boolean(req.body?.isPremium);
+  const planId = String(req.body?.planId || '');
+  if (!userId) {
+    res.status(400).json({ error: 'userId required' });
+    return;
+  }
+  const row = ensureWallet(userId);
+  row.isPremium = isPremium;
+  if (isPremium && planId) {
+    pushLedger(userId, 0, `VIP plan · ${planId}`, 'credit');
+  }
+  wallets.set(userId, row);
+  broadcastWs({
+    type: 'wallet:updated',
+    payload: { userId, coinBalance: row.coinBalance, xp: row.xp, isPremium },
+  });
+  res.json({ ok: true, wallet: walletPublic(row) });
 });
 
 app.get('/api/wallet/:userId', (req, res) => {
@@ -731,15 +797,12 @@ app.post('/api/wallet/spend', (req, res) => {
   row.coinBalance -= amount;
   row.xp += amount;
   wallets.set(userId, row);
+  pushLedger(userId, amount, reason, 'spend');
   broadcastWs({
     type: 'wallet:updated',
     payload: { userId, coinBalance: row.coinBalance, xp: row.xp },
   });
   res.json({ ok: true, reason, wallet: walletPublic(row) });
-});
-
-app.get('/api/wallet/products', (_req, res) => {
-  res.json({ products: IAP_PRODUCTS });
 });
 
 /**
@@ -762,8 +825,7 @@ app.post('/api/wallet/iap/session', (req, res) => {
 
 /**
  * Verify IAP receipt then credit wallet.
- * TODO: Call Google androidpublisher.purchases.products.get
- *       and Apple App Store Server API before trusting purchaseToken.
+ * Replace stub with Google androidpublisher + Apple App Store Server API.
  */
 app.post('/api/wallet/iap/verify', (req, res) => {
   const userId = String(req.body?.userId || '').trim();
@@ -780,7 +842,6 @@ app.post('/api/wallet/iap/verify', (req, res) => {
     return;
   }
 
-  // STUB VERIFICATION — replace with Google/Apple API calls using env keys
   const googleReady = Boolean(process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON);
   const appleReady = Boolean(process.env.APPLE_IAP_SHARED_SECRET);
   if (platform === 'google' && !googleReady) {
@@ -795,6 +856,7 @@ app.post('/api/wallet/iap/verify', (req, res) => {
   const row = ensureWallet(userId);
   row.coinBalance += credited;
   wallets.set(userId, row);
+  pushLedger(userId, credited, `IAP · ${product.title}`, 'credit');
   broadcastWs({
     type: 'wallet:updated',
     payload: { userId, coinBalance: row.coinBalance, xp: row.xp },
@@ -997,6 +1059,53 @@ function broadcastWs(event: unknown) {
     if (client.readyState === WebSocket.OPEN) client.send(raw);
   }
 }
+
+/** In-memory live rooms (Firebase is source of truth on clients; API mirrors for Luma) */
+const liveRooms = new Map<string, Record<string, unknown>>();
+
+app.post('/api/live/rooms', (req, res) => {
+  const room = req.body as Record<string, unknown>;
+  const id = String(room?.id || '');
+  if (!id) {
+    res.status(400).json({ error: 'id required' });
+    return;
+  }
+  liveRooms.set(id, { ...room, updatedAt: Date.now() });
+  const hostId = String(room.hostId || '');
+  if (hostId && hosts.has(hostId)) {
+    const h = hosts.get(hostId)!;
+    h.isLive = true;
+    h.isOnline = true;
+    h.lastSeen = Date.now();
+    hosts.set(hostId, h);
+  }
+  broadcastWs({ type: 'live:room', payload: room });
+  res.json({ ok: true, room });
+});
+
+app.get('/api/live/rooms', (_req, res) => {
+  const rooms = [...liveRooms.values()].filter((r) => r.isLive);
+  res.json({ rooms });
+});
+
+app.post('/api/live/rooms/:id/end', (req, res) => {
+  const id = String(req.params.id || '');
+  const room = liveRooms.get(id);
+  if (room) {
+    room.isLive = false;
+    room.endedAt = Date.now();
+    liveRooms.set(id, room);
+    const hostId = String(room.hostId || req.body?.hostId || '');
+    if (hostId && hosts.has(hostId)) {
+      const h = hosts.get(hostId)!;
+      h.isLive = false;
+      h.lastSeen = Date.now();
+      hosts.set(hostId, h);
+    }
+  }
+  broadcastWs({ type: 'live:ended', payload: { id } });
+  res.json({ ok: true });
+});
 
 const httpServer = createServer(app);
 const wss = new WebSocketServer({ server: httpServer, path: '/ws' });

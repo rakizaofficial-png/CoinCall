@@ -27,7 +27,6 @@ import type {
   HostPresenceStatus,
   HostWorkspaceMode,
   PartySeat,
-  PkBattleState,
 } from '../types/hostWorkspace';
 import { notify } from '../utils/notify';
 
@@ -145,10 +144,6 @@ type AppContextValue = {
   joinPartySeat: (seatIndex: number) => void;
   leavePartySeat: () => void;
   enterPartyRoom: () => void;
-  pkBattle: PkBattleState | null;
-  enterPkBattle: () => void;
-  leavePkBattle: () => void;
-  tickPkBattle: () => void;
 };
 
 const AppContext = createContext<AppContextValue | undefined>(undefined);
@@ -265,7 +260,6 @@ export function AppProvider({
     })),
   );
   const [partyGroupGiftsToday, setPartyGroupGiftsToday] = useState(1840);
-  const [pkBattle, setPkBattle] = useState<PkBattleState | null>(null);
   const callRef = useRef<CallSession | null>(null);
 
   const clearIncomingBridgeCall = useCallback(() => {
@@ -391,57 +385,6 @@ export function AppProvider({
           : s,
       ),
     );
-  }, []);
-
-  const enterPkBattle = useCallback(() => {
-    setHostOnlineState(true);
-    const rival =
-      MOCK_HOSTS.find((h) => h.isOnline && h.id !== user.id) ?? MOCK_HOSTS[0];
-    setPkBattle({
-      active: true,
-      mySide: 'pink',
-      pinkPoints: 420,
-      bluePoints: 388,
-      pinkHost: {
-        id: user.id,
-        name: user.name,
-        avatarUrl: user.avatarUrl,
-      },
-      blueHost: {
-        id: rival.id,
-        name: rival.name,
-        avatarUrl: rival.avatarUrl,
-      },
-      secondsLeft: 3 * 60,
-      engagementTick: 0,
-    });
-    setWorkspaceModeState('pk_battle');
-    notify('PK Battle', `Matched vs ${rival.name}. Fight for engagement votes!`);
-  }, [user.avatarUrl, user.id, user.name]);
-
-  const leavePkBattle = useCallback(() => {
-    setPkBattle(null);
-    if (workspaceMode === 'pk_battle') {
-      setWorkspaceModeState('waiting_1v1');
-    }
-  }, [workspaceMode]);
-
-  const tickPkBattle = useCallback(() => {
-    setPkBattle((battle) => {
-      if (!battle || !battle.active) return battle;
-      const pinkDelta = Math.floor(Math.random() * 18);
-      const blueDelta = Math.floor(Math.random() * 18);
-      const nextSeconds = Math.max(0, battle.secondsLeft - 1);
-      return {
-        ...battle,
-        pinkPoints: battle.pinkPoints + pinkDelta,
-        bluePoints: battle.bluePoints + blueDelta,
-        secondsLeft: nextSeconds,
-        engagementTick: battle.engagementTick + 1,
-        active: nextSeconds > 0,
-      };
-    });
-    setPartyGroupGiftsToday((g) => g + Math.floor(Math.random() * 3));
   }, []);
 
   // Animate party seat speaking indicators + gift ticker while in party room
@@ -1340,10 +1283,6 @@ export function AppProvider({
       joinPartySeat,
       leavePartySeat,
       enterPartyRoom,
-      pkBattle,
-      enterPkBattle,
-      leavePkBattle,
-      tickPkBattle,
     }),
     [
       user,
@@ -1407,10 +1346,6 @@ export function AppProvider({
       joinPartySeat,
       leavePartySeat,
       enterPartyRoom,
-      pkBattle,
-      enterPkBattle,
-      leavePkBattle,
-      tickPkBattle,
     ],
   );
 
