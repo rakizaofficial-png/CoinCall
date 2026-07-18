@@ -3,12 +3,14 @@ import type { HostRow } from '../api';
 import {
   exportHostsCsv,
   fetchAuditLogs,
+  fetchBridgeHosts,
   fetchManagedHosts,
   mergeFirebaseHosts,
   runBulkHostAction,
   runHostAction,
   syncHostsToServer,
   type AuditLog,
+  type BridgeHostStatus,
   type ManagedHost,
 } from '../hostApi';
 
@@ -49,6 +51,9 @@ export function HostManagementPanel({
   const [detail, setDetail] = useState<ManagedHost | null>(null);
   const [managed, setManaged] = useState<ManagedHost[]>([]);
   const [logs, setLogs] = useState<AuditLog[]>([]);
+  const [bridgeHosts, setBridgeHosts] = useState<BridgeHostStatus[]>([]);
+  const [bridgeReady, setBridgeReady] = useState(0);
+  const [bridgeOnline, setBridgeOnline] = useState(0);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
 
@@ -56,6 +61,12 @@ export function HostManagementPanel({
     () => mergeFirebaseHosts(firebaseHosts, managed),
     [firebaseHosts, managed],
   );
+
+  const bridgeById = useMemo(() => {
+    const map = new Map<string, BridgeHostStatus>();
+    for (const h of bridgeHosts) map.set(h.id, h);
+    return map;
+  }, [bridgeHosts]);
 
   const filtered = useMemo(() => {
     let rows = hosts;
@@ -95,6 +106,16 @@ export function HostManagementPanel({
       setManaged(data.hosts || []);
       const audit = await fetchAuditLogs(60);
       setLogs(audit.logs || []);
+      try {
+        const bridge = await fetchBridgeHosts();
+        setBridgeHosts(bridge.hosts || []);
+        setBridgeReady(bridge.readyCount || 0);
+        setBridgeOnline(bridge.onlineCount || 0);
+      } catch {
+        setBridgeHosts([]);
+        setBridgeReady(0);
+        setBridgeOnline(0);
+      }
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Server sync failed — using Firebase only');
     }
@@ -174,6 +195,10 @@ export function HostManagementPanel({
           <h2>Host Management</h2>
           <p className="sub">
             Applications · approvals · control · finance · monitoring · audit
+          </p>
+          <p className="sub" style={{ marginTop: 6 }}>
+            User-app bridge: <strong>{bridgeOnline}</strong> online ·{' '}
+            <strong>{bridgeReady}</strong> ready to call
           </p>
         </div>
         <div className="hm-header-actions">
@@ -282,6 +307,7 @@ export function HostManagementPanel({
                 : h.photoUrl
                   ? [h.photoUrl]
                   : [];
+              const bridge = bridgeById.get(h.id);
               return (
                 <div className="card hm-card" key={h.id}>
                   <label className="hm-check">
@@ -301,6 +327,17 @@ export function HostManagementPanel({
                         {(h.hostStatus || 'none').replace('_', ' ').toUpperCase()}
                       </span>
                       {h.isOnline ? <span className="badge online">ONLINE</span> : null}
+                      {bridge?.readyToCall ? (
+                        <span className="badge online">READY TO CALL</span>
+                      ) : null}
+                      {bridge?.isLive ? <span className="badge pending">LIVE</span> : null}
+                      {bridge?.isOnCall ? (
+                        <span className="badge under_review">ON CALL</span>
+                      ) : null}
+                      {bridge && !bridge.readyToCall && bridge.isOnline ? (
+                        <span className="badge">ON BRIDGE</span>
+                      ) : null}
+                      {!bridge ? <span className="badge">NOT ON USER APP</span> : null}
                       {h.banned ? <span className="badge rejected">BANNED</span> : null}
                       {h.walletFrozen ? (
                         <span className="badge rejected">WALLET FROZEN</span>
@@ -365,6 +402,7 @@ export function HostManagementPanel({
           {detail ? (
             <HostDetail
               host={detail}
+              bridge={bridgeById.get(detail.id)}
               busy={busy}
               onClose={() => setDetail(null)}
               onAction={(action, extra) => void act(detail.id, action, extra)}
@@ -400,11 +438,13 @@ export function HostManagementPanel({
 
 function HostDetail({
   host,
+  bridge,
   busy,
   onClose,
   onAction,
 }: {
   host: ManagedHost;
+  bridge?: BridgeHostStatus;
   busy: boolean;
   onClose: () => void;
   onAction: (
@@ -437,6 +477,22 @@ function HostDetail({
         Status <strong>{host.hostStatus}</strong>
         {host.rejectionReason ? ` · ${host.rejectionReason}` : ''}
         {host.docsRequested ? ` · Docs: ${host.docsRequested}` : ''}
+        <br />
+        User app:{' '}
+        {bridge ? (
+          <>
+            {bridge.readyToCall
+              ? 'Ready to call'
+              : bridge.isLive
+                ? 'Live'
+                : bridge.isOnCall
+                  ? 'On call'
+                  : 'Online'}
+            {bridge.workspaceMode ? ` · ${bridge.workspaceMode}` : ''}
+          </>
+        ) : (
+          'Not listed (host must be Online in CoinCall)'
+        )}
       </div>
 
       <div className="photos" style={{ marginTop: 10 }}>

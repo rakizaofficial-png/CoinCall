@@ -6,6 +6,11 @@
 
 import { randomUUID } from 'crypto';
 import type { Express, Request, Response } from 'express';
+import {
+  clearPresenceForAdminAction,
+  listPresence,
+  pruneHosts,
+} from './presenceStore.ts';
 
 export type HostLifecycleStatus =
   | 'pending'
@@ -178,6 +183,45 @@ export function listHosts(): HostManagedRecord[] {
 
 export function getHost(id: string) {
   return registry.get(id) || null;
+}
+
+/** Alias used by the call bridge */
+export function getManagedHost(id: string) {
+  return getHost(id);
+}
+
+/**
+ * Gate for listing / ringing a host on the user-app bridge.
+ * Hosts with no managed row are allowed (not yet synced from admin).
+ */
+export function assertHostCanReceiveCalls(id: string): {
+  ok: boolean;
+  error?: string;
+  status?: number;
+  host?: HostManagedRecord | null;
+} {
+  const row = getHost(id);
+  if (!row) {
+    return { ok: true, host: null };
+  }
+  if (row.banned || row.hostStatus === 'banned') {
+    return { ok: false, error: 'Host is banned', status: 403, host: row };
+  }
+  if (row.suspended || row.hostStatus === 'suspended') {
+    return { ok: false, error: 'Host is suspended', status: 403, host: row };
+  }
+  if (row.hostStatus !== 'approved') {
+    return {
+      ok: false,
+      error: 'Host is not approved for calls',
+      status: 403,
+      host: row,
+    };
+  }
+  if (!row.callsEnabled) {
+    return { ok: false, error: 'Calls disabled by admin', status: 403, host: row };
+  }
+  return { ok: true, host: row };
 }
 
 export function pushAudit(entry: Omit<AuditLogEntry, 'id' | 'at'> & { at?: number }) {
@@ -506,6 +550,9 @@ export function applyHostAction(
     },
   });
 
+  // Drop from Luma presence bridge when admin takes the host offline
+  clearPresenceForAdminAction(hostUid, action);
+
   opts.broadcast?.({
     type: 'host:updated',
     payload: { hostUid, action, host: row },
@@ -631,6 +678,27 @@ export function registerHostManagementRoutes(
       broadcast: broadcastWs,
     });
     res.json({ ok: true, host: row });
+  });
+
+  /** Admin: live bridge presence (what the user app sees) */
+  app.get('/api/admin/bridge-hosts', (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    pruneHosts();
+    const bridge = listPresence().map((h) => {
+      const managed = getHost(h.id);
+      return {
+        ...h,
+        hostStatus: managed?.hostStatus || h.hostStatus || 'unknown',
+        callsEnabled: managed ? managed.callsEnabled : true,
+        banned: managed?.banned || false,
+        suspended: managed?.suspended || false,
+      };
+    });
+    res.json({
+      hosts: bridge,
+      readyCount: bridge.filter((h) => h.readyToCall).length,
+      onlineCount: bridge.filter((h) => h.isOnline).length,
+    });
   });
 
   /** Admin: list / search / filter / sort */

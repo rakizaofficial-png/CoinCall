@@ -123,6 +123,32 @@ export async function fetchAuditLogs(limit = 80) {
   return adminFetch<{ logs: AuditLog[] }>(`/admin/audit-logs?limit=${limit}`);
 }
 
+export type BridgeHostStatus = {
+  id: string;
+  name: string;
+  avatarUrl?: string;
+  country?: string;
+  ratePerMinute: number;
+  isOnline: boolean;
+  isLive: boolean;
+  isOnCall: boolean;
+  readyToCall: boolean;
+  workspaceMode?: string;
+  hostStatus?: string;
+  callsEnabled?: boolean;
+  banned?: boolean;
+  suspended?: boolean;
+  lastSeen: number;
+};
+
+export async function fetchBridgeHosts() {
+  return adminFetch<{
+    hosts: BridgeHostStatus[];
+    readyCount: number;
+    onlineCount: number;
+  }>('/admin/bridge-hosts');
+}
+
 export async function exportHostsCsv() {
   const csv = await adminFetch<string>('/admin/hosts-export');
   const blob = new Blob([csv], { type: 'text/csv' });

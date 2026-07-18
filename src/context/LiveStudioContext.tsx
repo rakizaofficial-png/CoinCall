@@ -37,6 +37,7 @@ import {
 } from '../services/hostOutreachService';
 import { syncHostPresence } from '../services/realtimeService';
 import { publishHostPresence } from '../services/callBridge';
+import { setBridgeLive } from '../services/hostBridgeState';
 import { notify } from '../utils/notify';
 
 type GoLiveDraft = {
@@ -250,6 +251,7 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
       name: user.name,
       avatarUrl: user.avatarUrl,
     });
+    setBridgeLive(true);
     void publishHostPresence({
       id: user.id,
       name: user.name,
@@ -259,6 +261,7 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
       isOnline: true,
       isLive: true,
       isOnCall: false,
+      workspaceMode: 'waiting_1v1',
     });
     await postRoomComment(room.id, {
       userId: 'system',
@@ -318,6 +321,7 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
       name: user.name,
       avatarUrl: user.avatarUrl,
     });
+    setBridgeLive(true);
     void publishHostPresence({
       id: user.id,
       name: user.name,
@@ -327,6 +331,7 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
       isOnline: true,
       isLive: true,
       isOnCall: false,
+      workspaceMode: 'waiting_1v1',
     });
     await postRoomComment(room.id, {
       userId: 'system',
@@ -352,10 +357,22 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
     }
     setMyLiveRoom(null);
     setActiveRoomId(null);
+    setBridgeLive(false);
     await syncHostPresence(user.id, {
       isLive: false,
       isOnCall: false,
     });
+    void publishHostPresence({
+      id: user.id,
+      name: user.name,
+      avatarUrl: user.avatarUrl,
+      country: user.country,
+      ratePerMinute: 80,
+      isOnline: true,
+      isLive: false,
+      isOnCall: false,
+      workspaceMode: 'waiting_1v1',
+    }).catch(() => undefined);
     notify('Live ended', 'Thanks for streaming!');
   }, [myLiveRoom, user]);
 

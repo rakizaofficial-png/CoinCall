@@ -13,6 +13,11 @@ import {
   listenIncomingCalls,
   publishHostPresence,
 } from '../services/callBridge';
+import {
+  getBridgeLive,
+  getBridgeWorkspaceMode,
+  setBridgeWorkspaceMode,
+} from '../services/hostBridgeState';
 import { listenHostControl, syncHostPresence } from '../services/realtimeService';
 import type {
   CallSession,
@@ -268,7 +273,14 @@ export function AppProvider({
 
   const setWorkspaceMode = useCallback((mode: HostWorkspaceMode) => {
     setWorkspaceModeState(mode);
+    setBridgeWorkspaceMode(mode === 'solo_calling' ? 'solo_calling' : 'waiting_1v1');
   }, []);
+
+  useEffect(() => {
+    setBridgeWorkspaceMode(
+      workspaceMode === 'solo_calling' ? 'solo_calling' : 'waiting_1v1',
+    );
+  }, [workspaceMode]);
 
   const hostPresenceStatus: HostPresenceStatus = useMemo(() => {
     if (!hostOnline) return 'offline';
@@ -354,6 +366,7 @@ export function AppProvider({
     setUser((u) => ({ ...u, isOnline: v }));
     if (!v) {
       setWorkspaceModeState('waiting_1v1');
+      setBridgeWorkspaceMode('waiting_1v1');
     }
     void syncHostPresence(user.id, { isOnline: v });
     // Always try production bridge — never skip when online
@@ -364,8 +377,9 @@ export function AppProvider({
       country: user.country,
       ratePerMinute: 80,
       isOnline: v,
-      isLive: false,
+      isLive: getBridgeLive(),
       isOnCall: Boolean(callRef.current?.status === 'active'),
+      workspaceMode: getBridgeWorkspaceMode(),
     })
       .then(() => {
         if (v && !opts?.silent) {
@@ -404,9 +418,11 @@ export function AppProvider({
         country: user.country,
         ratePerMinute: 80,
         isOnline: true,
+        isLive: getBridgeLive(),
         isOnCall:
           Boolean(callRef.current?.status === 'active') ||
           Boolean(incomingBridgeCall),
+        workspaceMode: getBridgeWorkspaceMode(),
       }).catch(() => undefined);
     };
     beat();

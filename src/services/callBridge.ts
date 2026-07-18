@@ -9,6 +9,8 @@ export type BridgeHost = {
   isOnline: boolean;
   isLive: boolean;
   isOnCall: boolean;
+  readyToCall?: boolean;
+  workspaceMode?: 'waiting_1v1' | 'solo_calling';
 };
 
 export type BridgeCall = {
@@ -58,6 +60,7 @@ export async function publishHostPresence(input: {
   isOnline: boolean;
   isLive?: boolean;
   isOnCall?: boolean;
+  workspaceMode?: 'waiting_1v1' | 'solo_calling';
 }) {
   const res = await fetch(`${base()}/hosts/presence`, {
     method: 'POST',
@@ -66,6 +69,7 @@ export async function publishHostPresence(input: {
       ratePerMinute: 80,
       isLive: false,
       isOnCall: false,
+      workspaceMode: 'waiting_1v1',
       ...input,
     }),
   });

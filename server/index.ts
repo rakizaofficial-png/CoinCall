@@ -5,7 +5,22 @@ import agoraToken from 'agora-token';
 import { randomUUID } from 'crypto';
 import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
-import { registerHostManagementRoutes } from './hostManagement.ts';
+import {
+  assertHostCanReceiveCalls,
+  registerHostManagementRoutes,
+} from './hostManagement.ts';
+import {
+  computeReadyToCall,
+  getPresence,
+  listPresence,
+  presenceCountOnline,
+  pruneHosts,
+  removePresence,
+  setPresence,
+  upsertPresence,
+  type HostPresence,
+  type HostWorkspaceMode,
+} from './presenceStore.ts';
 
 const { RtcRole, RtcTokenBuilder } = agoraToken as {
   RtcRole: { PUBLISHER: number; SUBSCRIBER: number };
@@ -30,19 +45,6 @@ const APP_ID = process.env.AGORA_APP_ID || '';
 const APP_CERT = process.env.AGORA_APP_CERTIFICATE || '';
 const PORT = Number(process.env.PORT || 4000);
 const ADMIN_KEY = process.env.ADMIN_API_KEY || 'coincall-admin';
-const HOST_TTL_MS = 90_000;
-
-type HostPresence = {
-  id: string;
-  name: string;
-  avatarUrl?: string;
-  country?: string;
-  ratePerMinute: number;
-  isOnline: boolean;
-  isLive: boolean;
-  isOnCall: boolean;
-  lastSeen: number;
-};
 
 type CallStatus = 'ringing' | 'accepted' | 'rejected' | 'ended' | 'missed';
 
@@ -97,9 +99,31 @@ const GIFT_CATALOG_SERVER: Record<
   rocket: { name: 'Rocket', emoji: '🚀', coins: 2999 },
 };
 
-const hosts = new Map<string, HostPresence>();
 const calls = new Map<string, CallRecord>();
 const hostStreams = new Map<string, Set<express.Response>>();
+
+function patchPresence(
+  hostId: string,
+  patch: Partial<HostPresence>,
+): HostPresence | undefined {
+  const current = getPresence(hostId);
+  if (!current) return undefined;
+  const next: HostPresence = {
+    ...current,
+    ...patch,
+    id: hostId,
+    lastSeen: patch.lastSeen ?? Date.now(),
+  };
+  next.readyToCall = computeReadyToCall(next);
+  setPresence(hostId, next);
+  return next;
+}
+
+function isListablePresence(h: HostPresence): boolean {
+  if (!h.isOnline) return false;
+  const gate = assertHostCanReceiveCalls(h.id);
+  return gate.ok;
+}
 
 function requireAdmin(req: express.Request, res: express.Response): boolean {
   const key = String(req.headers['x-admin-key'] || req.query.key || '');
@@ -139,23 +163,15 @@ function pushToHost(hostId: string, event: string, data: unknown) {
   }
 }
 
-function pruneHosts() {
-  const now = Date.now();
-  for (const [id, h] of hosts) {
-    if (now - h.lastSeen > HOST_TTL_MS) {
-      hosts.delete(id);
-    }
-  }
-}
-
-setInterval(pruneHosts, 10_000);
+setInterval(() => pruneHosts(), 10_000);
 
 app.get('/api/health', (_req, res) => {
   pruneHosts();
   res.json({
     ok: true,
     agoraConfigured: Boolean(APP_ID && APP_CERT),
-    onlineHosts: [...hosts.values()].filter((h) => h.isOnline).length,
+    onlineHosts: presenceCountOnline(),
+    readyHosts: listPresence().filter((h) => h.readyToCall).length,
     activeCalls: [...calls.values()].filter(
       (c) => c.status === 'ringing' || c.status === 'accepted',
     ).length,
@@ -191,10 +207,27 @@ app.post('/api/hosts/presence', (req, res) => {
     isOnline = true,
     isLive = false,
     isOnCall = false,
+    workspaceMode,
   } = req.body || {};
 
   if (!id || !name) {
     res.status(400).json({ error: 'id and name are required' });
+    return;
+  }
+
+  const hostId = String(id);
+
+  // Going offline always clears the bridge entry
+  if (!isOnline) {
+    removePresence(hostId);
+    res.json({ ok: true, host: { id: hostId, isOnline: false } });
+    return;
+  }
+
+  const gate = assertHostCanReceiveCalls(hostId);
+  if (!gate.ok) {
+    removePresence(hostId);
+    res.status(gate.status || 403).json({ error: gate.error, ok: false });
     return;
   }
 
@@ -209,35 +242,47 @@ app.post('/api/hosts/presence', (req, res) => {
     safeAvatar = undefined;
   }
 
+  const mode: HostWorkspaceMode | undefined =
+    workspaceMode === 'solo_calling' || workspaceMode === 'waiting_1v1'
+      ? workspaceMode
+      : undefined;
+
   const record: HostPresence = {
-    id: String(id),
+    id: hostId,
     name: String(name),
     avatarUrl:
       safeAvatar ||
-      `https://i.pravatar.cc/150?u=${encodeURIComponent(String(id))}`,
+      `https://i.pravatar.cc/150?u=${encodeURIComponent(hostId)}`,
     country: country ? String(country) : undefined,
     ratePerMinute: Number(ratePerMinute) || 80,
-    isOnline: Boolean(isOnline),
+    isOnline: true,
     isLive: Boolean(isLive),
     isOnCall: Boolean(isOnCall),
+    readyToCall: false,
+    workspaceMode: mode,
+    hostStatus: gate.host?.hostStatus || 'approved',
     lastSeen: Date.now(),
   };
-
-  if (!record.isOnline) {
-    hosts.delete(record.id);
-  } else {
-    hosts.set(record.id, record);
-  }
+  record.readyToCall = computeReadyToCall(record);
+  upsertPresence(record);
 
   res.json({ ok: true, host: record });
 });
 
 /** User app: list online CoinCall hosts */
-app.get('/api/hosts', (_req, res) => {
+app.get('/api/hosts', (req, res) => {
   pruneHosts();
-  const list = [...hosts.values()]
-    .filter((h) => h.isOnline)
-    .sort((a, b) => Number(b.isLive) - Number(a.isLive));
+  const readyOnly =
+    String(req.query.ready || '') === '1' ||
+    String(req.query.ready || '').toLowerCase() === 'true';
+  let list = listPresence().filter(isListablePresence);
+  if (readyOnly) {
+    list = list.filter((h) => h.readyToCall);
+  }
+  list = list.sort((a, b) => {
+    if (a.readyToCall !== b.readyToCall) return Number(b.readyToCall) - Number(a.readyToCall);
+    return Number(b.isLive) - Number(a.isLive);
+  });
   res.json({ hosts: list });
 });
 
@@ -280,13 +325,24 @@ app.post('/api/calls', (req, res) => {
     return;
   }
 
-  const host = hosts.get(String(hostId));
+  const hid = String(hostId);
+  const gate = assertHostCanReceiveCalls(hid);
+  if (!gate.ok) {
+    res.status(gate.status || 403).json({ error: gate.error });
+    return;
+  }
+
+  const host = getPresence(hid);
   if (!host || !host.isOnline) {
     res.status(404).json({ error: 'Host is offline. Ask them to Go Online in CoinCall.' });
     return;
   }
-  if (host.isOnCall) {
-    res.status(409).json({ error: 'Host is busy on another call' });
+  if (host.isOnCall || host.isLive || !host.readyToCall) {
+    res.status(409).json({
+      error: host.isLive
+        ? 'Host is live — try again when they are waiting for calls'
+        : 'Host is busy on another call',
+    });
     return;
   }
 
@@ -308,8 +364,7 @@ app.post('/api/calls', (req, res) => {
   };
 
   calls.set(id, call);
-  host.isOnCall = true;
-  hosts.set(host.id, host);
+  patchPresence(host.id, { isOnCall: true });
   pushToHost(host.id, 'incoming_call', call);
 
   // Auto-miss after 45s
@@ -319,11 +374,7 @@ app.post('/api/calls', (req, res) => {
       current.status = 'missed';
       current.updatedAt = Date.now();
       calls.set(id, current);
-      const h = hosts.get(current.hostId);
-      if (h) {
-        h.isOnCall = false;
-        hosts.set(h.id, h);
-      }
+      patchPresence(current.hostId, { isOnCall: false });
       pushToHost(current.hostId, 'call_missed', current);
     }
   }, 45_000);
@@ -370,11 +421,7 @@ app.post('/api/calls/:id/reject', (req, res) => {
   call.status = 'rejected';
   call.updatedAt = Date.now();
   calls.set(call.id, call);
-  const h = hosts.get(call.hostId);
-  if (h) {
-    h.isOnCall = false;
-    hosts.set(h.id, h);
-  }
+  patchPresence(call.hostId, { isOnCall: false });
   pushToHost(call.hostId, 'call_rejected', call);
   res.json({ call });
 });
@@ -388,11 +435,7 @@ app.post('/api/calls/:id/end', (req, res) => {
   call.status = 'ended';
   call.updatedAt = Date.now();
   calls.set(call.id, call);
-  const h = hosts.get(call.hostId);
-  if (h) {
-    h.isOnCall = false;
-    hosts.set(h.id, h);
-  }
+  patchPresence(call.hostId, { isOnCall: false });
   pushToHost(call.hostId, 'call_ended', call);
   res.json({ call });
 });
@@ -719,7 +762,9 @@ app.post('/api/calls/route', (req, res) => {
     return;
   }
 
-  const online = [...hosts.values()].filter((h) => h.isOnline && !h.isOnCall);
+  const online = listPresence().filter(
+    (h) => isListablePresence(h) && h.readyToCall,
+  );
   const matched = online.find((h) => h.id === requestedHostId) || null;
 
   if (matched) {
@@ -937,7 +982,7 @@ function recordUserRecharge(input: {
     },
   });
   // Notify live hosts via SSE when a user recharges
-  for (const h of hosts.values()) {
+  for (const h of listPresence()) {
     if (h.isLive || h.isOnline) {
       pushToHost(h.id, 'system_recharge', {
         type: 'recharge',
@@ -1494,12 +1539,8 @@ app.post('/api/live/rooms', (req, res) => {
   }
   liveRooms.set(id, { ...room, updatedAt: Date.now() });
   const hostId = String(room.hostId || '');
-  if (hostId && hosts.has(hostId)) {
-    const h = hosts.get(hostId)!;
-    h.isLive = true;
-    h.isOnline = true;
-    h.lastSeen = Date.now();
-    hosts.set(hostId, h);
+  if (hostId && getPresence(hostId)) {
+    patchPresence(hostId, { isLive: true, isOnline: true });
   }
   broadcastWs({ type: 'live:room', payload: room });
   res.json({ ok: true, room });
@@ -1518,11 +1559,8 @@ app.post('/api/live/rooms/:id/end', (req, res) => {
     room.endedAt = Date.now();
     liveRooms.set(id, room);
     const hostId = String(room.hostId || req.body?.hostId || '');
-    if (hostId && hosts.has(hostId)) {
-      const h = hosts.get(hostId)!;
-      h.isLive = false;
-      h.lastSeen = Date.now();
-      hosts.set(hostId, h);
+    if (hostId && getPresence(hostId)) {
+      patchPresence(hostId, { isLive: false });
     }
   }
   broadcastWs({ type: 'live:ended', payload: { id } });
