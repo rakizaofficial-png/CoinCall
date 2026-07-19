@@ -21,10 +21,14 @@
 - GiftSheet sends `X-User-Id`
 - Optional Mongo snapshot upsert (disk always written first)
 
-## Verified on production (pre-this-deploy smoke)
-- `agoraConfigured: true` — token mint works for `live_*` channels
-- `/api/ai-hosts` returns prerecorded CDN catalog (not generative AI)
-- Wallet credit without `X-User-Id` → 401
+## Verified on production (post-deploy 2026-07-19)
+- API commit live: `/api/ready` returns `mongoConfigured:false`, `persistence:local_dot_data`
+- `agoraConfigured: true` — token mint works for `live_*`; evil channels → 403
+- `/api/ai-hosts` returns 5 prerecorded catalog hosts; `/calls/route` → `ai_prerecorded` when offline
+- Wallet credit / sync without `X-User-Id` → 401; sync ignores client `coinBalance`
+- Free VIP → 403 in production
+- Smoke script: all checks passed; Luma / Admin / Host HTTP 200
+- Pushed: CoinCall `08cc655`, Luma `944bb11`
 
 ## Still required for full money production
 - Set `MONGODB_URI` (or mongodb `DATABASE_URL`) + Render persistent `DATA_DIR` for durable multi-instance wallets
