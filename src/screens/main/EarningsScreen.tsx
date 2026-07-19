@@ -3,34 +3,62 @@ import {
   ArrowDownCircle,
   Clock,
   Gift,
+  Phone,
   TrendingUp,
   Users,
   Wallet,
 } from 'lucide-react-native';
+import { useCallback, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GlassCard } from '../../components/ui/GlassCard';
 import { PrimaryButton } from '../../components/ui/PrimaryButton';
 import { Screen } from '../../components/ui/Screen';
 import { useApp } from '../../context/AppContext';
-import { useLiveStudio } from '../../context/LiveStudioContext';
+import {
+  fetchHostEarnings,
+  formatDuration,
+  type HostCallHistoryRow,
+  type HostEarningsPayload,
+  type HostGiftHistoryRow,
+} from '../../services/hostEarningsApi';
 import { radii } from '../../theme/colors';
 import { useTheme } from '../../theme/ThemeContext';
 
 export function EarningsScreen({ navigation }: { navigation: any }) {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
-  const { user, hostEarnings, transactions, callsToday, myTodayMinutes } = useApp();
-  const { todayLiveGiftCoins, monthlyEarn, liveSeconds } = useLiveStudio();
+  const { user } = useApp();
+  const [payload, setPayload] = useState<HostEarningsPayload | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  const today =
-    hostEarnings.call +
-    hostEarnings.gift +
-    hostEarnings.task +
-    hostEarnings.invite +
-    todayLiveGiftCoins;
+  const load = useCallback(async () => {
+    if (!user.id) return;
+    setLoading(true);
+    try {
+      const data = await fetchHostEarnings(user.id);
+      setPayload(data);
+    } catch {
+      setPayload(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [user.id]);
 
-  const recent = transactions.slice(0, 8);
+  useFocusEffect(
+    useCallback(() => {
+      void load();
+    }, [load]),
+  );
+
+  const summary = payload?.summary;
+  const calls: HostCallHistoryRow[] = payload?.calls || [];
+  const gifts: HostGiftHistoryRow[] = payload?.gifts || [];
+  const callCoins = summary?.callCoins ?? 0;
+  const giftCoins = summary?.giftCoins ?? 0;
+  const totalCoins = summary?.totalCoins ?? 0;
+  const balance = summary?.walletBalance ?? user.coinBalance;
 
   return (
     <Screen
@@ -45,8 +73,11 @@ export function EarningsScreen({ navigation }: { navigation: any }) {
         style={styles.hero}
       >
         <Text style={styles.heroLabel}>Available balance</Text>
-        <Text style={styles.heroValue}>{user.coinBalance}</Text>
-        <Text style={styles.heroSub}>coins · today +{today}</Text>
+        <Text style={styles.heroValue}>{balance}</Text>
+        <Text style={styles.heroSub}>
+          total earned {totalCoins} coins
+          {loading ? ' · syncing…' : ''}
+        </Text>
         <PrimaryButton
           label="Withdraw"
           onPress={() => navigation.navigate('Withdraw')}
@@ -56,10 +87,24 @@ export function EarningsScreen({ navigation }: { navigation: any }) {
 
       <View style={styles.grid}>
         {[
-          { icon: TrendingUp, label: 'Monthly', value: monthlyEarn },
-          { icon: Gift, label: 'Gifts today', value: todayLiveGiftCoins },
-          { icon: Users, label: 'Calls', value: callsToday },
-          { icon: Clock, label: 'Live mins', value: Math.floor(liveSeconds / 60) || myTodayMinutes },
+          { icon: TrendingUp, label: 'Total earned', value: totalCoins },
+          { icon: Phone, label: 'Call coins', value: callCoins },
+          { icon: Gift, label: 'Gift coins', value: giftCoins },
+          {
+            icon: Users,
+            label: 'Calls',
+            value: summary?.totalCalls ?? 0,
+          },
+          {
+            icon: Clock,
+            label: 'Call time',
+            value: formatDuration(summary?.totalDurationSec ?? 0),
+          },
+          {
+            icon: Gift,
+            label: 'Gifts',
+            value: summary?.totalGifts ?? 0,
+          },
         ].map((s) => (
           <GlassCard key={s.label} style={styles.stat}>
             <s.icon size={18} color={colors.primarySoft} />
@@ -70,13 +115,12 @@ export function EarningsScreen({ navigation }: { navigation: any }) {
       </View>
 
       <GlassCard>
-        <Text style={[styles.section, { color: colors.text }]}>Breakdown</Text>
+        <Text style={[styles.section, { color: colors.text }]}>Revenue breakdown</Text>
         {(
           [
-            ['Calls', hostEarnings.call],
-            ['Gifts', hostEarnings.gift + todayLiveGiftCoins],
-            ['Tasks', hostEarnings.task],
-            ['Invites', hostEarnings.invite],
+            ['Calls', callCoins],
+            ['Gifting', giftCoins],
+            ['Combined total', totalCoins],
           ] as const
         ).map(([label, value]) => (
           <View key={label} style={styles.breakRow}>
@@ -101,31 +145,52 @@ export function EarningsScreen({ navigation }: { navigation: any }) {
       </Pressable>
 
       <Text style={[styles.section, { color: colors.text, marginTop: 18 }]}>
-        Recent activity
+        Call Analytics
       </Text>
-      {recent.length === 0 ? (
-        <Text style={{ color: colors.textSecondary }}>No transactions yet.</Text>
+      {calls.length === 0 ? (
+        <Text style={{ color: colors.textSecondary, marginBottom: 12 }}>
+          No calls recorded yet.
+        </Text>
       ) : (
-        recent.map((t) => (
+        calls.slice(0, 12).map((c) => (
           <View
-            key={t.id}
+            key={c.id}
             style={[styles.tx, { borderColor: colors.border, backgroundColor: colors.bgCard }]}
           >
             <View style={{ flex: 1 }}>
-              <Text style={{ color: colors.text, fontWeight: '700' }}>{t.label}</Text>
+              <Text style={{ color: colors.text, fontWeight: '700' }}>
+                {c.userName || 'Caller'}
+              </Text>
               <Text style={{ color: colors.textMuted, fontSize: 11 }}>
-                {new Date(t.timestamp).toLocaleString()}
+                {new Date(c.startedAt).toLocaleString()} · {formatDuration(c.durationSec)}
               </Text>
             </View>
-            <Text
-              style={{
-                color: t.type === 'payout' || t.type === 'spend' ? colors.danger : colors.online,
-                fontWeight: '900',
-              }}
-            >
-              {t.type === 'payout' || t.type === 'spend' ? '-' : '+'}
-              {t.amount}
-            </Text>
+            <Text style={{ color: colors.online, fontWeight: '900' }}>+{c.coinsSpent}</Text>
+          </View>
+        ))
+      )}
+
+      <Text style={[styles.section, { color: colors.text, marginTop: 10 }]}>
+        Gifts received
+      </Text>
+      {gifts.length === 0 ? (
+        <Text style={{ color: colors.textSecondary }}>No gifts yet.</Text>
+      ) : (
+        gifts.slice(0, 20).map((g) => (
+          <View
+            key={g.id}
+            style={[styles.tx, { borderColor: colors.border, backgroundColor: colors.bgCard }]}
+          >
+            <Text style={{ fontSize: 22, marginRight: 8 }}>{g.giftEmoji}</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: colors.text, fontWeight: '700' }}>
+                {g.giftName} · from {g.fromName}
+              </Text>
+              <Text style={{ color: colors.textMuted, fontSize: 11 }}>
+                {new Date(g.createdAt).toLocaleString()}
+              </Text>
+            </View>
+            <Text style={{ color: colors.online, fontWeight: '900' }}>+{g.coins}</Text>
           </View>
         ))
       )}
@@ -142,7 +207,7 @@ const styles = StyleSheet.create({
   heroSub: { color: 'rgba(255,255,255,0.8)' },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 12 },
   stat: { width: '48%', gap: 6 },
-  statValue: { fontWeight: '900', fontSize: 22 },
+  statValue: { fontWeight: '900', fontSize: 20 },
   statLabel: { fontSize: 12 },
   section: { fontWeight: '900', fontSize: 16, marginBottom: 10 },
   breakRow: {

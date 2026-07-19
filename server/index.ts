@@ -92,11 +92,51 @@ type CallRecord = {
   status: CallStatus;
   createdAt: number;
   updatedAt: number;
+  acceptedAt?: number;
   hostUidAgora: number;
   userUidAgora: number;
   giftRequest?: GiftRequestRecord | null;
   /** How many full minutes have been billed user → host */
   billedMinutes?: number;
+  endReason?: CallEndReason;
+};
+
+type CallEndReason =
+  | 'user'
+  | 'host'
+  | 'exhausted'
+  | 'missed'
+  | 'rejected';
+
+type CallHistoryRecord = {
+  id: string;
+  hostId: string;
+  hostName: string;
+  userId: string;
+  userName: string;
+  userAvatar?: string;
+  ratePerMinute: number;
+  billedMinutes: number;
+  coinsSpent: number;
+  status: CallStatus;
+  startedAt: number;
+  endedAt: number;
+  durationSec: number;
+  endReason: CallEndReason;
+};
+
+type GiftHistoryRecord = {
+  id: string;
+  fromUserId: string;
+  fromName: string;
+  toHostId: string;
+  giftId: string;
+  giftName: string;
+  giftEmoji: string;
+  coins: number;
+  roomId?: string | null;
+  callId?: string | null;
+  createdAt: number;
 };
 
 type GiftRequestStatus = 'pending' | 'accepted' | 'declined' | 'expired';
@@ -134,6 +174,78 @@ const GIFT_CATALOG_SERVER: Record<
 };
 
 const calls = new Map<string, CallRecord>();
+/** Durable call archive (capped) */
+const callHistory: CallHistoryRecord[] = [];
+/** Durable gift ledger for host revenue (capped) */
+const giftHistory: GiftHistoryRecord[] = [];
+
+function archiveCall(call: CallRecord, endReason: CallEndReason) {
+  if (callHistory.some((c) => c.id === call.id)) return;
+  const startedAt = call.acceptedAt || call.createdAt;
+  const endedAt = call.updatedAt || Date.now();
+  const billedMinutes = Math.max(0, Math.floor(call.billedMinutes || 0));
+  const rate = Math.max(1, Math.floor(Number(call.ratePerMinute) || 80));
+  const row: CallHistoryRecord = {
+    id: call.id,
+    hostId: call.hostId,
+    hostName: call.hostName,
+    userId: call.userId,
+    userName: call.userName,
+    userAvatar: call.userAvatar,
+    ratePerMinute: rate,
+    billedMinutes,
+    coinsSpent: billedMinutes * rate,
+    status: call.status,
+    startedAt,
+    endedAt,
+    durationSec: Math.max(0, Math.floor((endedAt - startedAt) / 1000)),
+    endReason,
+  };
+  callHistory.unshift(row);
+  if (callHistory.length > 800) callHistory.length = 800;
+  persist();
+}
+
+function forceEndCall(call: CallRecord, endReason: CallEndReason) {
+  if (call.status === 'ended' || call.status === 'rejected' || call.status === 'missed') {
+    archiveCall(call, call.endReason || endReason);
+    return call;
+  }
+  call.status = 'ended';
+  call.endReason = endReason;
+  call.updatedAt = Date.now();
+  calls.set(call.id, call);
+  patchPresence(call.hostId, { isOnCall: false });
+  archiveCall(call, endReason);
+  pushToHost(call.hostId, 'call_ended', call);
+  broadcastWs({ type: 'call:ended', payload: call });
+  return call;
+}
+
+function pushGiftHistory(event: GiftHistoryRecord) {
+  giftHistory.unshift(event);
+  if (giftHistory.length > 2000) giftHistory.length = 2000;
+  persist();
+}
+
+function hostEarningsSummary(hostId: string) {
+  const hostCalls = callHistory.filter((c) => c.hostId === hostId);
+  const hostGifts = giftHistory.filter((g) => g.toHostId === hostId);
+  const callCoins = hostCalls.reduce((s, c) => s + c.coinsSpent, 0);
+  const giftCoins = hostGifts.reduce((s, g) => s + g.coins, 0);
+  const totalDurationSec = hostCalls.reduce((s, c) => s + c.durationSec, 0);
+  const answered = hostCalls.filter(
+    (c) => c.status === 'ended' || c.status === 'accepted',
+  );
+  return {
+    callCoins,
+    giftCoins,
+    totalCoins: callCoins + giftCoins,
+    totalCalls: answered.length,
+    totalDurationSec,
+    totalGifts: hostGifts.length,
+  };
+}
 const hostStreams = new Map<string, Set<express.Response>>();
 
 function patchPresence(
@@ -398,6 +510,20 @@ app.post('/api/calls', (req, res) => {
     return;
   }
 
+  const rate = Math.max(1, Math.floor(Number(host.ratePerMinute) || 80));
+  const userWallet = ensureWallet(String(userId), {
+    role: 'user',
+    displayName: String(userName),
+  });
+  if (userWallet.coinBalance < rate) {
+    res.status(402).json({
+      error: 'Insufficient balance, please recharge',
+      need: rate,
+      wallet: walletPublic(userWallet),
+    });
+    return;
+  }
+
   const id = randomUUID().slice(0, 12);
   const call: CallRecord = {
     id,
@@ -407,7 +533,7 @@ app.post('/api/calls', (req, res) => {
     userId: String(userId),
     userName: String(userName),
     userAvatar: userAvatar ? String(userAvatar) : undefined,
-    ratePerMinute: host.ratePerMinute,
+    ratePerMinute: rate,
     status: 'ringing',
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -424,9 +550,11 @@ app.post('/api/calls', (req, res) => {
     const current = calls.get(id);
     if (current?.status === 'ringing') {
       current.status = 'missed';
+      current.endReason = 'missed';
       current.updatedAt = Date.now();
       calls.set(id, current);
       patchPresence(current.hostId, { isOnCall: false });
+      archiveCall(current, 'missed');
       pushToHost(current.hostId, 'call_missed', current);
     }
   }, 45_000);
@@ -458,6 +586,7 @@ app.post('/api/calls/:id/accept', (req, res) => {
     return;
   }
   call.status = 'accepted';
+  call.acceptedAt = Date.now();
   call.updatedAt = Date.now();
   calls.set(call.id, call);
   pushToHost(call.hostId, 'call_accepted', call);
@@ -471,9 +600,11 @@ app.post('/api/calls/:id/reject', (req, res) => {
     return;
   }
   call.status = 'rejected';
+  call.endReason = 'rejected';
   call.updatedAt = Date.now();
   calls.set(call.id, call);
   patchPresence(call.hostId, { isOnCall: false });
+  archiveCall(call, 'rejected');
   pushToHost(call.hostId, 'call_rejected', call);
   res.json({ call });
 });
@@ -484,13 +615,15 @@ app.post('/api/calls/:id/end', (req, res) => {
     res.status(404).json({ error: 'Call not found' });
     return;
   }
-  call.status = 'ended';
-  call.updatedAt = Date.now();
-  calls.set(call.id, call);
-  patchPresence(call.hostId, { isOnCall: false });
-  pushToHost(call.hostId, 'call_ended', call);
-  broadcastWs({ type: 'call:ended', payload: call });
-  res.json({ call });
+  const reasonRaw = String(req.body?.reason || '').trim();
+  const endReason: CallEndReason =
+    reasonRaw === 'exhausted'
+      ? 'exhausted'
+      : reasonRaw === 'host'
+        ? 'host'
+        : 'user';
+  const ended = forceEndCall(call, endReason);
+  res.json({ call: ended });
 });
 
 /**
@@ -517,10 +650,12 @@ app.post('/api/calls/:id/minute', (req, res) => {
   const amount = Math.max(1, Math.floor(Number(call.ratePerMinute) || 80));
   const userWallet = ensureWallet(userId, { role: 'user', displayName: call.userName });
   if (userWallet.coinBalance < amount) {
+    forceEndCall(call, 'exhausted');
     res.status(402).json({
       error: 'Coins exhausted',
       wallet: walletPublic(userWallet),
       need: amount,
+      callEnded: true,
     });
     return;
   }
@@ -596,6 +731,70 @@ app.get('/api/profiles/search', (req, res) => {
     }
   }
   res.status(404).json({ error: 'User not found' });
+});
+
+/** User call history */
+app.get('/api/users/:userId/calls', (req, res) => {
+  const userId = String(req.params.userId || '').trim();
+  if (!userId) {
+    res.status(400).json({ error: 'userId required' });
+    return;
+  }
+  if (!requireUserMatch(req, res, userId)) return;
+  const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
+  const callsForUser = callHistory.filter((c) => c.userId === userId).slice(0, limit);
+  res.json({
+    calls: callsForUser,
+    summary: {
+      totalCalls: callsForUser.length,
+      totalCoinsSpent: callsForUser.reduce((s, c) => s + c.coinsSpent, 0),
+      totalDurationSec: callsForUser.reduce((s, c) => s + c.durationSec, 0),
+    },
+  });
+});
+
+/** Host call analytics + history */
+app.get('/api/hosts/:hostId/calls', (req, res) => {
+  const hostId = String(req.params.hostId || '').trim();
+  if (!hostId) {
+    res.status(400).json({ error: 'hostId required' });
+    return;
+  }
+  if (!requireUserMatch(req, res, hostId)) return;
+  const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
+  const callsForHost = callHistory.filter((c) => c.hostId === hostId).slice(0, limit);
+  const summary = hostEarningsSummary(hostId);
+  res.json({
+    calls: callsForHost,
+    summary: {
+      totalCalls: summary.totalCalls,
+      totalDurationSec: summary.totalDurationSec,
+      totalCallCoins: summary.callCoins,
+    },
+  });
+});
+
+/** Host revenue breakdown: calls + gifts with sender detail */
+app.get('/api/hosts/:hostId/earnings', (req, res) => {
+  const hostId = String(req.params.hostId || '').trim();
+  if (!hostId) {
+    res.status(400).json({ error: 'hostId required' });
+    return;
+  }
+  if (!requireUserMatch(req, res, hostId)) return;
+  const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 40));
+  const summary = hostEarningsSummary(hostId);
+  const callsForHost = callHistory.filter((c) => c.hostId === hostId).slice(0, limit);
+  const giftsForHost = giftHistory.filter((g) => g.toHostId === hostId).slice(0, limit);
+  const wallet = ensureWallet(hostId, { role: 'host' });
+  res.json({
+    summary: {
+      ...summary,
+      walletBalance: wallet.coinBalance,
+    },
+    calls: callsForHost,
+    gifts: giftsForHost,
+  });
 });
 
 /** Token helper for a call participant */
@@ -777,6 +976,20 @@ app.post('/api/calls/:id/gift-requests/:reqId/respond', (req, res) => {
     userWallet: walletPublic(userWallet),
   };
 
+  pushGiftHistory({
+    id: gr.id,
+    fromUserId: userId,
+    fromName: call.userName,
+    toHostId: call.hostId,
+    giftId: gr.giftId,
+    giftName: gr.giftName,
+    giftEmoji: gr.giftEmoji,
+    coins: gr.coins,
+    callId: call.id,
+    roomId: null,
+    createdAt: Date.now(),
+  });
+
   broadcastWs({
     type: 'gift:accepted',
     payload,
@@ -866,6 +1079,19 @@ app.post('/api/gifts/send', (req, res) => {
 
   broadcastWs({ type: 'gift:received', payload: giftEvent });
   pushToHost(hostId, 'live_gift', giftEvent);
+  pushGiftHistory({
+    id: giftEvent.id,
+    fromUserId: giftEvent.fromUserId,
+    fromName: giftEvent.fromName,
+    toHostId: giftEvent.toHostId,
+    giftId: giftEvent.giftId,
+    giftName: giftEvent.giftName,
+    giftEmoji: giftEvent.giftEmoji,
+    coins: giftEvent.coins,
+    roomId: giftEvent.roomId,
+    callId: giftEvent.callId,
+    createdAt: giftEvent.createdAt,
+  });
 
   res.status(201).json({
     ok: true,
@@ -2219,6 +2445,8 @@ function buildSnapshot(): PersistedSnapshot {
       ...t,
       messages: dmMessages.get(t.id) || [],
     })) as Array<Record<string, unknown>>,
+    callHistory: callHistory as unknown as Array<Record<string, unknown>>,
+    giftHistory: giftHistory as unknown as Array<Record<string, unknown>>,
   };
 }
 
@@ -2284,8 +2512,16 @@ function restoreFromDisk() {
       dmMessages.set(id, row.messages);
     }
   }
+  if (Array.isArray(snap.callHistory)) {
+    callHistory.length = 0;
+    callHistory.push(...(snap.callHistory as unknown as CallHistoryRecord[]));
+  }
+  if (Array.isArray(snap.giftHistory)) {
+    giftHistory.length = 0;
+    giftHistory.push(...(snap.giftHistory as unknown as GiftHistoryRecord[]));
+  }
   console.log(
-    `[persist] restored wallets=${wallets.size} withdrawals=${withdrawals.length} liveRooms=${liveRooms.size} dm=${dmThreads.size}`,
+    `[persist] restored wallets=${wallets.size} withdrawals=${withdrawals.length} liveRooms=${liveRooms.size} dm=${dmThreads.size} calls=${callHistory.length} gifts=${giftHistory.length}`,
   );
 }
 
@@ -2335,8 +2571,16 @@ async function applyMongoOrDisk() {
       liveRooms.set(id, room);
     }
   }
+  if (Array.isArray(snap.callHistory)) {
+    callHistory.length = 0;
+    callHistory.push(...(snap.callHistory as unknown as CallHistoryRecord[]));
+  }
+  if (Array.isArray(snap.giftHistory)) {
+    giftHistory.length = 0;
+    giftHistory.push(...(snap.giftHistory as unknown as GiftHistoryRecord[]));
+  }
   console.log(
-    `[persist] restored from Mongo wallets=${wallets.size} withdrawals=${withdrawals.length}`,
+    `[persist] restored from Mongo wallets=${wallets.size} withdrawals=${withdrawals.length} calls=${callHistory.length} gifts=${giftHistory.length}`,
   );
 }
 

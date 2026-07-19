@@ -25,6 +25,10 @@ export type PersistedSnapshot = {
   liveRooms: Array<Record<string, unknown>>;
   /** Optional 1:1 DM chats (user ↔ host) */
   dmChats?: Array<Record<string, unknown>>;
+  /** Ended / missed / rejected call archive */
+  callHistory?: Array<Record<string, unknown>>;
+  /** Gift send ledger for host revenue */
+  giftHistory?: Array<Record<string, unknown>>;
 };
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;

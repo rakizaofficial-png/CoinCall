@@ -175,6 +175,13 @@ export function ProfileScreen({ navigation }: { navigation: any }) {
           </Text>
           <ChevronRight size={18} color={colors.textMuted} />
         </Pressable>
+        <Pressable style={styles.row} onPress={() => navigation.navigate('Earnings')}>
+          <Wallet size={20} color={colors.accent} />
+          <Text style={[styles.rowText, { color: colors.text }]}>
+            Call Analytics & Revenue
+          </Text>
+          <ChevronRight size={18} color={colors.textMuted} />
+        </Pressable>
         <Pressable style={styles.row} onPress={() => navigation.navigate('Withdraw')}>
           <Wallet size={20} color={colors.primarySoft} />
           <Text style={[styles.rowText, { color: colors.text }]}>Wallet & withdraw</Text>

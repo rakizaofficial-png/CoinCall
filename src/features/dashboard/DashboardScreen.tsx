@@ -183,6 +183,15 @@ export function DashboardScreen({ navigation }: { navigation: any }) {
         ))}
       </View>
 
+      <Pressable onPress={() => navigation.navigate('Earnings')}>
+        <GlassCard>
+          <Text style={[styles.rowTitle, { color: colors.text }]}>Call Analytics & Revenue</Text>
+          <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
+            Total calls, duration, call coins, gifts with sender details — open Earnings
+          </Text>
+        </GlassCard>
+      </Pressable>
+
       <GlassCard>
         <View style={styles.row}>
           <View style={styles.rowLeft}>

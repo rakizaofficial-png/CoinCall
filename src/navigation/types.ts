@@ -30,4 +30,5 @@ export type RootStackParamList = {
   LiveRoom: { roomId: string; hostMode?: boolean };
   Withdraw: undefined;
   Calling: undefined;
+  Earnings: undefined;
 };

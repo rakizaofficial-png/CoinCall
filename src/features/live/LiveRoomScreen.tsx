@@ -27,7 +27,6 @@ import {
   stopAgoraCall,
   switchAgoraCamera,
 } from '../../services/agoraService';
-import { radii } from '../../theme/colors';
 import { useTheme } from '../../theme/ThemeContext';
 import { notify } from '../../utils/notify';
 
@@ -165,7 +164,7 @@ export function LiveRoomScreen({ navigation, route }: Props) {
         pointerEvents="none"
       />
 
-      {/* Top bar */}
+      {/* Top bar — floating glass */}
       <View style={[styles.top, { paddingTop: insets.top + 8 }]}>
         <View style={styles.hostChip}>
           <Image source={{ uri: room.hostAvatar }} style={styles.hostAv} />
@@ -193,8 +192,8 @@ export function LiveRoomScreen({ navigation, route }: Props) {
         </View>
       </View>
 
-      {/* Viewer + gift feed (no Room / User / Mass) */}
-      <View style={styles.feed}>
+      {/* Chat overlay — bottom left */}
+      <View style={[styles.feed, { bottom: insets.bottom + 100 }]}>
         <FlatList
           data={feed}
           keyExtractor={(item) => item.id}
@@ -222,11 +221,11 @@ export function LiveRoomScreen({ navigation, route }: Props) {
         </View>
       ) : null}
 
-      {/* Host controls: mic · flip · filter · gifts seen */}
+      {/* Floating circular actions */}
       {hostMode ? (
-        <View style={[styles.controls, { paddingBottom: insets.bottom + 16 }]}>
+        <View style={[styles.fabColumn, { paddingBottom: insets.bottom + 16 }]}>
           <Pressable
-            style={styles.ctrl}
+            style={styles.fab}
             onPress={async () => {
               const next = !muted;
               setMuted(next);
@@ -234,19 +233,14 @@ export function LiveRoomScreen({ navigation, route }: Props) {
             }}
           >
             {muted ? <MicOff size={20} color="#fff" /> : <Mic size={20} color="#fff" />}
-            <Text style={styles.ctrlLabel}>Mic</Text>
           </Pressable>
 
-          <Pressable
-            style={styles.ctrl}
-            onPress={() => void switchAgoraCamera()}
-          >
+          <Pressable style={styles.fab} onPress={() => void switchAgoraCamera()}>
             <FlipHorizontal size={20} color="#fff" />
-            <Text style={styles.ctrlLabel}>Flip</Text>
           </Pressable>
 
           <Pressable
-            style={[styles.ctrl, beauty && styles.ctrlOn]}
+            style={[styles.fab, beauty && styles.fabOn]}
             onPress={async () => {
               const next = !beauty;
               setBeauty(next);
@@ -255,24 +249,20 @@ export function LiveRoomScreen({ navigation, route }: Props) {
             }}
           >
             <Sparkles size={20} color="#fff" />
-            <Text style={styles.ctrlLabel}>Filter</Text>
           </Pressable>
 
-          <Pressable style={styles.ctrl} onPress={() => setGiftsOpen(true)}>
+          <Pressable style={styles.fab} onPress={() => setGiftsOpen(true)}>
             <Gift size={20} color="#F5C14C" />
-            <Text style={styles.ctrlLabel}>Gifts</Text>
           </Pressable>
 
-          <Pressable style={[styles.ctrl, styles.endCtrl]} onPress={() => void onEnd()}>
-            <X size={20} color="#fff" />
-            <Text style={styles.ctrlLabel}>End</Text>
+          <Pressable style={styles.fabEnd} onPress={() => void onEnd()}>
+            <X size={22} color="#fff" />
           </Pressable>
         </View>
       ) : (
-        <View style={[styles.controls, { paddingBottom: insets.bottom + 16 }]}>
-          <Pressable style={styles.ctrl} onPress={() => setGiftsOpen(true)}>
-            <Gift size={20} color="#F5C14C" />
-            <Text style={styles.ctrlLabel}>Gift</Text>
+        <View style={[styles.fabColumn, { paddingBottom: insets.bottom + 16 }]}>
+          <Pressable style={styles.fabGift} onPress={() => setGiftsOpen(true)}>
+            <Gift size={22} color="#fff" />
           </Pressable>
         </View>
       )}
@@ -325,7 +315,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.22)',
     paddingVertical: 6,
     paddingHorizontal: 8,
     borderRadius: 999,
@@ -333,7 +325,7 @@ const styles = StyleSheet.create({
   },
   hostAv: { width: 36, height: 36, borderRadius: 18 },
   hostName: { color: '#fff', fontWeight: '800', fontSize: 13 },
-  timer: { color: 'rgba(255,255,255,0.7)', fontSize: 11, fontWeight: '600' },
+  timer: { color: 'rgba(255,255,255,0.75)', fontSize: 11, fontWeight: '600' },
   livePill: {
     backgroundColor: '#E11D48',
     paddingHorizontal: 8,
@@ -346,7 +338,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.22)',
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 999,
@@ -356,31 +350,46 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: 'rgba(255,255,255,0.14)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.25)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   feed: {
     position: 'absolute',
     left: 12,
-    right: 90,
-    bottom: 110,
-    maxHeight: 220,
+    right: 88,
+    maxHeight: 240,
     zIndex: 20,
     elevation: 20,
   },
   feedRow: {
     alignSelf: 'flex-start',
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    backgroundColor: 'transparent',
     borderRadius: 14,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    marginBottom: 6,
+    paddingHorizontal: 2,
+    paddingVertical: 3,
+    marginBottom: 4,
     maxWidth: '100%',
   },
-  feedGift: { backgroundColor: 'rgba(245,193,76,0.28)' },
-  feedText: { color: '#fff', fontSize: 12, fontWeight: '600' },
-  feedEmpty: { color: 'rgba(255,255,255,0.45)', fontSize: 12, marginBottom: 8 },
+  feedGift: {
+    backgroundColor: 'rgba(123,44,255,0.45)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(196,181,253,0.35)',
+  },
+  feedText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+    textShadowColor: 'rgba(0,0,0,0.85)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  feedEmpty: { color: 'rgba(255,255,255,0.5)', fontSize: 12, marginBottom: 8 },
   giftBurst: {
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
@@ -396,30 +405,44 @@ const styles = StyleSheet.create({
     textShadowColor: '#000',
     textShadowRadius: 8,
   },
-  controls: {
+  fabColumn: {
     position: 'absolute',
-    left: 0,
-    right: 0,
+    right: 14,
     bottom: 0,
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-    paddingTop: 12,
-    paddingHorizontal: 8,
-    backgroundColor: 'rgba(0,0,0,0.35)',
     zIndex: 20,
-    elevation: 20,
-  },
-  ctrl: {
     alignItems: 'center',
-    gap: 4,
-    minWidth: 56,
-    paddingVertical: 8,
-    borderRadius: radii.md,
+    gap: 12,
   },
-  ctrlOn: { backgroundColor: 'rgba(108,124,255,0.55)' },
-  endCtrl: { backgroundColor: 'rgba(225,29,72,0.55)' },
-  ctrlLabel: { color: '#fff', fontSize: 10, fontWeight: '700' },
+  fab: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.14)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.28)',
+  },
+  fabOn: {
+    backgroundColor: 'rgba(139,92,246,0.45)',
+    borderColor: 'rgba(196,181,253,0.5)',
+  },
+  fabGift: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ff2d55',
+  },
+  fabEnd: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ff2d55',
+  },
   giftSheet: {
     position: 'absolute',
     left: 0,
@@ -430,7 +453,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 20,
     padding: 18,
     paddingBottom: 36,
-    zIndex: 20,
+    zIndex: 30,
     maxHeight: '50%',
   },
   sheetTitle: { color: '#fff', fontSize: 18, fontWeight: '900', marginBottom: 8 },

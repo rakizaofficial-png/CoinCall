@@ -17,6 +17,7 @@ import { HostApplyScreen } from '../screens/auth/HostApplyScreen';
 import { HostPendingScreen } from '../screens/auth/HostPendingScreen';
 import { CallScreen } from '../screens/call/CallScreen';
 import { ChatScreen } from '../screens/main/ChatScreen';
+import { EarningsScreen } from '../screens/main/EarningsScreen';
 import { HostProfileScreen } from '../screens/main/HostProfileScreen';
 import { NotificationsScreen } from '../screens/main/NotificationsScreen';
 import { SettingsScreen } from '../screens/main/SettingsScreen';
@@ -72,6 +73,7 @@ function AuthenticatedApp() {
           <Stack.Screen name="GoLive" component={GoLiveRoute} />
           <Stack.Screen name="LiveRoom" component={LiveRoomScreen} />
           <Stack.Screen name="Withdraw" component={WithdrawScreen} />
+          <Stack.Screen name="Earnings" component={EarningsScreen} />
           <Stack.Screen name="Calling" component={CallingScreen} />
         </Stack.Navigator>
         <BridgeIncomingLayer />
