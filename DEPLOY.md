@@ -44,9 +44,15 @@ VITE_AGORA_APP_ID=...
 `VITE_API_BASE_URL` is already set.
 
 ## 2) Deploy Luma user app
-1. Blueprint → connect **luma-coincall-user**
-2. Deploy `render.yaml`
-3. `NEXT_PUBLIC_API_BASE_URL` points at the CoinCall API
+Luma now lives in this repo at `luma-user/` (host-bridge feed fix included).
+
+**Preferred (same Blueprint as CoinCall):**
+1. Open Render → CoinCall Blueprint → **Sync** / redeploy so `luma-user` service appears from `render.yaml`
+2. Or create Web Service → repo **CoinCall** → **Root Directory** = `luma-user`
+3. Build: `npm install --include=dev && npm run build` · Start: `npm start`
+4. Env: `NEXT_PUBLIC_API_BASE_URL=https://coincall-api.onrender.com/api`
+
+**If you still use the old `luma-coincall-user` repo:** reconnect that Render service to **CoinCall** with rootDir `luma-user`, or grant this agent push access to `luma-coincall-user` so we can update it directly.
 
 ## 3) Test
 1. Open host URL → log in → **Go Online**
