@@ -119,8 +119,22 @@ export async function fetchRevenue(agencyId?: string) {
   }>(`/admin/revenue${q}`);
 }
 
-export async function fetchHostTypes() {
+export async function fetchHostTypes(agencyId?: string) {
+  const q = agencyId ? `?agencyId=${encodeURIComponent(agencyId)}` : '';
   return get<{ agency: RevenueHostRow[]; individual: RevenueHostRow[] }>(
-    '/admin/host-types',
+    `/admin/host-types${q}`,
   );
+}
+
+export async function fetchAgencyLedger(agencyId: string) {
+  return get<{
+    agency: Agency;
+    hosts: RevenueHostRow[];
+    totals: {
+      hosts: number;
+      revenue: number;
+      pending: number;
+      paid: number;
+    };
+  }>(`/admin/agency-ledger?agencyId=${encodeURIComponent(agencyId)}`);
 }

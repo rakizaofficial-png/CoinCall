@@ -304,10 +304,41 @@ export function registerAgencyRoutes(app: Express, ctx: Ctx) {
 
   app.get('/api/admin/host-types', (req, res) => {
     if (!ctx.requireAdmin(req, res)) return;
+    const agencyId = String(req.query.agencyId || '').trim();
     const snapshot = ctx.getHostRevenueSnapshot();
+    let agency = snapshot.filter((h) => h.type === 'agency');
+    const individual = snapshot.filter((h) => h.type === 'individual');
+    if (agencyId) {
+      agency = agency.filter((h) => h.agencyId === agencyId);
+    }
+    res.json({ agency, individual });
+  });
+
+  /** Agency ledger — scoped hosts with live-friendly earnings fields */
+  app.get('/api/admin/agency-ledger', (req, res) => {
+    if (!ctx.requireAdmin(req, res)) return;
+    const agencyId = String(req.query.agencyId || '').trim();
+    if (!agencyId) {
+      res.status(400).json({ error: 'agencyId required' });
+      return;
+    }
+    const agency = getAgency(agencyId);
+    if (!agency) {
+      res.status(404).json({ error: 'Agency not found' });
+      return;
+    }
+    const snapshot = ctx.getHostRevenueSnapshot().filter(
+      (h) => h.agencyId === agencyId,
+    );
     res.json({
-      agency: snapshot.filter((h) => h.type === 'agency'),
-      individual: snapshot.filter((h) => h.type === 'individual'),
+      agency: publicAgency(agency),
+      hosts: snapshot,
+      totals: {
+        hosts: snapshot.length,
+        revenue: snapshot.reduce((s, h) => s + (h.revenueGenerated || 0), 0),
+        pending: snapshot.reduce((s, h) => s + (h.pendingEarnings || 0), 0),
+        paid: snapshot.reduce((s, h) => s + (h.paidEarnings || 0), 0),
+      },
     });
   });
 }

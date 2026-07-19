@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { fetchBridgeHosts } from './hostApi';
+import { fetchBridgeHosts, fetchManagedHosts } from './hostApi';
 import {
   adminLogin,
   connectAdminRealtime,
@@ -167,6 +167,7 @@ export default function App() {
   const [bridgeHosts, setBridgeHosts] = useState<
     { id: string; name: string; readyToCall?: boolean; isOnline?: boolean; isLive?: boolean; isOnCall?: boolean; avatarUrl?: string }[]
   >([]);
+  const [agencyHostIds, setAgencyHostIds] = useState<Set<string>>(new Set());
 
   const allowed = useMemo(
     () => sectionsForRole(adminRole, agencyPerms),
@@ -199,7 +200,6 @@ export default function App() {
       const data = await fetchAdminActiveSessions();
       setBridgeCalls(data.calls || []);
       setBridgeLiveRooms(data.liveRooms || []);
-      // Keep legacy liveRooms shape for any other consumers
       setLiveRooms(
         (data.liveRooms || []).map((r) => ({
           id: r.id,
@@ -217,12 +217,36 @@ export default function App() {
       /* keep last */
     }
     try {
-      const bridge = await fetchBridgeHosts();
+      const scopedAgency = localStorage.getItem('cc_agency_id');
+      const bridge = await fetchBridgeHosts(scopedAgency);
       setBridgeHosts(bridge.hosts || []);
     } catch {
       setBridgeHosts([]);
     }
   };
+
+  useEffect(() => {
+    if (!authed || !agencyId) {
+      setAgencyHostIds(new Set());
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const data = await fetchManagedHosts({ agencyId, status: 'all' });
+        if (cancelled) return;
+        setAgencyHostIds(new Set((data.hosts || []).map((h) => h.id)));
+      } catch {
+        if (!cancelled) setAgencyHostIds(new Set());
+      }
+    };
+    void load();
+    const t = setInterval(() => void load(), 8000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [authed, agencyId]);
 
   useEffect(() => {
     if (!authed) return;
@@ -318,7 +342,7 @@ export default function App() {
     };
   }, [hosts, calls, bridgeCalls, liveRooms, bridgeLiveRooms, bridgeHosts, openPayouts, reports]);
 
-  const monitorLiveRooms = bridgeLiveRooms.length
+  const monitorLiveRoomsRaw = bridgeLiveRooms.length
     ? bridgeLiveRooms
     : liveRooms.map((r) => ({
         id: r.id,
@@ -333,10 +357,28 @@ export default function App() {
         status: 'live',
       }));
 
-  const monitorCalls: Array<AdminActiveCall | (ActiveCall & { kind?: 'call' })> =
+  const monitorCallsRaw: Array<AdminActiveCall | (ActiveCall & { kind?: 'call' })> =
     bridgeCalls.length > 0
       ? bridgeCalls
       : calls.map((c) => ({ ...c, kind: 'call' as const }));
+
+  const monitorLiveRooms =
+    agencyId && agencyHostIds.size
+      ? monitorLiveRoomsRaw.filter((r) => agencyHostIds.has(r.hostId || ''))
+      : agencyId
+        ? []
+        : monitorLiveRoomsRaw;
+
+  const monitorCalls =
+    agencyId && agencyHostIds.size
+      ? monitorCallsRaw.filter((c) => {
+          const hid =
+            'hostId' in c ? String((c as { hostId?: string }).hostId || '') : '';
+          return agencyHostIds.has(hid);
+        })
+      : agencyId
+        ? []
+        : monitorCallsRaw;
 
   const remoteHosts = useMemo(() => {
     const byId = new Map<string, HostRow & { readyToCall?: boolean; isLive?: boolean; isOnCall?: boolean }>();
@@ -686,11 +728,17 @@ export default function App() {
 
             {tab === 'agencies' ? <AgenciesPanel /> : null}
             {tab === 'agency_hosts' ? (
-              <HostTypePanel
-                mode="agency"
-                agencyId={agencyId}
-                canManage={!isAgency}
-              />
+              isAgency ? (
+                <HostManagementPanel
+                  firebaseHosts={hosts}
+                  agencyId={agencyId}
+                  canAct={!!agencyPerms?.canManageHosts}
+                  title="Agency hosts"
+                  subtitle="Live presence · earnings · lifecycle for your linked hosts only"
+                />
+              ) : (
+                <HostTypePanel mode="agency" canManage />
+              )
             ) : null}
             {tab === 'individual_hosts' ? (
               <HostTypePanel mode="individual" canManage={!isAgency} />
@@ -706,187 +754,248 @@ export default function App() {
               <>
                 <PageHead
                   title="Live Monitor"
-                  subtitle={`${stats.liveStreams} streams · ${stats.liveCalls} private calls · silent Agora watch`}
+                  subtitle={`${monitorLiveRooms.length} streams · ${monitorCalls.length} private calls · silent Agora watch`}
                 />
-                <h3 className="section-title">Live streams ({monitorLiveRooms.length})</h3>
-                <div className="list">
+                <h3 className="section-title">
+                  Live streams ({monitorLiveRooms.length})
+                </h3>
+                <div className="desk-table-wrap">
                   {monitorLiveRooms.length === 0 ? (
                     <div className="empty-state">No live streams right now.</div>
                   ) : (
-                    monitorLiveRooms.map((r) => (
-                      <div
-                        className="card"
-                        key={r.id}
-                        style={{ gridTemplateColumns: '1fr auto' }}
-                      >
-                        <div>
-                          <h3>{r.hostName || 'Host'}</h3>
-                          <div className="meta">
-                            <span className="badge live">LIVE</span>
-                            {r.title || 'Live'} · {r.viewers || 0} viewers
-                          </div>
-                        </div>
-                        <div className="actions">
-                          {(agencyPerms?.canMonitor || !isAgency) && (
-                            <button
-                              type="button"
-                              className="btn-pink"
-                              onClick={() =>
-                                setMonitor({
-                                  id: r.id,
-                                  kind: 'live',
-                                  title: r.hostName || 'Live host',
-                                  subtitle: r.title || 'Live stream',
-                                  channel:
-                                    r.channel ||
-                                    `live_${r.hostId || r.id}`,
-                                })
-                              }
-                            >
-                              Watch silently
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    ))
+                    <table className="desk-table">
+                      <thead>
+                        <tr>
+                          <th>Host</th>
+                          <th>Title</th>
+                          <th>Viewers</th>
+                          <th>Status</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {monitorLiveRooms.map((r) => (
+                          <tr key={r.id}>
+                            <td>
+                              <strong>{r.hostName || 'Host'}</strong>
+                            </td>
+                            <td className="meta">{r.title || 'Live'}</td>
+                            <td>{r.viewers || 0}</td>
+                            <td>
+                              <span className="badge solid live">Live</span>
+                            </td>
+                            <td>
+                              {(agencyPerms?.canMonitor || !isAgency) && (
+                                <button
+                                  type="button"
+                                  className="btn-pink"
+                                  onClick={() =>
+                                    setMonitor({
+                                      id: r.id,
+                                      kind: 'live',
+                                      title: r.hostName || 'Live host',
+                                      subtitle: r.title || 'Live stream',
+                                      channel:
+                                        r.channel ||
+                                        `live_${r.hostId || r.id}`,
+                                    })
+                                  }
+                                >
+                                  Watch
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   )}
                 </div>
 
                 <h3 className="section-title" style={{ marginTop: 28 }}>
                   Private 1:1 calls ({monitorCalls.length})
                 </h3>
-                <div className="list">
+                <div className="desk-table-wrap">
                   {monitorCalls.length === 0 ? (
                     <div className="empty-state">No active calls.</div>
                   ) : (
-                    monitorCalls.map((c) => {
-                      const hostName =
-                        'hostName' in c ? c.hostName : (c as ActiveCall).hostName;
-                      const peerName =
-                        'peerName' in c
-                          ? (c as AdminActiveCall | ActiveCall).peerName
-                          : 'Caller';
-                      const channel = c.channel;
-                      const seconds =
-                        'seconds' in c ? Number(c.seconds || 0) : 0;
-                      const coins =
-                        'coinsEarned' in c ? Number(c.coinsEarned || 0) : 0;
-                      const status =
-                        'status' in c ? String(c.status || 'active') : 'active';
-                      return (
-                        <div
-                          className="card"
-                          key={c.id}
-                          style={{ gridTemplateColumns: '1fr auto' }}
-                        >
-                          <div>
-                            <h3>
-                              {hostName} ↔ {peerName}
-                            </h3>
-                            <div className="meta">
-                              <span className="badge live">
-                                {status === 'ringing' ? 'RINGING' : '1:1'}
-                              </span>
-                              {formatClock(seconds)} · {coins} coins
-                            </div>
-                          </div>
-                          <div className="actions">
-                            {(agencyPerms?.canMonitor || !isAgency) &&
-                            status !== 'ringing' ? (
-                              <button
-                                type="button"
-                                className="btn-pink"
-                                onClick={() =>
-                                  setMonitor({
-                                    id: c.id,
-                                    kind: 'call',
-                                    title: `${hostName} ↔ ${peerName}`,
-                                    subtitle: 'Private video call',
-                                    channel,
-                                  })
-                                }
-                              >
-                                Watch silently
-                              </button>
-                            ) : null}
-                            {!isAgency ? (
-                              <button
-                                type="button"
-                                className="btn-red"
-                                onClick={() =>
-                                  void (async () => {
-                                    try {
-                                      if (bridgeCalls.some((b) => b.id === c.id)) {
-                                        await endBridgeCallAdmin(c.id);
-                                      } else {
-                                        await endCallRemote(c as ActiveCall);
+                    <table className="desk-table">
+                      <thead>
+                        <tr>
+                          <th>Participants</th>
+                          <th>Duration</th>
+                          <th>Coins</th>
+                          <th>Status</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {monitorCalls.map((c) => {
+                          const hostName =
+                            'hostName' in c
+                              ? c.hostName
+                              : (c as ActiveCall).hostName;
+                          const peerName =
+                            'peerName' in c
+                              ? (c as AdminActiveCall | ActiveCall).peerName
+                              : 'Caller';
+                          const channel = c.channel;
+                          const seconds =
+                            'seconds' in c ? Number(c.seconds || 0) : 0;
+                          const coins =
+                            'coinsEarned' in c
+                              ? Number(c.coinsEarned || 0)
+                              : 0;
+                          const status =
+                            'status' in c
+                              ? String(c.status || 'active')
+                              : 'active';
+                          return (
+                            <tr key={c.id}>
+                              <td>
+                                <strong>
+                                  {hostName} ↔ {peerName}
+                                </strong>
+                              </td>
+                              <td>{formatClock(seconds)}</td>
+                              <td>{coins}</td>
+                              <td>
+                                <span className="badge solid live">
+                                  {status === 'ringing' ? 'Ringing' : '1:1'}
+                                </span>
+                              </td>
+                              <td>
+                                <div className="desk-row-actions">
+                                  {(agencyPerms?.canMonitor || !isAgency) &&
+                                  status !== 'ringing' ? (
+                                    <button
+                                      type="button"
+                                      className="btn-pink"
+                                      onClick={() =>
+                                        setMonitor({
+                                          id: c.id,
+                                          kind: 'call',
+                                          title: `${hostName} ↔ ${peerName}`,
+                                          subtitle: 'Private video call',
+                                          channel,
+                                        })
                                       }
-                                      await refreshSessions();
-                                    } catch {
-                                      /* ignore */
-                                    }
-                                  })()
-                                }
-                              >
-                                Force end
-                              </button>
-                            ) : null}
-                          </div>
-                        </div>
-                      );
-                    })
+                                    >
+                                      Watch
+                                    </button>
+                                  ) : null}
+                                  {!isAgency ? (
+                                    <button
+                                      type="button"
+                                      className="btn-red"
+                                      onClick={() =>
+                                        void (async () => {
+                                          try {
+                                            if (
+                                              bridgeCalls.some(
+                                                (b) => b.id === c.id,
+                                              )
+                                            ) {
+                                              await endBridgeCallAdmin(c.id);
+                                            } else {
+                                              await endCallRemote(
+                                                c as ActiveCall,
+                                              );
+                                            }
+                                            await refreshSessions();
+                                          } catch {
+                                            /* ignore */
+                                          }
+                                        })()
+                                      }
+                                    >
+                                      Force end
+                                    </button>
+                                  ) : null}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   )}
                 </div>
               </>
             ) : null}
 
-            {tab === 'payouts' ? <MoneyDesk readOnly={isAgency} /> : null}
+            {tab === 'payouts' ? (
+              <MoneyDesk
+                readOnly={isAgency}
+                agencyHostIds={isAgency ? agencyHostIds : undefined}
+              />
+            ) : null}
 
             {tab === 'reports' ? (
               <>
                 <PageHead title="Reports" subtitle="Abuse / spam queue" />
-                <div className="list">
+                <div className="desk-table-wrap">
                   {reports.length === 0 ? (
                     <div className="empty-state">No reports.</div>
                   ) : (
-                    reports.map((r) => (
-                      <div
-                        className="card"
-                        key={r.id}
-                        style={{ gridTemplateColumns: '1fr auto' }}
-                      >
-                        <div>
-                          <h3>
-                            {r.reason} · {r.status}
-                          </h3>
-                          <div className="meta">{r.details || 'No details'}</div>
-                        </div>
-                        {r.status !== 'resolved' ? (
-                          <button
-                            type="button"
-                            className="btn-green"
-                            onClick={() =>
-                              void (async () => {
-                                try {
-                                  await resolveFirebaseReport(r.id);
-                                } catch {
-                                  await resolveAdminReport(r.id);
-                                }
-                                setReports((list) =>
-                                  list.map((x) =>
-                                    x.id === r.id
-                                      ? { ...x, status: 'resolved' }
-                                      : x,
-                                  ),
-                                );
-                              })()
-                            }
-                          >
-                            Resolve
-                          </button>
-                        ) : null}
-                      </div>
-                    ))
+                    <table className="desk-table">
+                      <thead>
+                        <tr>
+                          <th>Target</th>
+                          <th>Reason</th>
+                          <th>Status</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {reports.map((r) => (
+                          <tr key={r.id}>
+                            <td>
+                              <strong>{r.targetId || '—'}</strong>
+                              <div className="meta">{r.reporterName || r.reporterId}</div>
+                            </td>
+                            <td className="meta">{r.reason || r.details || '—'}</td>
+                            <td>
+                              <span
+                                className={`badge solid ${
+                                  r.status === 'resolved' ? 'approved' : 'pending'
+                                }`}
+                              >
+                                {r.status || 'open'}
+                              </span>
+                            </td>
+                            <td>
+                              {r.status !== 'resolved' ? (
+                                <button
+                                  type="button"
+                                  className="btn-green"
+                                  onClick={() =>
+                                    void (async () => {
+                                      try {
+                                        await resolveAdminReport(r.id);
+                                      } catch {
+                                        await resolveFirebaseReport(r.id);
+                                      }
+                                      setReports((prev) =>
+                                        prev.map((x) =>
+                                          x.id === r.id
+                                            ? { ...x, status: 'resolved' }
+                                            : x,
+                                        ),
+                                      );
+                                    })()
+                                  }
+                                >
+                                  Resolve
+                                </button>
+                              ) : (
+                                <span className="badge solid approved">Resolved</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   )}
                 </div>
               </>

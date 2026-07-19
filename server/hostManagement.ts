@@ -7,6 +7,10 @@
 import { randomUUID } from 'crypto';
 import type { Express, Request, Response } from 'express';
 import {
+  getAgency,
+  getAgencyIdForHost,
+} from './agencyManagement.ts';
+import {
   clearPresenceForAdminAction,
   listPresence,
   pruneHosts,
@@ -20,7 +24,21 @@ export type HostLifecycleStatus =
   | 'suspended'
   | 'banned';
 
-export type AdminRole = 'super_admin' | 'moderator' | 'finance' | 'support';
+export type AdminRole =
+  | 'super_admin'
+  | 'moderator'
+  | 'finance'
+  | 'support'
+  | 'agency';
+
+/** Lifecycle actions agencies may run on their own hosts */
+const AGENCY_ALLOWED_ACTIONS = new Set<string>([
+  'approve',
+  'reject',
+  'under_review',
+  'suspend',
+  'unsuspend',
+]);
 
 export type HostManagedRecord = {
   id: string;
@@ -270,12 +288,30 @@ export function listNotifications(hostUid: string) {
 
 type Broadcast = (event: unknown) => void;
 
-function adminMeta(req: Request): { adminId: string; adminRole: AdminRole } {
-  const role = String(req.headers['x-admin-role'] || req.body?.adminRole || 'super_admin');
-  const allowed: AdminRole[] = ['super_admin', 'moderator', 'finance', 'support'];
+function adminMeta(req: Request): {
+  adminId: string;
+  adminRole: AdminRole;
+  agencyId?: string;
+} {
+  const role = String(
+    req.headers['x-admin-role'] || req.body?.adminRole || 'super_admin',
+  );
+  const allowed: AdminRole[] = [
+    'super_admin',
+    'moderator',
+    'finance',
+    'support',
+    'agency',
+  ];
+  const agencyId = String(
+    req.headers['x-agency-id'] || req.body?.agencyId || '',
+  ).trim();
   return {
     adminId: String(req.headers['x-admin-id'] || req.body?.adminId || 'admin'),
-    adminRole: (allowed.includes(role as AdminRole) ? role : 'super_admin') as AdminRole,
+    adminRole: (allowed.includes(role as AdminRole)
+      ? role
+      : 'super_admin') as AdminRole,
+    agencyId: agencyId || undefined,
   };
 }
 
@@ -284,7 +320,34 @@ function canFinance(role: AdminRole) {
 }
 
 function canModerate(role: AdminRole) {
-  return role === 'super_admin' || role === 'moderator' || role === 'support';
+  return (
+    role === 'super_admin' ||
+    role === 'moderator' ||
+    role === 'support' ||
+    role === 'agency'
+  );
+}
+
+function assertAgencyHostAccess(
+  meta: { adminRole: AdminRole; agencyId?: string },
+  hostId: string,
+  action?: string,
+): { ok: true } | { ok: false; status: number; error: string } {
+  if (meta.adminRole !== 'agency') return { ok: true };
+  if (!meta.agencyId) {
+    return { ok: false, status: 403, error: 'Agency scope required' };
+  }
+  if (getAgencyIdForHost(hostId) !== meta.agencyId) {
+    return { ok: false, status: 403, error: 'Host is not under your agency' };
+  }
+  const agency = getAgency(meta.agencyId);
+  if (!agency?.permissions.canManageHosts) {
+    return { ok: false, status: 403, error: 'Host management disabled' };
+  }
+  if (action && !AGENCY_ALLOWED_ACTIONS.has(action)) {
+    return { ok: false, status: 403, error: 'Action not allowed for agency' };
+  }
+  return { ok: true };
 }
 
 export type HostAction =
@@ -684,7 +747,11 @@ export function registerHostManagementRoutes(
   app.get('/api/admin/bridge-hosts', (req, res) => {
     if (!requireAdmin(req, res)) return;
     pruneHosts();
-    const bridge = listPresence().map((h) => {
+    const meta = adminMeta(req);
+    const scopeAgency =
+      String(req.query.agencyId || '').trim() ||
+      (meta.adminRole === 'agency' ? meta.agencyId : undefined);
+    let bridge = listPresence().map((h) => {
       const managed = getHost(h.id);
       return {
         ...h,
@@ -692,8 +759,12 @@ export function registerHostManagementRoutes(
         callsEnabled: managed ? managed.callsEnabled : true,
         banned: managed?.banned || false,
         suspended: managed?.suspended || false,
+        agencyId: getAgencyIdForHost(h.id) || undefined,
       };
     });
+    if (scopeAgency) {
+      bridge = bridge.filter((h) => h.agencyId === scopeAgency);
+    }
     res.json({
       hosts: bridge,
       readyCount: bridge.filter((h) => h.readyToCall).length,
@@ -704,10 +775,17 @@ export function registerHostManagementRoutes(
   /** Admin: list / search / filter / sort */
   app.get('/api/admin/hosts', (req, res) => {
     if (!requireAdmin(req, res)) return;
+    const meta = adminMeta(req);
     const q = String(req.query.q || '').trim().toLowerCase();
     const status = String(req.query.status || 'all');
     const sort = String(req.query.sort || 'updated');
+    const scopeAgency =
+      String(req.query.agencyId || '').trim() ||
+      (meta.adminRole === 'agency' ? meta.agencyId : undefined);
     let rows = listHosts();
+    if (scopeAgency) {
+      rows = rows.filter((h) => getAgencyIdForHost(h.id) === scopeAgency);
+    }
     if (status !== 'all') {
       rows = rows.filter((h) => h.hostStatus === status);
     }
@@ -733,7 +811,14 @@ export function registerHostManagementRoutes(
           return b.updatedAt - a.updatedAt;
       }
     });
-    res.json({ hosts: rows, total: rows.length });
+    res.json({
+      hosts: rows.map((h) => ({
+        ...h,
+        agencyId: getAgencyIdForHost(h.id) || undefined,
+        agencyName: getAgency(getAgencyIdForHost(h.id) || '')?.name,
+      })),
+      total: rows.length,
+    });
   });
 
   /** Upsert from admin Firebase sync */
@@ -806,14 +891,17 @@ export function registerHostManagementRoutes(
 
   app.post('/api/admin/hosts/:id/action', (req, res) => {
     if (!requireAdmin(req, res)) return;
-    const { adminId, adminRole } = adminMeta(req);
+    const meta = adminMeta(req);
+    const { adminId, adminRole } = meta;
     const action = String(req.body?.action || '') as HostAction;
     if (!action) {
       res.status(400).json({ error: 'action required' });
       return;
     }
     if (
-      (action === 'reset_earnings' || action === 'set_commission' || action === 'freeze_wallet') &&
+      (action === 'reset_earnings' ||
+        action === 'set_commission' ||
+        action === 'freeze_wallet') &&
       !canFinance(adminRole)
     ) {
       res.status(403).json({ error: 'Finance role required' });
@@ -824,6 +912,11 @@ export function registerHostManagementRoutes(
       return;
     }
     const id = String(req.params.id);
+    const gate = assertAgencyHostAccess(meta, id, action);
+    if (!gate.ok) {
+      res.status(gate.status).json({ error: gate.error });
+      return;
+    }
     ensureHostRecord(id, {
       name: req.body?.name,
       hostId: req.body?.hostId,
@@ -832,7 +925,9 @@ export function registerHostManagementRoutes(
       adminId,
       adminRole,
       reason: req.body?.reason ? String(req.body.reason) : undefined,
-      docsMessage: req.body?.docsMessage ? String(req.body.docsMessage) : undefined,
+      docsMessage: req.body?.docsMessage
+        ? String(req.body.docsMessage)
+        : undefined,
       commissionRate:
         req.body?.commissionRate != null
           ? Number(req.body.commissionRate)
@@ -851,17 +946,29 @@ export function registerHostManagementRoutes(
 
   app.post('/api/admin/hosts/bulk', (req, res) => {
     if (!requireAdmin(req, res)) return;
-    const { adminId, adminRole } = adminMeta(req);
+    const meta = adminMeta(req);
+    const { adminId, adminRole } = meta;
     if (!canModerate(adminRole)) {
       res.status(403).json({ error: 'Moderator role required' });
       return;
     }
-    const ids: string[] = Array.isArray(req.body?.ids) ? req.body.ids.map(String) : [];
+    const ids: string[] = Array.isArray(req.body?.ids)
+      ? req.body.ids.map(String)
+      : [];
     const action = String(req.body?.action || '') as HostAction;
     const reason = req.body?.reason ? String(req.body.reason) : undefined;
     if (!ids.length || !action) {
       res.status(400).json({ error: 'ids and action required' });
       return;
+    }
+    if (adminRole === 'agency') {
+      for (const id of ids) {
+        const gate = assertAgencyHostAccess(meta, id, action);
+        if (!gate.ok) {
+          res.status(gate.status).json({ error: gate.error });
+          return;
+        }
+      }
     }
     const results = ids.map((id) => {
       ensureHostRecord(id);

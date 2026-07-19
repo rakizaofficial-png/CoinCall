@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { motion } from 'framer-motion';
 import { fetchRevenue, type RevenueHostRow } from '../agencyApi';
-import { FadeIn } from './AnimatedPage';
 
 export function RevenuePanel({ agencyId }: { agencyId?: string | null }) {
   const [totals, setTotals] = useState({
@@ -37,18 +35,18 @@ export function RevenuePanel({ agencyId }: { agencyId?: string | null }) {
 
   useEffect(() => {
     void load();
-    const t = setInterval(() => void load(), 12000);
+    const t = setInterval(() => void load(), 8000);
     return () => clearInterval(t);
   }, [load]);
 
   return (
-    <>
-      <div className="page-head">
+    <div className="desk-root">
+      <div className="desk-header">
         <div>
           <h2>Revenue</h2>
           <p className="sub">
             {agencyId
-              ? 'Your agency host earnings (limited view)'
+              ? 'Your agency host earnings (live ledger)'
               : 'Platform · agency · individual host revenue'}
           </p>
         </div>
@@ -60,98 +58,101 @@ export function RevenuePanel({ agencyId }: { agencyId?: string | null }) {
       {error ? <div className="error">{error}</div> : null}
 
       <div className="stats">
-        <FadeIn>
-          <div className="stat">
-            <span>All hosts</span>
-            <b>{totals.allHosts.toLocaleString()}</b>
-          </div>
-        </FadeIn>
-        <FadeIn delay={0.05}>
-          <div className="stat teal">
-            <span>Agency hosts</span>
-            <b>{totals.agencyHosts.toLocaleString()}</b>
-          </div>
-        </FadeIn>
-        <FadeIn delay={0.1}>
-          <div className="stat gold">
-            <span>Individual</span>
-            <b>{totals.individualHosts.toLocaleString()}</b>
-          </div>
-        </FadeIn>
-        <FadeIn delay={0.15}>
-          <div className="stat blue">
-            <span>Agencies (month)</span>
-            <b>{totals.agenciesMonth.toLocaleString()}</b>
-          </div>
-        </FadeIn>
+        <div className="stat">
+          <span>All hosts</span>
+          <b>{totals.allHosts.toLocaleString()}</b>
+        </div>
+        <div className="stat teal">
+          <span>Agency hosts</span>
+          <b>{totals.agencyHosts.toLocaleString()}</b>
+        </div>
+        <div className="stat gold">
+          <span>Individual</span>
+          <b>{totals.individualHosts.toLocaleString()}</b>
+        </div>
+        <div className="stat blue">
+          <span>Agencies (month)</span>
+          <b>{totals.agenciesMonth.toLocaleString()}</b>
+        </div>
       </div>
 
       {!agencyId ? (
         <>
           <h3 className="section-title">Agency split</h3>
-          <div className="list">
-            {agencies.map((a, i) => (
-              <motion.div
-                key={a.id}
-                className="card"
-                style={{ gridTemplateColumns: '1fr auto' }}
-                initial={{ opacity: 0, x: -8 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: i * 0.04 }}
-              >
-                <div>
-                  <h3>{a.name}</h3>
-                  <div className="meta">
-                    {a.hostCount} hosts · {a.commissionPercent}% agency cut
-                    <br />
-                    Month {a.revenueMonth.toLocaleString()} · Agency share{' '}
-                    {a.agencyShare.toLocaleString()} · Platform{' '}
-                    {a.platformShare.toLocaleString()}
-                  </div>
-                  <div className="rev-bar">
-                    <div
-                      className="rev-bar-fill agency"
-                      style={{
-                        width: `${Math.min(100, a.commissionPercent)}%`,
-                      }}
-                    />
-                  </div>
-                </div>
-              </motion.div>
-            ))}
+          <div className="desk-table-wrap">
+            <table className="desk-table">
+              <thead>
+                <tr>
+                  <th>Agency</th>
+                  <th>Hosts</th>
+                  <th>Cut</th>
+                  <th>Month</th>
+                  <th>Agency share</th>
+                  <th>Platform</th>
+                </tr>
+              </thead>
+              <tbody>
+                {agencies.map((a) => (
+                  <tr key={a.id}>
+                    <td>
+                      <strong>{a.name}</strong>
+                    </td>
+                    <td>{a.hostCount}</td>
+                    <td>{a.commissionPercent}%</td>
+                    <td>{a.revenueMonth.toLocaleString()}</td>
+                    <td>{a.agencyShare.toLocaleString()}</td>
+                    <td>{a.platformShare.toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </>
       ) : null}
 
       <h3 className="section-title">Host earnings</h3>
-      <div className="list">
+      <div className="desk-table-wrap">
         {hosts.length === 0 ? (
           <div className="empty-state">No host revenue rows yet.</div>
         ) : (
-          hosts.slice(0, 40).map((h) => (
-            <div
-              key={h.hostId}
-              className="card"
-              style={{ gridTemplateColumns: '1fr auto' }}
-            >
-              <div>
-                <h3>{h.name}</h3>
-                <div className="meta">
-                  <span className={`badge ${h.type === 'agency' ? 'approved' : 'pending'}`}>
-                    {h.type}
-                  </span>
-                  {h.agencyName ? `${h.agencyName} · ` : ''}
-                  Pending {h.pendingEarnings.toLocaleString()} · Paid{' '}
-                  {h.paidEarnings.toLocaleString()}
-                </div>
-              </div>
-              <div style={{ fontFamily: 'var(--display)', fontWeight: 800 }}>
-                {h.revenueGenerated.toLocaleString()}
-              </div>
-            </div>
-          ))
+          <table className="desk-table">
+            <thead>
+              <tr>
+                <th>Host</th>
+                <th>Type</th>
+                <th>Agency</th>
+                <th>Revenue</th>
+                <th>Pending</th>
+                <th>Paid</th>
+              </tr>
+            </thead>
+            <tbody>
+              {hosts.slice(0, 80).map((h) => (
+                <tr key={h.hostId}>
+                  <td>
+                    <strong>{h.name}</strong>
+                  </td>
+                  <td>
+                    <span
+                      className={`badge solid ${
+                        h.type === 'agency' ? 'approved' : 'pending'
+                      }`}
+                    >
+                      {h.type}
+                    </span>
+                  </td>
+                  <td className="meta">{h.agencyName || '—'}</td>
+                  <td>
+                    <strong>{h.revenueGenerated.toLocaleString()}</strong>
+                  </td>
+                  <td>{h.pendingEarnings.toLocaleString()}</td>
+                  <td>{h.paidEarnings.toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
       </div>
-    </>
+    </div>
   );
 }

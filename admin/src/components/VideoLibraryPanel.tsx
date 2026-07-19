@@ -459,9 +459,9 @@ export function VideoLibraryPanel() {
                   className="btn danger"
                   disabled={busy}
                   onClick={() => {
-                    if (!confirm('Delete this video permanently?')) return;
                     void deleteAdminVideo(selected.id).then(() => {
                       setSelected(null);
+                      setError('');
                       return load();
                     });
                   }}

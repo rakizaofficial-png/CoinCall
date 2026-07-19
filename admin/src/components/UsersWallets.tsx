@@ -5,14 +5,20 @@ import {
   setWalletAccountStatus,
   type AdminWalletRow,
 } from '../api';
+import { DeskField, DeskModal } from './DeskModal';
 
-/** Luma user wallets — auto-created profiles + balances */
 export function UsersWalletsPanel() {
   const [wallets, setWallets] = useState<AdminWalletRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
   const [msg, setMsg] = useState('');
+  const [creditTarget, setCreditTarget] = useState<AdminWalletRow | null>(null);
+  const [creditAmount, setCreditAmount] = useState('100');
+  const [creditReason, setCreditReason] = useState('Admin credit');
+  const [filter, setFilter] = useState<'all' | 'active' | 'suspended' | 'banned'>(
+    'all',
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -34,12 +40,16 @@ export function UsersWalletsPanel() {
   }, [load]);
 
   const filtered = useMemo(() => {
+    let rows = wallets;
+    if (filter !== 'all') {
+      rows = rows.filter((w) => (w.accountStatus || 'active') === filter);
+    }
     const q = query.trim().toLowerCase();
-    if (!q) return wallets;
-    return wallets.filter((w) =>
-      `${w.userId} ${w.displayName} ${w.role}`.toLowerCase().includes(q),
+    if (!q) return rows;
+    return rows.filter((w) =>
+      `${w.userId} ${w.displayName} ${w.role} ${w.appId || ''}`.toLowerCase().includes(q),
     );
-  }, [wallets, query]);
+  }, [wallets, query, filter]);
 
   const totals = useMemo(() => {
     const users = wallets.filter(
@@ -50,20 +60,37 @@ export function UsersWalletsPanel() {
     return { count: wallets.length, users: users.length, vip, coins };
   }, [wallets]);
 
-  async function credit(userId: string) {
-    const raw = window.prompt('Credit amount (use negative to deduct)?', '100');
-    if (raw == null) return;
-    const amount = Number(raw);
+  async function applyStatus(
+    userId: string,
+    accountStatus: 'active' | 'suspended' | 'banned',
+  ) {
+    setWallets((prev) =>
+      prev.map((w) => (w.userId === userId ? { ...w, accountStatus } : w)),
+    );
+    try {
+      await setWalletAccountStatus(userId, accountStatus);
+      setMsg(`${accountStatus} · ${userId.slice(0, 12)}…`);
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Status update failed');
+      await load();
+    }
+  }
+
+  async function submitCredit() {
+    if (!creditTarget) return;
+    const amount = Number(creditAmount);
     if (!Number.isFinite(amount) || amount === 0) {
       setMsg('Invalid amount');
       return;
     }
-    const reason =
-      window.prompt('Reason', amount > 0 ? 'Admin credit' : 'Admin adjust') ||
-      'Admin adjust';
     try {
-      await adminCreditWallet(userId, amount, reason);
-      setMsg(`${amount > 0 ? '+' : ''}${amount} · ${userId.slice(0, 14)}…`);
+      await adminCreditWallet(
+        creditTarget.userId,
+        amount,
+        creditReason || 'Admin adjust',
+      );
+      setMsg(`${amount > 0 ? '+' : ''}${amount} · ${creditTarget.displayName}`);
+      setCreditTarget(null);
       await load();
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Credit failed');
@@ -71,12 +98,12 @@ export function UsersWalletsPanel() {
   }
 
   return (
-    <>
-      <div className="page-head">
+    <div className="desk-root">
+      <div className="desk-header">
         <div>
-          <h2>Luma users</h2>
+          <h2>User list</h2>
           <p className="sub">
-            Auto-created profiles · wallet balances · purchase IDs
+            Luma profiles · wallets · suspend / ban without page reload
           </p>
         </div>
         <button type="button" className="btn-ghost" onClick={() => void load()}>
@@ -103,130 +130,181 @@ export function UsersWalletsPanel() {
         </div>
       </div>
 
-      <div className="hm-toolbar">
+      <div className="desk-toolbar">
         <input
-          className="hm-search"
+          className="hm-search desk-search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search user id / name…"
+          placeholder="Search user id / name / App ID…"
         />
-      </div>
-
-      {msg ? <div className="hm-toast">{msg}</div> : null}
-      {error ? <div className="error">{error}</div> : null}
-      {loading && !wallets.length ? (
-        <div className="empty-state">Loading wallets…</div>
-      ) : filtered.length === 0 ? (
-        <div className="empty-state">
-          No user wallets yet. They appear when someone opens the Luma app.
-        </div>
-      ) : (
-        <div className="list">
-          {filtered.map((w) => (
-            <div
-              className="card"
-              key={w.userId}
-              style={{ gridTemplateColumns: 'auto 1fr auto' }}
+        <div className="desk-filters">
+          {(['all', 'active', 'suspended', 'banned'] as const).map((f) => (
+            <button
+              key={f}
+              type="button"
+              className={`desk-tab ${filter === f ? 'on' : ''}`}
+              onClick={() => setFilter(f)}
             >
-              {w.avatarUrl ? (
-                <img src={w.avatarUrl} alt="" width={48} height={48} />
-              ) : (
-                <div
-                  style={{
-                    width: 48,
-                    height: 48,
-                    borderRadius: 12,
-                    background: 'linear-gradient(145deg,#ff4d7a33,#2ee6c533)',
-                    display: 'grid',
-                    placeItems: 'center',
-                    fontWeight: 800,
-                    fontFamily: 'var(--display)',
-                  }}
-                >
-                  {(w.displayName || '?')[0]}
-                </div>
-              )}
-              <div>
-                <h3>{w.displayName || 'User'}</h3>
-                <div className="meta">
-                  <code>{w.userId}</code>
-                  {w.appId ? <> · ID {w.appId}</> : null}
-                  <br />
-                  {w.role} · XP {w.xp}
-                  {w.isPremium ? ' · VIP' : ''} ·{' '}
-                  <span
-                    className={`badge ${
-                      w.accountStatus === 'banned'
-                        ? 'rejected'
-                        : w.accountStatus === 'suspended'
-                          ? 'pending'
-                          : 'active'
-                    }`}
-                  >
-                    {w.accountStatus || 'active'}
-                  </span>
-                </div>
-              </div>
-              <div className="actions" style={{ textAlign: 'right' }}>
-                <div
-                  style={{
-                    fontFamily: 'var(--display)',
-                    fontWeight: 800,
-                    fontSize: 20,
-                    marginBottom: 8,
-                  }}
-                >
-                  {w.coinBalance.toLocaleString()}
-                  <span
-                    style={{ fontSize: 11, opacity: 0.7, fontWeight: 600 }}
-                  >
-                    {' '}
-                    coins
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  className="btn-pink"
-                  onClick={() => void credit(w.userId)}
-                >
-                  Adjust
-                </button>
-                <button
-                  type="button"
-                  className="btn-gold"
-                  onClick={() =>
-                    void setWalletAccountStatus(
-                      w.userId,
-                      w.accountStatus === 'suspended' ? 'active' : 'suspended',
-                    ).then(() => load())
-                  }
-                >
-                  {w.accountStatus === 'suspended' ? 'Unsuspend' : 'Suspend'}
-                </button>
-                <button
-                  type="button"
-                  className="btn-red"
-                  onClick={() =>
-                    void setWalletAccountStatus(
-                      w.userId,
-                      w.accountStatus === 'banned' ? 'active' : 'banned',
-                    ).then(() => {
-                      setMsg(
-                        w.accountStatus === 'banned'
-                          ? 'Unbanned'
-                          : 'Banned instantly',
-                      );
-                      return load();
-                    })
-                  }
-                >
-                  {w.accountStatus === 'banned' ? 'Unban' : 'Ban'}
-                </button>
-              </div>
-            </div>
+              {f}
+            </button>
           ))}
         </div>
-      )}
-    </>
+      </div>
+
+      {msg ? <div className="hm-toast desk-toast">{msg}</div> : null}
+      {error ? <div className="error">{error}</div> : null}
+
+      <div className="desk-table-wrap">
+        {loading && !wallets.length ? (
+          <div className="empty-state">Loading wallets…</div>
+        ) : filtered.length === 0 ? (
+          <div className="empty-state">
+            No user wallets yet. They appear when someone opens the Luma app.
+          </div>
+        ) : (
+          <table className="desk-table">
+            <thead>
+              <tr>
+                <th>Profile</th>
+                <th>User</th>
+                <th>App ID</th>
+                <th>Status</th>
+                <th>Coins</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((w) => {
+                const st = w.accountStatus || 'active';
+                return (
+                  <tr key={w.userId}>
+                    <td>
+                      {w.avatarUrl ? (
+                        <img
+                          className="desk-table-avatar"
+                          src={w.avatarUrl}
+                          alt=""
+                        />
+                      ) : (
+                        <span className="desk-avatar-fallback sm">
+                          {(w.displayName || '?')[0]}
+                        </span>
+                      )}
+                    </td>
+                    <td>
+                      <strong>{w.displayName || 'User'}</strong>
+                      <div className="meta">
+                        {w.role}
+                        {w.isPremium ? ' · VIP' : ''} · XP {w.xp}
+                      </div>
+                    </td>
+                    <td>
+                      <code className="desk-app-id">
+                        {w.appId ||
+                          String(w.userId).replace(/\D/g, '').slice(-6).padStart(6, '0')}
+                      </code>
+                    </td>
+                    <td>
+                      <span
+                        className={`badge solid ${
+                          st === 'banned'
+                            ? 'banned'
+                            : st === 'suspended'
+                              ? 'suspended'
+                              : 'approved'
+                        }`}
+                      >
+                        {st}
+                      </span>
+                    </td>
+                    <td>
+                      <strong>{w.coinBalance.toLocaleString()}</strong>
+                    </td>
+                    <td>
+                      <div className="desk-row-actions">
+                        <button
+                          type="button"
+                          className="btn-pink"
+                          onClick={() => {
+                            setCreditTarget(w);
+                            setCreditAmount('100');
+                            setCreditReason('Admin credit');
+                          }}
+                        >
+                          Adjust
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-gold"
+                          onClick={() =>
+                            void applyStatus(
+                              w.userId,
+                              st === 'suspended' ? 'active' : 'suspended',
+                            )
+                          }
+                        >
+                          {st === 'suspended' ? 'Unsuspend' : 'Suspend'}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-red"
+                          onClick={() =>
+                            void applyStatus(
+                              w.userId,
+                              st === 'banned' ? 'active' : 'banned',
+                            )
+                          }
+                        >
+                          {st === 'banned' ? 'Unban' : 'Ban'}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <DeskModal
+        open={!!creditTarget}
+        title="Adjust wallet"
+        subtitle={creditTarget?.displayName}
+        onClose={() => setCreditTarget(null)}
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() => setCreditTarget(null)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn-pink"
+              onClick={() => void submitCredit()}
+            >
+              Apply
+            </button>
+          </>
+        }
+      >
+        <DeskField label="Amount (negative to deduct)">
+          <input
+            value={creditAmount}
+            onChange={(e) => setCreditAmount(e.target.value)}
+            inputMode="decimal"
+          />
+        </DeskField>
+        <DeskField label="Reason">
+          <input
+            value={creditReason}
+            onChange={(e) => setCreditReason(e.target.value)}
+          />
+        </DeskField>
+      </DeskModal>
+    </div>
   );
 }

@@ -14,7 +14,7 @@ export type HostLifecycleStatus =
   | 'suspended'
   | 'banned';
 
-export type AdminRole = 'super_admin' | 'moderator' | 'finance' | 'support';
+export type AdminRole = 'super_admin' | 'moderator' | 'finance' | 'support' | 'agency';
 
 export type ManagedHost = HostRow & {
   bio?: string;
@@ -41,6 +41,8 @@ export type ManagedHost = HostRow & {
   rating?: number;
   reportsReceived?: number;
   revenueGenerated?: number;
+  agencyId?: string;
+  agencyName?: string;
   loginHistory?: { at: number; ip?: string; device?: string }[];
   deviceInfo?: {
     platform?: string;
@@ -72,6 +74,7 @@ function adminHeaders() {
     'x-admin-key': localStorage.getItem('cc_admin_key') || adminKey,
     'x-admin-id': localStorage.getItem('cc_admin_id') || 'admin',
     'x-admin-role': localStorage.getItem('cc_admin_role') || 'super_admin',
+    'x-agency-id': localStorage.getItem('cc_agency_id') || '',
   };
 }
 
@@ -109,11 +112,13 @@ export async function fetchManagedHosts(params: {
   q?: string;
   status?: string;
   sort?: string;
+  agencyId?: string | null;
 }) {
   const qs = new URLSearchParams();
   if (params.q) qs.set('q', params.q);
   if (params.status) qs.set('status', params.status);
   if (params.sort) qs.set('sort', params.sort);
+  if (params.agencyId) qs.set('agencyId', params.agencyId);
   return adminFetch<{ hosts: ManagedHost[]; total: number }>(
     `/admin/hosts?${qs.toString()}`,
   );
@@ -141,12 +146,15 @@ export type BridgeHostStatus = {
   lastSeen: number;
 };
 
-export async function fetchBridgeHosts() {
+export async function fetchBridgeHosts(agencyId?: string | null) {
+  const qs = agencyId
+    ? `?agencyId=${encodeURIComponent(agencyId)}`
+    : '';
   return adminFetch<{
     hosts: BridgeHostStatus[];
     readyCount: number;
     onlineCount: number;
-  }>('/admin/bridge-hosts');
+  }>(`/admin/bridge-hosts${qs}`);
 }
 
 export async function exportHostsCsv() {

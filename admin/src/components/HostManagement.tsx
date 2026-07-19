@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { HostRow } from '../api';
-import {
-  connectAdminRealtime,
-} from '../api';
+import { connectAdminRealtime } from '../api';
 import {
   exportHostsCsv,
   fetchAuditLogs,
@@ -14,8 +12,10 @@ import {
   syncHostsToServer,
   type AuditLog,
   type BridgeHostStatus,
+  type HostLifecycleStatus,
   type ManagedHost,
 } from '../hostApi';
+import { DeskField, DeskModal } from './DeskModal';
 
 const STATUS_FILTERS = [
   'all',
@@ -30,11 +30,22 @@ const STATUS_FILTERS = [
 const SORTS = [
   { id: 'updated', label: 'Recent' },
   { id: 'name', label: 'Name' },
-  { id: 'earnings', label: 'Revenue' },
+  { id: 'earnings', label: 'Earnings' },
   { id: 'rating', label: 'Rating' },
   { id: 'calls', label: 'Calls' },
   { id: 'coins', label: 'Coins' },
 ] as const;
+
+const NEXT_STATUS: Record<string, HostLifecycleStatus> = {
+  approve: 'approved',
+  reject: 'rejected',
+  suspend: 'suspended',
+  ban: 'banned',
+  unsuspend: 'approved',
+  unban: 'approved',
+  under_review: 'under_review',
+  request_docs: 'under_review',
+};
 
 function fmtSec(sec = 0) {
   const h = Math.floor(sec / 3600);
@@ -42,13 +53,44 @@ function fmtSec(sec = 0) {
   return `${h}h ${m}m`;
 }
 
+function appIdOf(h: ManagedHost) {
+  const raw = String(h.hostId || '').replace(/\D/g, '');
+  if (raw.length >= 6) return raw.slice(-6);
+  if (raw) return raw.padStart(6, '0');
+  const fallback = String(h.id || '')
+    .replace(/\D/g, '')
+    .slice(-6);
+  return fallback.padStart(6, '0') || '000000';
+}
+
+function photoOf(h: ManagedHost) {
+  if (h.photoUrls?.length) return h.photoUrls[0];
+  return h.photoUrl || h.avatarUrl || '';
+}
+
+function PresencePill({ bridge, online }: { bridge?: BridgeHostStatus; online?: boolean }) {
+  if (bridge?.readyToCall) return <span className="badge online">Ready</span>;
+  if (bridge?.isLive) return <span className="badge live">Live</span>;
+  if (bridge?.isOnCall) return <span className="badge under_review">On call</span>;
+  if (bridge?.isOnline || online) return <span className="badge online">Online</span>;
+  return <span className="badge none">Offline</span>;
+}
+
 export function HostManagementPanel({
   firebaseHosts,
+  agencyId,
+  canAct = true,
+  title,
+  subtitle,
 }: {
   firebaseHosts: HostRow[];
+  agencyId?: string | null;
+  canAct?: boolean;
+  title?: string;
+  subtitle?: string;
 }) {
   const [query, setQuery] = useState('');
-  const [status, setStatus] = useState<string>('all');
+  const [status, setStatus] = useState<string>(agencyId ? 'all' : 'pending');
   const [sort, setSort] = useState('updated');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [detail, setDetail] = useState<ManagedHost | null>(null);
@@ -57,13 +99,18 @@ export function HostManagementPanel({
   const [bridgeHosts, setBridgeHosts] = useState<BridgeHostStatus[]>([]);
   const [bridgeReady, setBridgeReady] = useState(0);
   const [bridgeOnline, setBridgeOnline] = useState(0);
-  const [busy, setBusy] = useState(false);
+  const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   const [msg, setMsg] = useState('');
+  const [form, setForm] = useState<
+    | null
+    | { type: 'docs' | 'commission' | 'coins'; host: ManagedHost }
+  >(null);
+  const [formValue, setFormValue] = useState('');
 
-  const hosts = useMemo(
-    () => mergeFirebaseHosts(firebaseHosts, managed),
-    [firebaseHosts, managed],
-  );
+  const hosts = useMemo(() => {
+    if (agencyId) return managed;
+    return mergeFirebaseHosts(firebaseHosts, managed);
+  }, [firebaseHosts, managed, agencyId]);
 
   const bridgeById = useMemo(() => {
     const map = new Map<string, BridgeHostStatus>();
@@ -79,7 +126,8 @@ export function HostManagementPanel({
     const q = query.trim().toLowerCase();
     if (q) {
       rows = rows.filter((h) => {
-        const hay = `${h.name} ${h.email || ''} ${h.hostId || ''} ${h.country || ''} ${h.id}`.toLowerCase();
+        const hay =
+          `${h.name} ${h.email || ''} ${h.hostId || ''} ${appIdOf(h)} ${h.country || ''} ${h.id}`.toLowerCase();
         return hay.includes(q);
       });
     }
@@ -113,13 +161,22 @@ export function HostManagementPanel({
 
   const refreshServer = async () => {
     try {
-      await syncHostsToServer(firebaseHosts as ManagedHost[]);
-      const data = await fetchManagedHosts({ q: query, status, sort });
+      if (!agencyId) {
+        await syncHostsToServer(firebaseHosts as ManagedHost[]);
+      }
+      const data = await fetchManagedHosts({
+        q: query,
+        status: 'all',
+        sort,
+        agencyId,
+      });
       setManaged(data.hosts || []);
-      const audit = await fetchAuditLogs(60);
-      setLogs(audit.logs || []);
+      if (!agencyId) {
+        const audit = await fetchAuditLogs(60);
+        setLogs(audit.logs || []);
+      }
       try {
-        const bridge = await fetchBridgeHosts();
+        const bridge = await fetchBridgeHosts(agencyId);
         setBridgeHosts(bridge.hosts || []);
         setBridgeReady(bridge.readyCount || 0);
         setBridgeOnline(bridge.onlineCount || 0);
@@ -129,7 +186,11 @@ export function HostManagementPanel({
         setBridgeOnline(0);
       }
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : 'Server sync failed — using Firebase only');
+      setMsg(
+        e instanceof Error
+          ? e.message
+          : 'Server sync failed — using Firebase only',
+      );
     }
   };
 
@@ -138,9 +199,8 @@ export function HostManagementPanel({
     const t = setInterval(() => void refreshServer(), 4000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [firebaseHosts.length, query, status, sort]);
+  }, [firebaseHosts.length, query, sort, agencyId]);
 
-  // Instant presence from admin websocket
   useEffect(() => {
     const off = connectAdminRealtime((type) => {
       if (
@@ -156,7 +216,133 @@ export function HostManagementPanel({
     });
     return () => off();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [agencyId]);
+
+  const markBusy = (id: string, on: boolean) => {
+    setBusyIds((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+
+  const patchLocal = (id: string, patch: Partial<ManagedHost>) => {
+    setManaged((prev) => {
+      const exists = prev.some((h) => h.id === id);
+      if (!exists) {
+        const fb = firebaseHosts.find((h) => h.id === id);
+        if (!fb) return prev;
+        return [...prev, { ...fb, ...patch } as ManagedHost];
+      }
+      return prev.map((h) => (h.id === id ? { ...h, ...patch } : h));
+    });
+    setDetail((d) => (d?.id === id ? { ...d, ...patch } : d));
+  };
+
+  const act = async (
+    id: string,
+    action: string,
+    extra?: {
+      reason?: string;
+      docsMessage?: string;
+      commissionRate?: number;
+      coinBalance?: number;
+    },
+  ) => {
+    if (!canAct) return;
+    const host = hosts.find((h) => h.id === id);
+    const next = NEXT_STATUS[action];
+    const snapshot = host ? { ...host } : null;
+
+    // Optimistic UI — row leaves current filter immediately; no page reload
+    if (next) {
+      patchLocal(id, {
+        hostStatus: next,
+        banned: action === 'ban' ? true : action === 'unban' ? false : host?.banned,
+        suspended:
+          action === 'suspend'
+            ? true
+            : action === 'unsuspend'
+              ? false
+              : host?.suspended,
+        rejectionReason:
+          action === 'reject'
+            ? extra?.reason || 'Not approved'
+            : host?.rejectionReason,
+      });
+    }
+
+    markBusy(id, true);
+    setMsg('');
+    try {
+      const result = await runHostAction(id, action, {
+        ...extra,
+        reason:
+          extra?.reason ||
+          (action === 'reject'
+            ? 'Not approved'
+            : action === 'ban'
+              ? 'Banned by admin'
+              : action === 'suspend'
+                ? 'Suspended by admin'
+                : undefined),
+        name: host?.name,
+        hostId: host?.hostId,
+      });
+      if (result.host) {
+        setManaged((prev) => {
+          const others = prev.filter((h) => h.id !== id);
+          return [...others, result.host];
+        });
+        if (detail?.id === id) setDetail(result.host);
+      }
+      setMsg(`${action.replace(/_/g, ' ')} · ${host?.name || id}`);
+      // Stay on current filter tab — row already moved out of this view
+    } catch (e) {
+      if (snapshot) patchLocal(id, snapshot);
+      setMsg(e instanceof Error ? e.message : 'Action failed');
+    } finally {
+      markBusy(id, false);
+    }
+  };
+
+  const bulk = async (action: string) => {
+    if (!canAct || !selected.size) return;
+    const ids = [...selected];
+    const next = NEXT_STATUS[action];
+    if (next) {
+      for (const id of ids) {
+        patchLocal(id, {
+          hostStatus: next,
+          banned: action === 'ban',
+          suspended: action === 'suspend',
+        });
+      }
+    }
+    setBusyIds(new Set(ids));
+    try {
+      await runBulkHostAction(
+        ids,
+        action,
+        action === 'reject'
+          ? 'Not approved'
+          : action === 'ban'
+            ? 'Banned by admin'
+            : action === 'suspend'
+              ? 'Suspended by admin'
+              : undefined,
+      );
+      setSelected(new Set());
+      setMsg(`Bulk ${action} · ${ids.length} hosts`);
+      await refreshServer();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Bulk failed');
+      await refreshServer();
+    } finally {
+      setBusyIds(new Set());
+    }
+  };
 
   const toggle = (id: string) => {
     setSelected((prev) => {
@@ -172,90 +358,68 @@ export function HostManagementPanel({
     else setSelected(new Set(filtered.map((h) => h.id)));
   };
 
-  const act = async (
-    id: string,
-    action: string,
-    extra?: { reason?: string; docsMessage?: string; commissionRate?: number; coinBalance?: number },
-  ) => {
-    setBusy(true);
-    setMsg('');
-    try {
-      const host = hosts.find((h) => h.id === id);
-      const result = await runHostAction(id, action, {
-        ...extra,
-        name: host?.name,
-        hostId: host?.hostId,
+  const submitForm = async () => {
+    if (!form) return;
+    const { type, host } = form;
+    if (type === 'docs') {
+      await act(host.id, 'request_docs', {
+        docsMessage: formValue.trim() || 'Please upload verification documents',
       });
-      setMsg(`${action} · ${host?.name || id}`);
-      if (result.host) {
-        setManaged((prev) => {
-          const others = prev.filter((h) => h.id !== id);
-          return [...others, result.host];
-        });
-        if (detail?.id === id) setDetail(result.host);
-        // Auto-switch tab when status leaves current filter
-        if (
-          status !== 'all' &&
-          result.host.hostStatus &&
-          result.host.hostStatus !== status
-        ) {
-          setStatus(result.host.hostStatus);
-        }
+    } else if (type === 'commission') {
+      const n = Number(formValue);
+      if (!Number.isFinite(n)) {
+        setMsg('Invalid commission');
+        return;
       }
-      await refreshServer();
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : 'Action failed');
-    } finally {
-      setBusy(false);
+      await act(host.id, 'set_commission', { commissionRate: n });
+    } else if (type === 'coins') {
+      const n = Number(formValue);
+      if (!Number.isFinite(n)) {
+        setMsg('Invalid coin balance');
+        return;
+      }
+      await act(host.id, 'set_coins', { coinBalance: n });
     }
+    setForm(null);
+    setFormValue('');
   };
 
-  const bulk = async (action: string) => {
-    if (!selected.size) return;
-    const reason =
-      action === 'reject' || action === 'ban' || action === 'suspend'
-        ? window.prompt('Reason (shown to hosts)?') || undefined
-        : undefined;
-    setBusy(true);
-    try {
-      const count = selected.size;
-      await runBulkHostAction([...selected], action, reason);
-      setSelected(new Set());
-      setMsg(`Bulk ${action} · ${count} hosts`);
-      await refreshServer();
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : 'Bulk failed');
-    } finally {
-      setBusy(false);
-    }
-  };
+  const defaultStatus = agencyId ? 'all' : 'pending';
+  useEffect(() => {
+    if (agencyId) setStatus('all');
+    else setStatus(defaultStatus);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agencyId]);
 
   return (
-    <div className="hm-root">
-      <div className="hm-header">
+    <div className="desk-root">
+      <div className="desk-header">
         <div>
-          <h2>Host Management</h2>
+          <h2>{title || (agencyId ? 'Agency hosts' : 'Host management')}</h2>
           <p className="sub">
-            Applications · approvals · control · finance · monitoring · audit
+            {subtitle ||
+              (agencyId
+                ? 'Live roster · earnings · presence from linked host apps'
+                : 'Applications · approvals · control · finance · audit')}
           </p>
-          <p className="sub" style={{ marginTop: 6 }}>
-            User-app bridge: <strong>{bridgeOnline}</strong> online ·{' '}
-            <strong>{bridgeReady}</strong> ready to call
+          <p className="sub desk-live-line">
+            Live bridge · <strong>{bridgeOnline}</strong> online ·{' '}
+            <strong>{bridgeReady}</strong> ready
           </p>
         </div>
-        <div className="hm-header-actions">
+        <div className="desk-header-actions">
+          {!agencyId ? (
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() => void exportHostsCsv().catch((e) => setMsg(String(e)))}
+            >
+              Export CSV
+            </button>
+          ) : null}
           <button
             type="button"
             className="btn-ghost"
-            disabled={busy}
-            onClick={() => void exportHostsCsv().catch((e) => setMsg(String(e)))}
-          >
-            Export CSV
-          </button>
-          <button
-            type="button"
-            className="btn-pink"
-            disabled={busy}
             onClick={() => void refreshServer()}
           >
             Refresh
@@ -263,34 +427,34 @@ export function HostManagementPanel({
         </div>
       </div>
 
-      {msg ? <div className="hm-toast">{msg}</div> : null}
+      {msg ? <div className="hm-toast desk-toast">{msg}</div> : null}
 
-      <div className="hm-toolbar">
+      <div className="desk-toolbar">
         <input
-          className="hm-search"
+          className="hm-search desk-search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search name, email, host ID, country…"
+          placeholder="Search name, App ID, country…"
         />
-        <div className="toolbar">
+        <div className="desk-filters">
           {STATUS_FILTERS.map((f) => (
             <button
               key={f}
               type="button"
-              className={`chip ${status === f ? 'on' : ''}`}
+              className={`desk-tab ${status === f ? 'on' : ''}`}
               onClick={() => setStatus(f)}
             >
               {f.replace('_', ' ')}
-              <span className="chip-count">{statusCounts[f] ?? 0}</span>
+              <span>{statusCounts[f] ?? 0}</span>
             </button>
           ))}
         </div>
-        <div className="toolbar">
+        <div className="desk-filters desk-sorts">
           {SORTS.map((s) => (
             <button
               key={s.id}
               type="button"
-              className={`chip ${sort === s.id ? 'on' : ''}`}
+              className={`desk-tab ghost ${sort === s.id ? 'on' : ''}`}
               onClick={() => setSort(s.id)}
             >
               {s.label}
@@ -299,146 +463,152 @@ export function HostManagementPanel({
         </div>
       </div>
 
-      <div className="hm-bulk">
-        <button type="button" className="btn-ghost" onClick={selectAll}>
-          {selected.size === filtered.length && filtered.length
-            ? 'Clear selection'
-            : `Select all (${filtered.length})`}
-        </button>
-        <button
-          type="button"
-          className="btn-green"
-          disabled={!selected.size || busy}
-          onClick={() => void bulk('approve')}
-        >
-          Bulk approve
-        </button>
-        <button
-          type="button"
-          className="btn-gold"
-          disabled={!selected.size || busy}
-          onClick={() => void bulk('reject')}
-        >
-          Bulk reject
-        </button>
-        <button
-          type="button"
-          className="btn-gold"
-          disabled={!selected.size || busy}
-          onClick={() => void bulk('suspend')}
-        >
-          Bulk suspend
-        </button>
-        <button
-          type="button"
-          className="btn-red"
-          disabled={!selected.size || busy}
-          onClick={() => void bulk('ban')}
-        >
-          Bulk ban
-        </button>
-      </div>
+      {canAct ? (
+        <div className="desk-bulk">
+          <button type="button" className="btn-ghost" onClick={selectAll}>
+            {selected.size === filtered.length && filtered.length
+              ? 'Clear selection'
+              : `Select all (${filtered.length})`}
+          </button>
+          <button
+            type="button"
+            className="btn-green"
+            disabled={!selected.size}
+            onClick={() => void bulk('approve')}
+          >
+            Approve
+          </button>
+          <button
+            type="button"
+            className="btn-gold"
+            disabled={!selected.size}
+            onClick={() => void bulk('reject')}
+          >
+            Reject
+          </button>
+          <button
+            type="button"
+            className="btn-gold"
+            disabled={!selected.size}
+            onClick={() => void bulk('suspend')}
+          >
+            Suspend
+          </button>
+          {!agencyId ? (
+            <button
+              type="button"
+              className="btn-red"
+              disabled={!selected.size}
+              onClick={() => void bulk('ban')}
+            >
+              Ban
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
-      <div className="hm-layout">
-        <div className="hm-table-wrap">
+      <div className={`desk-layout ${agencyId ? 'single' : ''}`}>
+        <div className="desk-table-wrap">
           {filtered.length === 0 ? (
-            <div className="meta">No hosts match filters</div>
+            <div className="empty-state">No hosts in this filter</div>
           ) : (
-            <table className="hm-table">
+            <table className="desk-table">
               <thead>
                 <tr>
-                  <th className="hm-th-check">
-                    <input
-                      type="checkbox"
-                      checked={
-                        selected.size > 0 && selected.size === filtered.length
-                      }
-                      onChange={selectAll}
-                      aria-label="Select all"
-                    />
-                  </th>
+                  {canAct ? (
+                    <th className="desk-check">
+                      <input
+                        type="checkbox"
+                        checked={
+                          selected.size > 0 &&
+                          selected.size === filtered.length
+                        }
+                        onChange={selectAll}
+                        aria-label="Select all"
+                      />
+                    </th>
+                  ) : null}
+                  <th>Profile</th>
                   <th>Host</th>
+                  <th>App ID</th>
+                  <th>Country</th>
                   <th>Status</th>
                   <th>Presence</th>
-                  <th>Location</th>
-                  <th>Calls</th>
-                  <th>Balance</th>
+                  <th>Earnings</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((h) => {
-                  const photos = h.photoUrls?.length
-                    ? h.photoUrls
-                    : h.photoUrl
-                      ? [h.photoUrl]
-                      : [];
-                  const bridge = bridgeById.get(h.id);
                   const st = h.hostStatus || 'none';
+                  const busy = busyIds.has(h.id);
+                  const bridge = bridgeById.get(h.id);
                   const needsReview =
                     st === 'pending' || st === 'under_review';
                   return (
                     <tr
                       key={h.id}
-                      className={detail?.id === h.id ? 'hm-row-active' : ''}
+                      className={`${detail?.id === h.id ? 'desk-row-active' : ''} ${busy ? 'desk-row-busy' : ''}`}
                     >
+                      {canAct ? (
+                        <td>
+                          <input
+                            type="checkbox"
+                            checked={selected.has(h.id)}
+                            onChange={() => toggle(h.id)}
+                          />
+                        </td>
+                      ) : null}
                       <td>
-                        <input
-                          type="checkbox"
-                          checked={selected.has(h.id)}
-                          onChange={() => toggle(h.id)}
-                        />
+                        <button
+                          type="button"
+                          className="desk-avatar-btn"
+                          onClick={() => setDetail(h)}
+                        >
+                          {photoOf(h) ? (
+                            <img src={photoOf(h)} alt="" />
+                          ) : (
+                            <span className="desk-avatar-fallback">
+                              {(h.name || '?')[0]}
+                            </span>
+                          )}
+                        </button>
                       </td>
                       <td>
                         <button
                           type="button"
-                          className="hm-host-cell"
+                          className="desk-name-btn"
                           onClick={() => setDetail(h)}
                         >
-                          <img src={photos[0] || h.avatarUrl || ''} alt="" />
-                          <span>
-                            <strong>{h.name || 'Host'}</strong>
-                            <small>
-                              {h.hostId || h.id.slice(0, 8)}
-                            </small>
-                          </span>
+                          <strong>{h.name || 'Host'}</strong>
+                          <small>{h.email || h.id.slice(0, 10)}</small>
                         </button>
                       </td>
                       <td>
-                        <span className={`badge ${st}`}>
-                          {st.replace('_', ' ').toUpperCase()}
+                        <code className="desk-app-id">{appIdOf(h)}</code>
+                      </td>
+                      <td className="meta">{h.country || '—'}</td>
+                      <td>
+                        <span className={`badge solid ${st}`}>
+                          {st.replace('_', ' ')}
                         </span>
                       </td>
                       <td>
-                        <div className="hm-presence">
-                          {bridge?.readyToCall ? (
-                            <span className="badge online">READY TO CALL</span>
-                          ) : bridge?.isLive ? (
-                            <span className="badge pending">LIVE</span>
-                          ) : bridge?.isOnCall ? (
-                            <span className="badge under_review">ON CALL</span>
-                          ) : bridge?.isOnline ? (
-                            <span className="badge online">ONLINE</span>
-                          ) : h.isOnline ? (
-                            <span className="badge online">ONLINE</span>
-                          ) : (
-                            <span className="badge">NOT ON USER APP</span>
-                          )}
+                        <PresencePill bridge={bridge} online={h.isOnline} />
+                      </td>
+                      <td>
+                        <div className="desk-earn">
+                          <strong>
+                            {(h.revenueGenerated || 0).toLocaleString()}
+                          </strong>
+                          <small>
+                            pend {(h.pendingEarnings || 0).toLocaleString()}
+                          </small>
                         </div>
                       </td>
-                      <td className="meta">{h.country || '—'}</td>
-                      <td className="meta">{h.totalCalls ?? 0}</td>
-                      <td className="meta">{h.coinBalance ?? 0}</td>
                       <td>
-                        <div className="hm-row-actions">
-                          <button
-                            type="button"
-                            className="btn-ghost"
-                            onClick={() => setDetail(h)}
-                          >
-                            Open
-                          </button>
-                          {needsReview ? (
+                        <div className="desk-row-actions">
+                          {canAct && needsReview ? (
                             <>
                               <button
                                 type="button"
@@ -452,46 +622,39 @@ export function HostManagementPanel({
                                 type="button"
                                 className="btn-gold"
                                 disabled={busy}
-                                onClick={() => {
-                                  const reason =
-                                    window.prompt('Reject reason?') ||
-                                    'Not approved';
-                                  void act(h.id, 'reject', { reason });
-                                }}
+                                onClick={() =>
+                                  void act(h.id, 'reject', {
+                                    reason: 'Not approved',
+                                  })
+                                }
                               >
                                 Reject
                               </button>
                             </>
                           ) : null}
-                          {st === 'approved' ? (
+                          {canAct && st === 'approved' ? (
                             <>
                               <button
                                 type="button"
                                 className="btn-gold"
                                 disabled={busy}
-                                onClick={() =>
-                                  void act(h.id, 'suspend', {
-                                    reason: 'Suspended by admin',
-                                  })
-                                }
+                                onClick={() => void act(h.id, 'suspend')}
                               >
                                 Suspend
                               </button>
-                              <button
-                                type="button"
-                                className="btn-red"
-                                disabled={busy}
-                                onClick={() =>
-                                  void act(h.id, 'ban', {
-                                    reason: 'Banned by admin',
-                                  })
-                                }
-                              >
-                                Ban
-                              </button>
+                              {!agencyId ? (
+                                <button
+                                  type="button"
+                                  className="btn-red"
+                                  disabled={busy}
+                                  onClick={() => void act(h.id, 'ban')}
+                                >
+                                  Ban
+                                </button>
+                              ) : null}
                             </>
                           ) : null}
-                          {st === 'suspended' ? (
+                          {canAct && st === 'suspended' ? (
                             <button
                               type="button"
                               className="btn-green"
@@ -501,7 +664,7 @@ export function HostManagementPanel({
                               Unsuspend
                             </button>
                           ) : null}
-                          {st === 'banned' ? (
+                          {canAct && st === 'banned' && !agencyId ? (
                             <button
                               type="button"
                               className="btn-green"
@@ -511,7 +674,7 @@ export function HostManagementPanel({
                               Unban
                             </button>
                           ) : null}
-                          {st === 'rejected' ? (
+                          {canAct && st === 'rejected' ? (
                             <button
                               type="button"
                               className="btn-green"
@@ -521,6 +684,28 @@ export function HostManagementPanel({
                               Re-approve
                             </button>
                           ) : null}
+                          {!canAct ||
+                          (!needsReview &&
+                            st !== 'approved' &&
+                            st !== 'suspended' &&
+                            st !== 'banned' &&
+                            st !== 'rejected') ? (
+                            <button
+                              type="button"
+                              className="btn-ghost"
+                              onClick={() => setDetail(h)}
+                            >
+                              View
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="btn-ghost"
+                              onClick={() => setDetail(h)}
+                            >
+                              Open
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -531,40 +716,118 @@ export function HostManagementPanel({
           )}
         </div>
 
-        <aside className="hm-side">
-          {detail ? (
+        {!agencyId ? (
+          <aside className="desk-side">
+            {detail ? (
+              <HostDetail
+                host={detail}
+                bridge={bridgeById.get(detail.id)}
+                busy={busyIds.has(detail.id)}
+                canAct={canAct}
+                onClose={() => setDetail(null)}
+                onAction={(action, extra) => void act(detail.id, action, extra)}
+                onOpenForm={(type) => {
+                  setForm({ type, host: detail });
+                  setFormValue(
+                    type === 'commission'
+                      ? String(detail.commissionRate ?? 0.3)
+                      : type === 'coins'
+                        ? String(detail.coinBalance ?? 0)
+                        : '',
+                  );
+                }}
+              />
+            ) : (
+              <div className="hm-audit">
+                <h3>Audit log</h3>
+                <p className="sub">Admin actions (live)</p>
+                <ul>
+                  {logs.length === 0 ? (
+                    <li className="meta">No audit entries yet</li>
+                  ) : (
+                    logs.map((l) => (
+                      <li key={l.id}>
+                        <strong>{l.action}</strong> · {l.hostName || l.hostId}
+                        <br />
+                        <span className="meta">
+                          {l.adminId}/{l.adminRole} ·{' '}
+                          {new Date(l.at).toLocaleString()}
+                          {l.details ? ` · ${l.details}` : ''}
+                        </span>
+                      </li>
+                    ))
+                  )}
+                </ul>
+              </div>
+            )}
+          </aside>
+        ) : detail ? (
+          <aside className="desk-side">
             <HostDetail
               host={detail}
               bridge={bridgeById.get(detail.id)}
-              busy={busy}
+              busy={busyIds.has(detail.id)}
+              canAct={canAct}
+              agencyMode
               onClose={() => setDetail(null)}
               onAction={(action, extra) => void act(detail.id, action, extra)}
+              onOpenForm={() => undefined}
+            />
+          </aside>
+        ) : null}
+      </div>
+
+      <DeskModal
+        open={!!form}
+        title={
+          form?.type === 'docs'
+            ? 'Request documents'
+            : form?.type === 'commission'
+              ? 'Set commission'
+              : 'Set coin balance'
+        }
+        subtitle={form?.host.name}
+        onClose={() => setForm(null)}
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() => setForm(null)}
+            >
+              Cancel
+            </button>
+            <button type="button" className="btn-pink" onClick={() => void submitForm()}>
+              Save
+            </button>
+          </>
+        }
+      >
+        <DeskField
+          label={
+            form?.type === 'docs'
+              ? 'Message to host'
+              : form?.type === 'commission'
+                ? 'Rate (0–1)'
+                : 'Coin balance'
+          }
+        >
+          {form?.type === 'docs' ? (
+            <textarea
+              rows={3}
+              value={formValue}
+              onChange={(e) => setFormValue(e.target.value)}
+              placeholder="Please upload CNIC / passport selfie…"
             />
           ) : (
-            <div className="hm-audit">
-              <h3>Audit log</h3>
-              <p className="sub">Admin actions (realtime refresh)</p>
-              <ul>
-                {logs.length === 0 ? (
-                  <li className="meta">No audit entries yet</li>
-                ) : (
-                  logs.map((l) => (
-                    <li key={l.id}>
-                      <strong>{l.action}</strong> · {l.hostName || l.hostId}
-                      <br />
-                      <span className="meta">
-                        {l.adminId}/{l.adminRole} ·{' '}
-                        {new Date(l.at).toLocaleString()}
-                        {l.details ? ` · ${l.details}` : ''}
-                      </span>
-                    </li>
-                  ))
-                )}
-              </ul>
-            </div>
+            <input
+              value={formValue}
+              onChange={(e) => setFormValue(e.target.value)}
+              inputMode="decimal"
+            />
           )}
-        </aside>
-      </div>
+        </DeskField>
+      </DeskModal>
     </div>
   );
 }
@@ -573,12 +836,17 @@ function HostDetail({
   host,
   bridge,
   busy,
+  canAct,
+  agencyMode,
   onClose,
   onAction,
+  onOpenForm,
 }: {
   host: ManagedHost;
   bridge?: BridgeHostStatus;
   busy: boolean;
+  canAct: boolean;
+  agencyMode?: boolean;
   onClose: () => void;
   onAction: (
     action: string,
@@ -589,12 +857,14 @@ function HostDetail({
       coinBalance?: number;
     },
   ) => void;
+  onOpenForm: (type: 'docs' | 'commission' | 'coins') => void;
 }) {
   const photos = host.photoUrls?.length
     ? host.photoUrls
     : host.photoUrl
       ? [host.photoUrl]
       : [];
+  const st = host.hostStatus || 'none';
 
   return (
     <div className="hm-detail">
@@ -605,26 +875,26 @@ function HostDetail({
         </button>
       </div>
       <div className="meta">
-        {host.hostId} · {host.email || 'no email'} · {host.country || '—'}
+        App ID <code className="desk-app-id">{appIdOf(host)}</code> ·{' '}
+        {host.email || 'no email'} · {host.country || '—'}
         <br />
-        Status <strong>{host.hostStatus}</strong>
+        Status{' '}
+        <span className={`badge solid ${st}`}>{st.replace('_', ' ')}</span>
         {host.rejectionReason ? ` · ${host.rejectionReason}` : ''}
-        {host.docsRequested ? ` · Docs: ${host.docsRequested}` : ''}
         <br />
-        User app:{' '}
+        Presence:{' '}
         {bridge ? (
-          <>
-            {bridge.readyToCall
-              ? 'Ready to call'
-              : bridge.isLive
-                ? 'Live'
-                : bridge.isOnCall
-                  ? 'On call'
-                  : 'Online'}
-            {bridge.workspaceMode ? ` · ${bridge.workspaceMode}` : ''}
-          </>
+          bridge.readyToCall
+            ? 'Ready to call'
+            : bridge.isLive
+              ? 'Live'
+              : bridge.isOnCall
+                ? 'On call'
+                : 'Online'
+        ) : host.isOnline ? (
+          'Online'
         ) : (
-          'Not listed (host must be Online in CoinCall)'
+          'Offline'
         )}
       </div>
 
@@ -633,63 +903,26 @@ function HostDetail({
           <img key={p} src={p} alt="" />
         ))}
       </div>
-      {host.idDocumentUrl ? (
-        <div className="meta" style={{ marginTop: 8 }}>
-          ID:{' '}
-          <a href={host.idDocumentUrl} target="_blank" rel="noreferrer">
-            CNIC / Passport
-          </a>
-        </div>
-      ) : null}
-      {host.selfieUrl ? (
-        <div className="meta">
-          Selfie:{' '}
-          <a href={host.selfieUrl} target="_blank" rel="noreferrer">
-            Open
-          </a>
-        </div>
-      ) : null}
-      {host.videoUrl ? (
-        <div className="meta">
-          Video preview
-          <video
-            src={host.videoUrl}
-            controls
-            playsInline
-            style={{
-              width: '100%',
-              maxHeight: 220,
-              borderRadius: 12,
-              background: '#000',
-              marginTop: 6,
-              display: 'block',
-            }}
-          />
-        </div>
-      ) : null}
 
       <p className="hm-bio">{host.bio || 'No bio'}</p>
-      <div className="meta">
-        Languages: {(host.languages || []).join(', ') || '—'}
-        <br />
-        Categories: {(host.categories || []).join(', ') || '—'}
-        <br />
-        Call price: {host.callPrice ?? 80} coins/min
-      </div>
 
-      <h4>Monitoring</h4>
+      <h4>Earnings</h4>
       <div className="hm-metrics">
+        <div>
+          <span>Revenue</span>
+          <b>{(host.revenueGenerated ?? 0).toLocaleString()}</b>
+        </div>
+        <div>
+          <span>Pending</span>
+          <b>{(host.pendingEarnings ?? 0).toLocaleString()}</b>
+        </div>
+        <div>
+          <span>Paid</span>
+          <b>{(host.paidEarnings ?? 0).toLocaleString()}</b>
+        </div>
         <div>
           <span>Calls</span>
           <b>{host.totalCalls ?? 0}</b>
-        </div>
-        <div>
-          <span>Missed</span>
-          <b>{host.missedCalls ?? 0}</b>
-        </div>
-        <div>
-          <span>Cancelled</span>
-          <b>{host.cancelledCalls ?? 0}</b>
         </div>
         <div>
           <span>Online</span>
@@ -699,111 +932,233 @@ function HostDetail({
           <span>Rating</span>
           <b>{(host.rating ?? 5).toFixed(1)}</b>
         </div>
-        <div>
-          <span>Reports</span>
-          <b>{host.reportsReceived ?? 0}</b>
-        </div>
-        <div>
-          <span>Revenue</span>
-          <b>{host.revenueGenerated ?? 0}</b>
-        </div>
       </div>
 
-      <h4>Finance</h4>
-      <div className="meta">
-        Wallet {host.coinBalance ?? 0} · Pending {host.pendingEarnings ?? 0} ·
-        Paid {host.paidEarnings ?? 0}
-        <br />
-        Commission {Math.round((host.commissionRate ?? 0.3) * 100)}% ·{' '}
-        {host.walletFrozen ? 'FROZEN' : 'Active'} · Withdrawals{' '}
-        {host.withdrawalsAllowed === false ? 'blocked' : 'allowed'}
-      </div>
+      {canAct ? (
+        <>
+          <h4>Lifecycle</h4>
+          <div className="actions hm-perm">
+            {st === 'pending' || st === 'under_review' ? (
+              <>
+                <button
+                  type="button"
+                  disabled={busy}
+                  className="btn-green"
+                  onClick={() => onAction('approve')}
+                >
+                  Approve
+                </button>
+                {!agencyMode ? (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    className="btn-ghost"
+                    onClick={() => onAction('under_review')}
+                  >
+                    Under review
+                  </button>
+                ) : null}
+                {!agencyMode ? (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    className="btn-gold"
+                    onClick={() => onOpenForm('docs')}
+                  >
+                    Request docs
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  disabled={busy}
+                  className="btn-gold"
+                  onClick={() =>
+                    onAction('reject', { reason: 'Not approved' })
+                  }
+                >
+                  Reject
+                </button>
+              </>
+            ) : null}
+            {st === 'rejected' ? (
+              <button
+                type="button"
+                disabled={busy}
+                className="btn-green"
+                onClick={() => onAction('approve')}
+              >
+                Re-approve
+              </button>
+            ) : null}
+            {st === 'approved' ? (
+              <>
+                <button
+                  type="button"
+                  disabled={busy}
+                  className="btn-gold"
+                  onClick={() => onAction('suspend')}
+                >
+                  Suspend
+                </button>
+                {!agencyMode ? (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    className="btn-red"
+                    onClick={() => onAction('ban')}
+                  >
+                    Ban
+                  </button>
+                ) : null}
+              </>
+            ) : null}
+            {st === 'suspended' ? (
+              <button
+                type="button"
+                disabled={busy}
+                className="btn-green"
+                onClick={() => onAction('unsuspend')}
+              >
+                Unsuspend
+              </button>
+            ) : null}
+            {st === 'banned' && !agencyMode ? (
+              <button
+                type="button"
+                disabled={busy}
+                className="btn-green"
+                onClick={() => onAction('unban')}
+              >
+                Unban
+              </button>
+            ) : null}
+          </div>
 
-      <h4>Permissions</h4>
-      <div className="actions hm-perm">
-        <button type="button" disabled={busy} className="btn-ghost" onClick={() => onAction(host.videoCallsEnabled === false ? 'enable_video' : 'disable_video')}>
-          Video {host.videoCallsEnabled === false ? 'OFF' : 'ON'}
-        </button>
-        <button type="button" disabled={busy} className="btn-ghost" onClick={() => onAction(host.voiceCallsEnabled === false ? 'enable_voice' : 'disable_voice')}>
-          Voice {host.voiceCallsEnabled === false ? 'OFF' : 'ON'}
-        </button>
-        <button type="button" disabled={busy} className="btn-ghost" onClick={() => onAction(host.giftsEnabled === false ? 'enable_gifts' : 'disable_gifts')}>
-          Gifts {host.giftsEnabled === false ? 'OFF' : 'ON'}
-        </button>
-        <button type="button" disabled={busy} className="btn-ghost" onClick={() => onAction(host.withdrawalsAllowed === false ? 'allow_withdrawals' : 'block_withdrawals')}>
-          Withdraw {host.withdrawalsAllowed === false ? 'blocked' : 'ok'}
-        </button>
-        <button type="button" disabled={busy} className="btn-ghost" onClick={() => onAction(host.callsEnabled === false ? 'enable_calls' : 'disable_calls')}>
-          Calls {host.callsEnabled === false ? 'disabled' : 'enabled'}
-        </button>
-      </div>
+          {!agencyMode ? (
+            <>
+              <h4>Permissions</h4>
+              <div className="actions hm-perm">
+                <button
+                  type="button"
+                  disabled={busy}
+                  className="btn-ghost"
+                  onClick={() =>
+                    onAction(
+                      host.videoCallsEnabled === false
+                        ? 'enable_video'
+                        : 'disable_video',
+                    )
+                  }
+                >
+                  Video {host.videoCallsEnabled === false ? 'OFF' : 'ON'}
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  className="btn-ghost"
+                  onClick={() =>
+                    onAction(
+                      host.voiceCallsEnabled === false
+                        ? 'enable_voice'
+                        : 'disable_voice',
+                    )
+                  }
+                >
+                  Voice {host.voiceCallsEnabled === false ? 'OFF' : 'ON'}
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  className="btn-ghost"
+                  onClick={() =>
+                    onAction(
+                      host.giftsEnabled === false
+                        ? 'enable_gifts'
+                        : 'disable_gifts',
+                    )
+                  }
+                >
+                  Gifts {host.giftsEnabled === false ? 'OFF' : 'ON'}
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  className="btn-ghost"
+                  onClick={() =>
+                    onAction(
+                      host.callsEnabled === false
+                        ? 'enable_calls'
+                        : 'disable_calls',
+                    )
+                  }
+                >
+                  Calls {host.callsEnabled === false ? 'OFF' : 'ON'}
+                </button>
+              </div>
 
-      <h4>Controls</h4>
-      <div className="actions hm-perm">
-        {host.hostStatus === 'pending' || host.hostStatus === 'under_review' ? (
-          <>
-            <button type="button" disabled={busy} className="btn-green" onClick={() => onAction('approve')}>Approve</button>
-            <button type="button" disabled={busy} className="btn-ghost" onClick={() => onAction('under_review')}>Under review</button>
-            <button type="button" disabled={busy} className="btn-gold" onClick={() => {
-              const docsMessage = window.prompt('Request documents') || '';
-              if (docsMessage) onAction('request_docs', { docsMessage });
-            }}>Request docs</button>
-            <button type="button" disabled={busy} className="btn-gold" onClick={() => {
-              const reason = window.prompt('Reject reason') || '';
-              onAction('reject', { reason });
-            }}>Reject</button>
-          </>
-        ) : null}
-        {host.hostStatus === 'rejected' ? (
-          <button type="button" disabled={busy} className="btn-green" onClick={() => onAction('approve')}>Re-approve</button>
-        ) : null}
-        {host.hostStatus === 'approved' ? (
-          <>
-            <button type="button" disabled={busy} className="btn-gold" onClick={() => onAction('suspend', { reason: 'Suspended by admin' })}>Suspend</button>
-            <button type="button" disabled={busy} className="btn-red" onClick={() => onAction('ban', { reason: 'Banned by admin' })}>Ban</button>
-          </>
-        ) : null}
-        {host.hostStatus === 'suspended' ? (
-          <button type="button" disabled={busy} className="btn-green" onClick={() => onAction('unsuspend')}>Unsuspend</button>
-        ) : null}
-        {host.hostStatus === 'banned' ? (
-          <button type="button" disabled={busy} className="btn-green" onClick={() => onAction('unban')}>Unban</button>
-        ) : null}
-        <button type="button" disabled={busy} className="btn-ghost" onClick={() => onAction('force_offline')}>Force offline</button>
-        <button type="button" disabled={busy} className="btn-ghost" onClick={() => onAction('force_online')}>Force online</button>
-        <button type="button" disabled={busy} className="btn-ghost" onClick={() => onAction('reset_profile')}>Reset profile</button>
-        <button type="button" disabled={busy} className="btn-red" onClick={() => {
-          if (window.confirm('Reset earnings per platform policy?')) {
-            onAction('reset_earnings', { reason: 'Platform policy reset' });
-          }
-        }}>Reset earnings</button>
-        <button type="button" disabled={busy} className="btn-gold" onClick={() => onAction(host.walletFrozen ? 'unfreeze_wallet' : 'freeze_wallet')}>
-          {host.walletFrozen ? 'Unfreeze wallet' : 'Freeze wallet'}
-        </button>
-        <button type="button" disabled={busy} className="btn-ghost" onClick={() => {
-          const n = window.prompt('Commission rate 0-1', String(host.commissionRate ?? 0.3));
-          if (n != null) onAction('set_commission', { commissionRate: Number(n) });
-        }}>Set commission</button>
-        <button type="button" disabled={busy} className="btn-ghost" onClick={() => {
-          const n = window.prompt('Coin balance', String(host.coinBalance ?? 0));
-          if (n != null) onAction('set_coins', { coinBalance: Number(n) });
-        }}>Set coins</button>
-      </div>
-
-      <h4>Login / device</h4>
-      <div className="meta">
-        {host.deviceInfo?.platform || '—'} · {host.deviceInfo?.model || '—'} ·{' '}
-        {host.deviceInfo?.appVersion || '—'}
-        <br />
-        IP {host.deviceInfo?.lastIp || '—'}
-      </div>
-      <ul className="hm-logins">
-        {(host.loginHistory || []).slice(0, 8).map((l, i) => (
-          <li key={`${l.at}-${i}`}>
-            {new Date(l.at).toLocaleString()} · {l.device || 'device'} · {l.ip || 'ip'}
-          </li>
-        ))}
-      </ul>
+              <h4>Controls</h4>
+              <div className="actions hm-perm">
+                <button
+                  type="button"
+                  disabled={busy}
+                  className="btn-ghost"
+                  onClick={() => onAction('force_offline')}
+                >
+                  Force offline
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  className="btn-ghost"
+                  onClick={() => onAction('force_online')}
+                >
+                  Force online
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  className="btn-gold"
+                  onClick={() =>
+                    onAction(
+                      host.walletFrozen ? 'unfreeze_wallet' : 'freeze_wallet',
+                    )
+                  }
+                >
+                  {host.walletFrozen ? 'Unfreeze wallet' : 'Freeze wallet'}
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  className="btn-ghost"
+                  onClick={() => onOpenForm('commission')}
+                >
+                  Set commission
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  className="btn-ghost"
+                  onClick={() => onOpenForm('coins')}
+                >
+                  Set coins
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  className="btn-red"
+                  onClick={() =>
+                    onAction('reset_earnings', {
+                      reason: 'Platform policy reset',
+                    })
+                  }
+                >
+                  Reset earnings
+                </button>
+              </div>
+            </>
+          ) : null}
+        </>
+      ) : null}
     </div>
   );
 }

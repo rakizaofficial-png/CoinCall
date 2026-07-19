@@ -22,7 +22,13 @@ function statusLabel(s: string) {
 }
 
 /** Money Desk — cash-out queue with clear Pending / Approved / Rejected */
-export function MoneyDesk({ readOnly }: { readOnly?: boolean }) {
+export function MoneyDesk({
+  readOnly,
+  agencyHostIds,
+}: {
+  readOnly?: boolean;
+  agencyHostIds?: Set<string>;
+}) {
   const [rows, setRows] = useState<WithdrawalRow[]>([]);
   const [tab, setTab] = useState<DeskTab>('pending');
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -43,26 +49,42 @@ export function MoneyDesk({ readOnly }: { readOnly?: boolean }) {
     return () => clearInterval(t);
   }, []);
 
+  const scopedRows = useMemo(() => {
+    if (!agencyHostIds || agencyHostIds.size === 0) {
+      return agencyHostIds ? [] : rows;
+    }
+    return rows.filter((w) => agencyHostIds.has(w.hostId));
+  }, [rows, agencyHostIds]);
+
   const counts = useMemo(() => {
-    const pending = rows.filter((w) => mapTab(w.status) === 'pending').length;
-    const approved = rows.filter((w) => mapTab(w.status) === 'approved').length;
-    const rejected = rows.filter((w) => mapTab(w.status) === 'rejected').length;
+    const pending = scopedRows.filter((w) => mapTab(w.status) === 'pending').length;
+    const approved = scopedRows.filter((w) => mapTab(w.status) === 'approved').length;
+    const rejected = scopedRows.filter((w) => mapTab(w.status) === 'rejected').length;
     return { pending, approved, rejected };
-  }, [rows]);
+  }, [scopedRows]);
 
   const filtered = useMemo(
-    () => rows.filter((w) => mapTab(w.status) === tab),
-    [rows, tab],
+    () => scopedRows.filter((w) => mapTab(w.status) === tab),
+    [scopedRows, tab],
   );
 
   const act = async (id: string, status: 'paid' | 'failed' | 'processing') => {
     if (readOnly) return;
+    const prev = rows.find((w) => w.id === id);
+    // Optimistic — leave current filter tab immediately
+    setRows((list) =>
+      list.map((w) => (w.id === id ? { ...w, status } : w)),
+    );
     setBusyId(id);
     try {
       await setWithdrawalStatus(id, status);
       setMsg(`Updated · ${statusLabel(status)}`);
-      await load();
     } catch (e) {
+      if (prev) {
+        setRows((list) =>
+          list.map((w) => (w.id === id ? { ...w, status: prev.status } : w)),
+        );
+      }
       setMsg(e instanceof Error ? e.message : 'Update failed');
     } finally {
       setBusyId(null);
@@ -70,8 +92,8 @@ export function MoneyDesk({ readOnly }: { readOnly?: boolean }) {
   };
 
   return (
-    <>
-      <div className="page-head">
+    <div className="desk-root">
+      <div className="desk-header">
         <div>
           <h2>Money Desk</h2>
           <p className="sub">
@@ -83,9 +105,9 @@ export function MoneyDesk({ readOnly }: { readOnly?: boolean }) {
         </button>
       </div>
 
-      {msg ? <div className="hm-toast">{msg}</div> : null}
+      {msg ? <div className="hm-toast desk-toast">{msg}</div> : null}
 
-      <div className="desk-tabs">
+      <div className="desk-filters">
         {(
           [
             ['pending', 'Pending', counts.pending],
@@ -105,64 +127,96 @@ export function MoneyDesk({ readOnly }: { readOnly?: boolean }) {
         ))}
       </div>
 
-      <div className="list">
+      <div className="desk-table-wrap">
         {filtered.length === 0 ? (
           <div className="empty-state">No {tab} withdrawals.</div>
         ) : (
-          filtered.map((w) => (
-            <article className="money-card" key={w.id}>
-              <div className="money-card-main">
-                <div className="money-amount">
-                  {w.amountCoins.toLocaleString()}
-                  <small>coins</small>
-                </div>
-                <div>
-                  <h3>
-                    {w.gateway.toUpperCase()} · {statusLabel(w.status)}
-                  </h3>
-                  <p className="meta">
-                    Host <code>{w.hostId}</code>
+          <table className="desk-table">
+            <thead>
+              <tr>
+                <th>Amount</th>
+                <th>Host</th>
+                <th>Gateway</th>
+                <th>Account</th>
+                <th>Status</th>
+                <th>Submitted</th>
+                {!readOnly ? <th>Actions</th> : null}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((w) => (
+                <tr key={w.id} className={busyId === w.id ? 'desk-row-busy' : ''}>
+                  <td>
+                    <strong>{w.amountCoins.toLocaleString()}</strong>
+                    <small className="meta"> coins</small>
+                  </td>
+                  <td>
+                    <code className="desk-app-id">{w.hostId}</code>
+                  </td>
+                  <td>{w.gateway.toUpperCase()}</td>
+                  <td className="meta">
+                    {w.accountName}
                     <br />
-                    {w.accountName} · {w.accountNumber}
-                    <br />
+                    {w.accountNumber}
+                  </td>
+                  <td>
+                    <span
+                      className={`badge solid ${
+                        mapTab(w.status) === 'approved'
+                          ? 'approved'
+                          : mapTab(w.status) === 'rejected'
+                            ? 'rejected'
+                            : 'pending'
+                      }`}
+                    >
+                      {statusLabel(w.status)}
+                    </span>
+                  </td>
+                  <td className="meta">
                     {new Date(w.createdAt).toLocaleString()}
-                    {w.providerRef ? ` · ref ${w.providerRef}` : ''}
-                    {w.error ? ` · ${w.error}` : ''}
-                  </p>
-                </div>
-              </div>
-              {!readOnly && mapTab(w.status) === 'pending' ? (
-                <div className="actions">
-                  <button
-                    type="button"
-                    className="btn-teal"
-                    disabled={busyId === w.id}
-                    onClick={() => void act(w.id, 'processing')}
-                  >
-                    Processing
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-green"
-                    disabled={busyId === w.id}
-                    onClick={() => void act(w.id, 'paid')}
-                  >
-                    Approve
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-red"
-                    disabled={busyId === w.id}
-                    onClick={() => void act(w.id, 'failed')}
-                  >
-                    Reject
-                  </button>
-                </div>
-              ) : null}
-            </article>
-          ))
+                  </td>
+                  {!readOnly ? (
+                    <td>
+                      {mapTab(w.status) === 'pending' ? (
+                        <div className="desk-row-actions">
+                          <button
+                            type="button"
+                            className="btn-teal"
+                            disabled={busyId === w.id}
+                            onClick={() => void act(w.id, 'processing')}
+                          >
+                            Processing
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-green"
+                            disabled={busyId === w.id}
+                            onClick={() => void act(w.id, 'paid')}
+                          >
+                            Approve
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-red"
+                            disabled={busyId === w.id}
+                            onClick={() => void act(w.id, 'failed')}
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      ) : (
+                        <span className={`badge solid ${mapTab(w.status) === 'approved' ? 'approved' : 'rejected'}`}>
+                          {statusLabel(w.status)}
+                        </span>
+                      )}
+                    </td>
+                  ) : null}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
       </div>
-    </>
+    </div>
   );
 }

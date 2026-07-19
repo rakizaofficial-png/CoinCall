@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from 'react';
-import { motion } from 'framer-motion';
 import {
   assignHostToAgency,
   fetchAgencies,
@@ -7,7 +6,7 @@ import {
   type Agency,
   type RevenueHostRow,
 } from '../agencyApi';
-import { FadeIn } from './AnimatedPage';
+import { DeskField, DeskModal } from './DeskModal';
 
 export function HostTypePanel({
   mode,
@@ -21,12 +20,14 @@ export function HostTypePanel({
   const [rows, setRows] = useState<RevenueHostRow[]>([]);
   const [agencies, setAgencies] = useState<Agency[]>([]);
   const [msg, setMsg] = useState('');
+  const [assignHostId, setAssignHostId] = useState<string | null>(null);
+  const [pickedAgency, setPickedAgency] = useState('');
 
   const load = useCallback(async () => {
     try {
-      const data = await fetchHostTypes();
+      const data = await fetchHostTypes(agencyId || undefined);
       let list = mode === 'agency' ? data.agency : data.individual;
-      if (agencyId) {
+      if (agencyId && mode === 'agency') {
         list = data.agency.filter((h) => h.agencyId === agencyId);
       }
       setRows(list || []);
@@ -41,23 +42,24 @@ export function HostTypePanel({
 
   useEffect(() => {
     void load();
+    const t = setInterval(() => void load(), 5000);
+    return () => clearInterval(t);
   }, [load]);
 
-  async function assign(hostId: string) {
-    if (!canManage || !agencies.length) return;
-    const names = agencies.map((a, i) => `${i + 1}. ${a.name}`).join('\n');
-    const pick = window.prompt(`Assign to agency:\n${names}\nEnter number`);
-    const idx = Number(pick) - 1;
-    const agency = agencies[idx];
+  async function confirmAssign() {
+    if (!assignHostId || !pickedAgency) return;
+    const agency = agencies.find((a) => a.id === pickedAgency);
     if (!agency) return;
-    await assignHostToAgency(agency.id, hostId, 'assign');
+    await assignHostToAgency(agency.id, assignHostId, 'assign');
     setMsg(`Assigned to ${agency.name}`);
+    setAssignHostId(null);
+    setPickedAgency('');
     await load();
   }
 
   return (
-    <>
-      <div className="page-head">
+    <div className="desk-root">
+      <div className="desk-header">
         <div>
           <h2>
             {mode === 'agency' ? 'Agency hosts' : 'Individual hosts'}
@@ -65,9 +67,9 @@ export function HostTypePanel({
           <p className="sub">
             {mode === 'agency'
               ? agencyId
-                ? 'Hosts under your agency only'
+                ? 'Hosts under your agency · live earnings ledger'
                 : 'Hosts managed by partner agencies'
-              : 'Independent hosts · not under an agency'}
+              : 'Independent hosts · assign to an agency'}
           </p>
         </div>
         <button type="button" className="btn-ghost" onClick={() => void load()}>
@@ -75,58 +77,101 @@ export function HostTypePanel({
         </button>
       </div>
 
-      {msg ? <div className="hm-toast">{msg}</div> : null}
+      {msg ? <div className="hm-toast desk-toast">{msg}</div> : null}
 
-      <div className="list">
+      <div className="desk-table-wrap">
         {rows.length === 0 ? (
           <div className="empty-state">No {mode} hosts found.</div>
         ) : (
-          rows.map((h, i) => (
-            <FadeIn key={h.hostId} delay={i * 0.03}>
-              <motion.div
-                className="card"
-                style={{ gridTemplateColumns: '1fr auto' }}
-                whileHover={{ scale: 1.005 }}
-              >
-                <div>
-                  <h3>{h.name}</h3>
-                  <div className="meta">
-                    <code>{h.hostId}</code>
-                    <br />
-                    {h.agencyName ? (
-                      <>Agency {h.agencyName}</>
-                    ) : (
-                      <>Independent</>
-                    )}{' '}
-                    · Revenue {h.revenueGenerated.toLocaleString()}
-                  </div>
-                </div>
-                {mode === 'individual' && canManage ? (
-                  <div className="actions">
-                    <button
-                      type="button"
-                      className="btn-pink"
-                      onClick={() => void assign(h.hostId)}
-                    >
-                      Assign agency
-                    </button>
-                  </div>
-                ) : (
-                  <div
-                    style={{
-                      fontFamily: 'var(--display)',
-                      fontWeight: 800,
-                      fontSize: 18,
-                    }}
-                  >
-                    {h.revenueGenerated.toLocaleString()}
-                  </div>
-                )}
-              </motion.div>
-            </FadeIn>
-          ))
+          <table className="desk-table">
+            <thead>
+              <tr>
+                <th>Host</th>
+                <th>App ID</th>
+                <th>Agency</th>
+                <th>Revenue</th>
+                <th>Pending</th>
+                <th>Paid</th>
+                {mode === 'individual' && canManage ? <th>Actions</th> : null}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((h) => (
+                <tr key={h.hostId}>
+                  <td>
+                    <strong>{h.name}</strong>
+                  </td>
+                  <td>
+                    <code className="desk-app-id">
+                      {String(h.hostId).replace(/\D/g, '').slice(-6).padStart(6, '0') ||
+                        h.hostId.slice(0, 8)}
+                    </code>
+                  </td>
+                  <td className="meta">{h.agencyName || 'Independent'}</td>
+                  <td>
+                    <strong>{h.revenueGenerated.toLocaleString()}</strong>
+                  </td>
+                  <td className="meta">{h.pendingEarnings.toLocaleString()}</td>
+                  <td className="meta">{h.paidEarnings.toLocaleString()}</td>
+                  {mode === 'individual' && canManage ? (
+                    <td>
+                      <button
+                        type="button"
+                        className="btn-pink"
+                        onClick={() => {
+                          setAssignHostId(h.hostId);
+                          setPickedAgency(agencies[0]?.id || '');
+                        }}
+                      >
+                        Assign agency
+                      </button>
+                    </td>
+                  ) : null}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
       </div>
-    </>
+
+      <DeskModal
+        open={!!assignHostId}
+        title="Assign to agency"
+        subtitle="Host will appear under that agency’s portal"
+        onClose={() => setAssignHostId(null)}
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() => setAssignHostId(null)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn-pink"
+              disabled={!pickedAgency}
+              onClick={() => void confirmAssign()}
+            >
+              Assign
+            </button>
+          </>
+        }
+      >
+        <DeskField label="Agency">
+          <select
+            value={pickedAgency}
+            onChange={(e) => setPickedAgency(e.target.value)}
+          >
+            {agencies.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name} · {a.commissionPercent}%
+              </option>
+            ))}
+          </select>
+        </DeskField>
+      </DeskModal>
+    </div>
   );
 }
