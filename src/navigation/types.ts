@@ -23,7 +23,7 @@ export type RootStackParamList = {
     ratePerMinute?: number;
     role?: 'host' | 'user';
   };
-  Chat: { peerId: string; peerName?: string; peerAvatar?: string };
+  DirectChat: { peerId: string; peerName?: string; peerAvatar?: string };
   Notifications: undefined;
   Settings: undefined;
   GoLive: { mode?: 'solo' | 'party' };

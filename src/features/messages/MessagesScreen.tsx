@@ -143,7 +143,7 @@ export function MessagesScreen({ navigation }: { navigation: any }) {
 
           <SectionLabel title="Host support" />
           <SoftPress
-            onPress={() => navigation.navigate('Chat', { peerId: ADMIN_SUPPORT_ID, peerName: 'Admin' })}
+            onPress={() => navigation.navigate('DirectChat', { peerId: ADMIN_SUPPORT_ID, peerName: 'Admin' })}
           >
             <GlassPanel pad={14} style={{ marginBottom: 10 }}>
               <View style={styles.inboxRow}>
@@ -185,7 +185,7 @@ export function MessagesScreen({ navigation }: { navigation: any }) {
               <SoftPress
                 key={row.id}
                 onPress={() =>
-                  navigation.navigate('Chat', {
+                  navigation.navigate('DirectChat', {
                     peerId: row.id,
                     peerName: row.title,
                   })

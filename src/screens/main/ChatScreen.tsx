@@ -19,12 +19,12 @@ import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import type { RootStackParamList } from '../../navigation/types';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { listenChatMessages, sendChatMessage, type ChatMessage } from '../../services/chatService';
+import { listenChatMessages, sendChatMessage, fetchDmMessages, type ChatMessage } from '../../services/chatService';
 import { radii } from '../../theme/colors';
 import { useTheme } from '../../theme/ThemeContext';
 import { notify } from '../../utils/notify';
 
-type Props = NativeStackScreenProps<RootStackParamList, 'Chat'>;
+type Props = NativeStackScreenProps<RootStackParamList, 'DirectChat'>;
 
 export function ChatScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
@@ -63,6 +63,8 @@ export function ChatScreen({ navigation, route }: Props) {
       });
       setText('');
       setPreview(null);
+      const rows = await fetchDmMessages(meId, peerId);
+      if (rows.length) setMessages(rows);
     } catch (e) {
       notify('Chat', e instanceof Error ? e.message : 'Could not send');
     } finally {

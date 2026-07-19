@@ -66,7 +66,7 @@ function AuthenticatedApp() {
           <Stack.Screen name="MainTabs" component={MainTabNavigator} />
           <Stack.Screen name="HostProfile" component={HostProfileScreen} />
           <Stack.Screen name="Call" component={CallScreen} />
-          <Stack.Screen name="Chat" component={ChatScreen} />
+          <Stack.Screen name="DirectChat" component={ChatScreen} />
           <Stack.Screen name="Notifications" component={NotificationsScreen} />
           <Stack.Screen name="Settings" component={SettingsScreen} />
           <Stack.Screen name="GoLive" component={GoLiveRoute} />

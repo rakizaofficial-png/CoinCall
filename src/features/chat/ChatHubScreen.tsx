@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../context/AppContext';
+import { useAuth } from '../../context/AuthContext';
 import { useLiveStudio } from '../../context/LiveStudioContext';
 import {
   fetchActiveUsers,
@@ -60,6 +61,8 @@ export function ChatHubScreen({ navigation }: { navigation: any }) {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const { user } = useApp();
+  const { user: authUser } = useAuth();
+  const hostId = authUser?.id || user.id;
   const { contactAdminSupport, rechargeUsers } = useLiveStudio();
 
   const [inbox, setInbox] = useState<InboxNotification[]>([]);
@@ -73,33 +76,33 @@ export function ChatHubScreen({ navigation }: { navigation: any }) {
   const [systemOpen, setSystemOpen] = useState(false);
 
   useEffect(() => {
-    return listenHostNotifications(user.id, setInbox);
-  }, [user.id]);
+    return listenHostNotifications(hostId, setInbox);
+  }, [hostId]);
 
   useEffect(() => {
     const load = () => {
       void fetchRechargeBoard().then((b) => setRechargeEvents(b.events || []));
       void fetchActiveUsers().then((u) => setActiveCount(u.length));
-      void fetchDmThreadsForHost(user.id).then(setDmThreads);
+      void fetchDmThreadsForHost(hostId).then(setDmThreads);
     };
     load();
     const t = setInterval(load, 5_000);
     return () => clearInterval(t);
-  }, [user.id]);
+  }, [hostId]);
 
   useEffect(() => {
     let unsub: (() => void) | undefined;
     void import('../../services/realtimeWs').then(({ subscribeRealtime }) => {
       unsub = subscribeRealtime((event) => {
         if (event.type === 'dm:message') {
-          void fetchDmThreadsForHost(user.id).then(setDmThreads);
+          void fetchDmThreadsForHost(hostId).then(setDmThreads);
           const p = event.payload as {
             message?: { fromName?: string; text?: string; fromId?: string };
             thread?: { hostId?: string };
           };
-          if (p?.thread?.hostId && p.thread.hostId !== user.id) return;
+          if (p?.thread?.hostId && p.thread.hostId !== hostId) return;
           if (p?.message?.text) {
-            void pushHostNotification(user.id, {
+            void pushHostNotification(hostId, {
               type: 'chat',
               title: 'New message',
               body: `${p.message.fromName || 'Fan'}: ${String(p.message.text).slice(0, 80)}`,
@@ -112,7 +115,7 @@ export function ChatHubScreen({ navigation }: { navigation: any }) {
           const p = event.payload as { event?: RechargeEvent };
           if (p?.event) {
             setRechargeEvents((prev) => [p.event!, ...prev].slice(0, 50));
-            void pushHostNotification(user.id, {
+            void pushHostNotification(hostId, {
               type: 'recharge',
               title: 'System information',
               body: `ID ${p.event.userId} user, recharge ${p.event.coins} coins`,
@@ -123,7 +126,7 @@ export function ChatHubScreen({ navigation }: { navigation: any }) {
       });
     });
     return () => unsub?.();
-  }, [user.id]);
+  }, [hostId]);
 
   const systemUnread = useMemo(() => {
     const fromInbox = inbox.filter((i) => i.type === 'recharge' && !i.read).length;
@@ -161,13 +164,13 @@ export function ChatHubScreen({ navigation }: { navigation: any }) {
     setSending(true);
     try {
       const sent = await massTextAllActiveUsers({
-        hostId: user.id,
+        hostId,
         hostName: user.name,
         text,
       });
       setLastSent(sent);
       setMassText('');
-      await pushHostNotification(user.id, {
+      await pushHostNotification(hostId, {
         type: 'mass',
         title: 'Mass texting',
         body: `Sent to ${sent} users: ${text.slice(0, 60)}`,
@@ -243,7 +246,7 @@ export function ChatHubScreen({ navigation }: { navigation: any }) {
             <Pressable
               key={t.id}
               onPress={() =>
-                navigation.navigate('Chat', {
+                navigation.navigate('DirectChat', {
                   peerId: t.userId,
                   peerName: t.userName,
                   peerAvatar: t.userAvatar,
