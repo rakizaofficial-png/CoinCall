@@ -1,12 +1,12 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
-  Flag,
   Gift,
   Mic,
   MicOff,
   PhoneOff,
   Signal,
   Sparkles,
+  SwitchCamera,
   Video,
   VideoOff,
 } from 'lucide-react-native';
@@ -19,14 +19,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import Animated, {
-  useAnimatedStyle,
-  useSharedValue,
-  withRepeat,
-  withTiming,
-} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Avatar } from '../../components/ui/Avatar';
 import { IconButton } from '../../components/ui/IconButton';
 import { useApp } from '../../context/AppContext';
 import { GIFT_CATALOG } from '../../data/gifts';
@@ -40,13 +33,13 @@ import {
   setAgoraMuted,
   startAgoraCall,
   stopAgoraCall,
+  switchAgoraCamera,
 } from '../../services/agoraService';
 import { endBridgeCall, fetchCallToken } from '../../services/callBridge';
 import {
   type GiftRequest,
   listenGiftRequestEvents,
   requestGiftFromUser,
-  respondToGiftRequest,
 } from '../../services/giftRequestService';
 import {
   endActiveCall,
@@ -55,11 +48,10 @@ import {
 } from '../../services/realtimeService';
 import { radii } from '../../theme/colors';
 import { useTheme } from '../../theme/ThemeContext';
-import { notify, promptChoices } from '../../utils/notify';
+import { notify } from '../../utils/notify';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Call'>;
 
-const REACTIONS = ['❤️', '🔥', '👏', '😍', '✨', '🎉'];
 const BEAUTY_CYCLE: BeautyPreset[] = ['snap', 'glamour', 'natural', 'off'];
 
 function nextBeauty(current: BeautyPreset): BeautyPreset {
@@ -74,6 +66,7 @@ function formatTime(totalSeconds: number) {
   const s = (totalSeconds % 60).toString().padStart(2, '0');
   return `${m}:${s}`;
 }
+
 
 function waitForEl(
   getter: () => HTMLElement | null,
@@ -98,22 +91,10 @@ function waitForEl(
   });
 }
 
-function MicPulse({ active }: { active: boolean }) {
-  const scale = useSharedValue(1);
-  useEffect(() => {
-    scale.value = active
-      ? withRepeat(withTiming(1.18, { duration: 700 }), -1, true)
-      : withTiming(1, { duration: 200 });
-  }, [active, scale]);
-  const style = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
-  return <Animated.View style={[styles.micPulse, style]} />;
-}
-
 export function CallScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
-  const { getHost, call, endCall, user, reportUser, beautyOn } =
-    useApp();
+  const { getHost, call, endCall, user, beautyOn } = useApp();
   const bridgeCallId = route.params.bridgeCallId;
   const isBridge = Boolean(bridgeCallId);
   const peerHost = !isBridge ? getHost(route.params.hostId) : undefined;
@@ -132,7 +113,6 @@ export function CallScreen({ navigation, route }: Props) {
   const [bridgeSeconds, setBridgeSeconds] = useState(0);
   const [bridgeCoins, setBridgeCoins] = useState(rate);
   const [surfacesReady, setSurfacesReady] = useState(false);
-  const [reaction, setReaction] = useState<string | null>(null);
   const [netQuality] = useState<'Excellent' | 'Good' | 'Fair'>('Good');
   const [beautyPreset, setBeautyPreset] = useState<BeautyPreset>(
     beautyOn ? 'snap' : 'off',
@@ -275,12 +255,6 @@ export function CallScreen({ navigation, route }: Props) {
   ]);
 
   useEffect(() => {
-    if (!reaction) return;
-    const t = setTimeout(() => setReaction(null), 1600);
-    return () => clearTimeout(t);
-  }, [reaction]);
-
-  useEffect(() => {
     if (!bridgeCallId) return;
     return listenGiftRequestEvents(bridgeCallId, (type, gift) => {
       if (type === 'gift:accepted') {
@@ -326,30 +300,9 @@ export function CallScreen({ navigation, route }: Props) {
     }
   };
 
-  /** Demo: simulate user accept from host (dev / when user app not open) */
-  const demoAcceptAsUser = async () => {
-    if (!bridgeCallId || !pendingGiftReq) return;
-    setGiftBusy(true);
-    try {
-      const result = await respondToGiftRequest({
-        callId: bridgeCallId,
-        requestId: pendingGiftReq.id,
-        action: 'accept',
-        userId: pendingGiftReq.userId,
-      });
-      setPendingGiftReq(null);
-      setGiftBurst(`${result.giftEmoji} ${result.giftName}`);
-      setTimeout(() => setGiftBurst(null), 2800);
-    } catch (e) {
-      notify('Accept failed', e instanceof Error ? e.message : 'Try again');
-    } finally {
-      setGiftBusy(false);
-    }
-  };
-
+  /** Gift accept comes from the user app */
   const displaySeconds = isBridge ? bridgeSeconds : call?.seconds ?? 0;
   const displayCoins = isBridge ? bridgeCoins : call?.coinsSpent ?? 0;
-
   const minutesEarned = useMemo(() => {
     return Math.floor(displayCoins / (rate || 1));
   }, [displayCoins, rate]);
@@ -398,54 +351,26 @@ export function CallScreen({ navigation, route }: Props) {
 
       <View style={[styles.overlay, { backgroundColor: colors.overlay }]} pointerEvents="none" />
 
-      <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
-        <View style={[styles.timerPill, { backgroundColor: colors.glass, borderColor: colors.glassBorder }]}>
-          <View style={[styles.liveDot, { backgroundColor: colors.danger }]} />
-          <Text style={styles.timer}>{formatTime(displaySeconds)}</Text>
+      <View style={[styles.topBar, { paddingTop: insets.top + 10 }]}>
+        <View style={styles.topRow}>
+          <View style={styles.timerPill}>
+            <View style={styles.liveDot} />
+            <Text style={styles.timer}>{formatTime(displaySeconds)}</Text>
+          </View>
+          <View style={styles.netPill}>
+            <Signal size={13} color={netColor} />
+            <Text style={[styles.netText, { color: netColor }]}>{netQuality}</Text>
+          </View>
         </View>
-
-        <View style={[styles.netPill, { backgroundColor: colors.glass, borderColor: colors.glassBorder }]}>
-          <Signal size={14} color={netColor} />
-          <Text style={[styles.netText, { color: netColor }]}>{netQuality}</Text>
-        </View>
-
         <Text style={styles.peer}>{peerName}</Text>
-        <Text style={[styles.coins, { color: colors.accent }]}>
-          {isBridge ? 'User call' : 'Earned'} {displayCoins} · {rate}/min
+        <Text style={styles.coins}>
+          {displayCoins} coins · {rate}/min
           {minutesEarned ? ` · ~${minutesEarned}m` : ''}
         </Text>
-        <Text style={[styles.videoStatus, { color: colors.primarySoft }]}>
-          {agoraReady ? videoStatus : 'Connecting video…'}
-        </Text>
       </View>
 
-      {/* Large participant avatars / local preview */}
-      <View style={styles.participants}>
-        <View style={styles.participantCard}>
-          <Avatar uri={peerAvatar} size={72} online />
-          <Text style={styles.participantName} numberOfLines={1}>
-            {peerName}
-          </Text>
-        </View>
-        <View style={styles.participantCard}>
-          <Avatar uri={user.avatarUrl} size={72} online ring />
-          <Text style={styles.participantName} numberOfLines={1}>
-            You
-          </Text>
-          {!muted ? <MicPulse active /> : null}
-        </View>
-      </View>
-
-      <View
-        style={[
-          styles.localPreview,
-          cameraOff && { backgroundColor: '#121826' },
-          {
-            borderColor:
-              beautyPreset === 'off' ? colors.glassBorder : 'rgba(255,182,220,0.85)',
-          },
-        ]}
-      >
+      {/* PiP self-view */}
+      <View style={[styles.localPreview, cameraOff && { backgroundColor: '#121826' }]}>
         {agoraReady ? (
           <div
             ref={(el: HTMLDivElement | null) => {
@@ -463,22 +388,16 @@ export function CallScreen({ navigation, route }: Props) {
         ) : (
           <Image
             source={{ uri: user.avatarUrl }}
-            style={{ width: '100%', height: '100%', borderRadius: 18 }}
+            style={{ width: '100%', height: '100%', borderRadius: 16 }}
           />
         )}
-        <View style={styles.beautyBadge}>
-          <Sparkles size={10} color="#fff" />
-          <Text style={styles.beautyBadgeText}>
-            {beautyPreset === 'off' ? 'Raw' : beautyPreset}
-          </Text>
-        </View>
+        {beautyPreset !== 'off' ? (
+          <View style={styles.beautyBadge}>
+            <Sparkles size={10} color="#fff" />
+            <Text style={styles.beautyBadgeText}>{beautyPreset}</Text>
+          </View>
+        ) : null}
       </View>
-
-      {reaction ? (
-        <View style={styles.reactionBurst} pointerEvents="none">
-          <Text style={styles.reactionEmoji}>{reaction}</Text>
-        </View>
-      ) : null}
 
       {giftBurst ? (
         <View style={styles.giftBurst} pointerEvents="none">
@@ -488,46 +407,14 @@ export function CallScreen({ navigation, route }: Props) {
       ) : null}
 
       {pendingGiftReq?.status === 'pending' ? (
-        <View style={[styles.pendingBanner, { bottom: insets.bottom + 168 }]}>
+        <View style={[styles.pendingBanner, { bottom: insets.bottom + 110 }]}>
           <Text style={styles.pendingText}>
-            Waiting for {peerName} to send {pendingGiftReq.giftEmoji}{' '}
-            {pendingGiftReq.giftName}…
+            Waiting for {peerName} · {pendingGiftReq.giftEmoji} {pendingGiftReq.giftName}
           </Text>
-          {__DEV__ ? (
-            <Pressable onPress={() => void demoAcceptAsUser()} style={styles.demoAccept}>
-              <Text style={styles.demoAcceptText}>
-                {giftBusy ? '…' : 'Demo: user accepts'}
-              </Text>
-            </Pressable>
-          ) : null}
         </View>
       ) : null}
 
-      <View style={[styles.reactions, { bottom: insets.bottom + 128 }]}>
-        {REACTIONS.map((e) => (
-          <Pressable
-            key={e}
-            accessibilityRole="button"
-            accessibilityLabel={`React ${e}`}
-            hitSlop={6}
-            onPress={() => setReaction(e)}
-            style={[styles.reactionBtn, { backgroundColor: colors.glass, borderColor: colors.glassBorder }]}
-          >
-            <Text style={{ fontSize: 18 }}>{e}</Text>
-          </Pressable>
-        ))}
-      </View>
-
-      <View
-        style={[
-          styles.controlPanel,
-          {
-            paddingBottom: insets.bottom + 16,
-            backgroundColor: colors.glass,
-            borderColor: colors.glassBorder,
-          },
-        ]}
-      >
+      <View style={[styles.controlPanel, { paddingBottom: insets.bottom + 18 }]}>
         <IconButton
           icon={muted ? MicOff : Mic}
           label={muted ? 'Unmute' : 'Mute'}
@@ -553,12 +440,17 @@ export function CallScreen({ navigation, route }: Props) {
           }}
         />
         <IconButton
+          icon={SwitchCamera}
+          label="Flip"
+          onPress={() => void switchAgoraCamera()}
+        />
+        <IconButton
           icon={Gift}
-          label="Ask gift"
+          label="Gift"
           active={Boolean(pendingGiftReq)}
           onPress={() => {
             if (!isBridge) {
-              notify('Ask gift', 'Gift requests work on live user calls.');
+              notify('Gift', 'Gift requests work on live user calls.');
               return;
             }
             setGiftPickerOpen(true);
@@ -566,39 +458,15 @@ export function CallScreen({ navigation, route }: Props) {
         />
         <IconButton
           icon={Sparkles}
-          label={beautyPreset === 'off' ? 'Beauty' : beautyPreset}
+          label="Filter"
           active={beautyPreset !== 'off'}
           onPress={() => {
             const next = nextBeauty(beautyPreset);
             setBeautyPreset(next);
             void setAgoraBeauty(next);
-            notify(
-              'Beauty filter',
-              next === 'off'
-                ? 'Beauty off'
-                : next === 'snap'
-                  ? 'Snapchat · world beauty ON'
-                  : `${next} beauty ON`,
-            );
           }}
         />
-        <IconButton
-          icon={Flag}
-          label="Report"
-          onPress={() =>
-            promptChoices('Report', 'Reason?', [
-              {
-                label: 'Abuse',
-                onPress: () => reportUser(route.params.hostId, 'Abuse'),
-              },
-              {
-                label: 'Spam',
-                onPress: () => reportUser(route.params.hostId, 'Spam'),
-              },
-            ])
-          }
-        />
-        <IconButton icon={PhoneOff} label="Leave" danger onPress={hangUp} />
+        <IconButton icon={PhoneOff} label="End" danger onPress={hangUp} />
       </View>
 
       {giftPickerOpen ? (
@@ -650,7 +518,8 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   remote: { ...StyleSheet.absoluteFill, width: '100%', height: '100%' },
   overlay: { ...StyleSheet.absoluteFill },
-  topBar: { alignItems: 'center', zIndex: 2, gap: 8 },
+  topBar: { alignItems: 'center', zIndex: 2, gap: 6, paddingHorizontal: 16 },
+  topRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   timerPill: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -658,70 +527,36 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: radii.full,
-    borderWidth: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
   },
-  liveDot: { width: 8, height: 8, borderRadius: 4 },
-  timer: { color: '#fff', fontSize: 18, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#E11D48' },
+  timer: { color: '#fff', fontSize: 17, fontWeight: '800', fontVariant: ['tabular-nums'] },
   netPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 5,
     paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingVertical: 6,
     borderRadius: radii.full,
-    borderWidth: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
   },
-  netText: { fontSize: 12, fontWeight: '700' },
-  peer: { color: '#fff', fontWeight: '800', fontSize: 20 },
-  coins: { fontWeight: '700', fontSize: 13 },
-  videoStatus: {
-    fontSize: 12,
-    fontWeight: '600',
-    textAlign: 'center',
-    paddingHorizontal: 20,
-  },
-  participants: {
-    position: 'absolute',
-    top: '28%',
-    left: 20,
-    right: 20,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 28,
-    zIndex: 2,
-  },
-  participantCard: { alignItems: 'center', width: 96 },
-  participantName: {
-    color: '#fff',
-    marginTop: 8,
-    fontWeight: '700',
-    fontSize: 13,
-  },
-  micPulse: {
-    position: 'absolute',
-    bottom: -4,
-    width: 84,
-    height: 84,
-    borderRadius: 42,
-    borderWidth: 2,
-    borderColor: 'rgba(108,124,255,0.55)',
-  },
+  netText: { fontSize: 11, fontWeight: '700' },
+  peer: { color: '#fff', fontWeight: '800', fontSize: 18 },
+  coins: { color: 'rgba(255,255,255,0.75)', fontWeight: '600', fontSize: 12 },
   localPreview: {
     position: 'absolute',
     right: 14,
-    top: 140,
-    width: 86,
-    height: 118,
-    borderRadius: 20,
+    top: 120,
+    width: 100,
+    height: 140,
+    borderRadius: 18,
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.35)',
     zIndex: 3,
-    shadowColor: '#FF8DC7',
-    shadowOpacity: 0.55,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
+    backgroundColor: '#0a0c14',
   },
   beautyBadge: {
     position: 'absolute',
@@ -730,7 +565,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
-    backgroundColor: 'rgba(255,105,180,0.75)',
+    backgroundColor: 'rgba(108,124,255,0.85)',
     paddingHorizontal: 7,
     paddingVertical: 3,
     borderRadius: 10,
@@ -741,30 +576,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     textTransform: 'capitalize',
   },
-  reactions: {
-    position: 'absolute',
-    left: 12,
-    right: 12,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 8,
-    zIndex: 4,
-  },
-  reactionBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-  },
-  reactionBurst: {
-    ...StyleSheet.absoluteFill,
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 5,
-  },
-  reactionEmoji: { fontSize: 72 },
   giftBurst: {
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
@@ -777,64 +588,52 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 16,
     right: 16,
-    backgroundColor: 'rgba(245,193,76,0.92)',
+    backgroundColor: 'rgba(245,193,76,0.95)',
     borderRadius: 14,
     padding: 12,
     zIndex: 5,
     alignItems: 'center',
-    gap: 8,
   },
   pendingText: { color: '#1a1200', fontWeight: '800', textAlign: 'center', fontSize: 13 },
-  demoAccept: {
-    backgroundColor: 'rgba(0,0,0,0.2)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 10,
+  controlPanel: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    paddingTop: 14,
+    paddingHorizontal: 8,
+    backgroundColor: 'rgba(5,7,15,0.72)',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.12)',
+    zIndex: 4,
   },
-  demoAcceptText: { color: '#1a1200', fontWeight: '900', fontSize: 12 },
   giftSheet: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: '#121826',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 16,
+    backgroundColor: 'rgba(12,10,18,0.97)',
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    padding: 18,
     paddingBottom: 36,
     zIndex: 20,
   },
-  giftSheetTitle: { color: '#fff', fontWeight: '900', fontSize: 18 },
-  giftSheetSub: { color: 'rgba(255,255,255,0.6)', marginTop: 4, marginBottom: 12, fontSize: 12 },
+  giftSheetTitle: { color: '#fff', fontSize: 18, fontWeight: '900', marginBottom: 4 },
+  giftSheetSub: { color: 'rgba(255,255,255,0.55)', marginBottom: 14, fontSize: 13 },
   giftGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   giftItem: {
-    width: '22%',
+    width: '30%',
     alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.06)',
     borderRadius: 14,
-    paddingVertical: 10,
+    paddingVertical: 12,
   },
   giftEmoji: { fontSize: 28 },
-  giftName: { color: '#fff', fontSize: 11, fontWeight: '700', marginTop: 4 },
-  giftCoins: { color: '#F5C14C', fontSize: 11, fontWeight: '800' },
-  giftClose: {
-    color: '#9B8CFF',
-    textAlign: 'center',
-    marginTop: 14,
-    fontWeight: '800',
-  },
-  controlPanel: {
-    position: 'absolute',
-    left: 12,
-    right: 12,
-    bottom: 0,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingTop: 14,
-    paddingHorizontal: 8,
-    borderTopLeftRadius: radii.xl,
-    borderTopRightRadius: radii.xl,
-    borderWidth: 1,
-    zIndex: 4,
-  },
+  giftName: { color: '#fff', fontWeight: '700', fontSize: 12, marginTop: 4 },
+  giftCoins: { color: '#F5C14C', fontWeight: '800', fontSize: 11, marginTop: 2 },
+  giftClose: { color: '#9B8CFF', textAlign: 'center', marginTop: 16, fontWeight: '800' },
 });

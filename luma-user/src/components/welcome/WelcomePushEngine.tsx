@@ -25,8 +25,8 @@ export function WelcomePushEngine() {
     hardDisconnectTeaser,
   } = useWelcomePushCall({ enabled: onHome });
 
-  // Once funnel starts, keep overlays even if path flickers; hide only when idle/done
-  if (phase === "IDLE" || phase === "DONE") return null;
+  // Once funnel starts, keep overlays even if path flickers; hide only when idle
+  if (phase === "IDLE") return null;
 
   return (
     <>

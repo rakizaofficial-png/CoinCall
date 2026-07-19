@@ -11,37 +11,28 @@ import {
   stopWelcomeRingTone,
 } from "@/lib/welcomePush/ringtone";
 
-function hasSeenWelcomePush(): boolean {
-  if (typeof window === "undefined") return true;
-  try {
-    return localStorage.getItem(WELCOME_PUSH_CONFIG.storageKey) === "1";
-  } catch {
-    return false;
-  }
-}
-
-function markWelcomePushSeen() {
-  try {
-    localStorage.setItem(WELCOME_PUSH_CONFIG.storageKey, "1");
-  } catch {
-    /* ignore */
-  }
-}
-
 /**
- * Lifecycle engine:
- * IDLE → (3s after first home load) → INCOMING_CALL
- *      → Accept → TEASER_PLAYING (3.5s hard cut) → PAYWALL_BOOST → DONE
+ * Lifecycle:
+ * IDLE → INCOMING_CALL (mobile ringtone, max 30s)
+ *      → Accept → TEASER → PAYWALL → DONE (then schedule next in 3 min)
+ *      → Reject / timeout 30s → IDLE (schedule next in 3 min)
+ *
+ * Repeats every 3 minutes while user is on home.
  */
 export function useWelcomePushCall(opts: { enabled: boolean }) {
   const [phase, setPhase] = useState<WelcomePushPhase>("IDLE");
   const [offerLeft, setOfferLeft] = useState<number>(
     WELCOME_PUSH_CONFIG.offerSeconds,
   );
-  const launched = useRef(false);
   const teaserTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const offerTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ringTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const repeatTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const phaseRef = useRef<WelcomePushPhase>("IDLE");
+
+  useEffect(() => {
+    phaseRef.current = phase;
+  }, [phase]);
 
   const clearTimers = useCallback(() => {
     if (teaserTimer.current) {
@@ -52,41 +43,65 @@ export function useWelcomePushCall(opts: { enabled: boolean }) {
       clearInterval(offerTimer.current);
       offerTimer.current = null;
     }
-    if (settleTimer.current) {
-      clearTimeout(settleTimer.current);
-      settleTimer.current = null;
+    if (ringTimer.current) {
+      clearTimeout(ringTimer.current);
+      ringTimer.current = null;
     }
     stopWelcomeRingTone();
   }, []);
 
-  // Auto-trigger exactly 3s after home dashboard is ready (first session only)
+  const scheduleNext = useCallback(
+    (delayMs: number) => {
+      if (repeatTimer.current) clearTimeout(repeatTimer.current);
+      repeatTimer.current = setTimeout(() => {
+        if (!opts.enabled) return;
+        if (phaseRef.current !== "IDLE" && phaseRef.current !== "DONE") return;
+        setPhase("INCOMING_CALL");
+        startWelcomeRingTone();
+      }, delayMs);
+    },
+    [opts.enabled],
+  );
+
+  // First call + recurring every 3 minutes while on home
   useEffect(() => {
-    if (!opts.enabled) return;
-    if (launched.current) return;
-    if (hasSeenWelcomePush()) return;
-    launched.current = true;
-
-    settleTimer.current = setTimeout(() => {
-      setPhase("INCOMING_CALL");
-      startWelcomeRingTone();
-    }, WELCOME_PUSH_CONFIG.launchDelayMs);
-
+    if (!opts.enabled) {
+      clearTimers();
+      if (repeatTimer.current) clearTimeout(repeatTimer.current);
+      setPhase("IDLE");
+      return;
+    }
+    scheduleNext(WELCOME_PUSH_CONFIG.launchDelayMs);
     return () => {
-      if (settleTimer.current) {
-        clearTimeout(settleTimer.current);
-        settleTimer.current = null;
+      clearTimers();
+      if (repeatTimer.current) clearTimeout(repeatTimer.current);
+    };
+  }, [opts.enabled, clearTimers, scheduleNext]);
+
+  // Ringtone + auto-dismiss after 30s
+  useEffect(() => {
+    if (phase !== "INCOMING_CALL") {
+      stopWelcomeRingTone();
+      if (ringTimer.current) {
+        clearTimeout(ringTimer.current);
+        ringTimer.current = null;
+      }
+      return;
+    }
+    startWelcomeRingTone();
+    ringTimer.current = setTimeout(() => {
+      stopWelcomeRingTone();
+      setPhase("IDLE");
+      scheduleNext(WELCOME_PUSH_CONFIG.repeatEveryMs);
+    }, WELCOME_PUSH_CONFIG.ringDurationMs);
+    return () => {
+      stopWelcomeRingTone();
+      if (ringTimer.current) {
+        clearTimeout(ringTimer.current);
+        ringTimer.current = null;
       }
     };
-  }, [opts.enabled]);
-
-  // Keep ringing while incoming is visible
-  useEffect(() => {
-    if (phase === "INCOMING_CALL") {
-      startWelcomeRingTone();
-      return () => stopWelcomeRingTone();
-    }
-    stopWelcomeRingTone();
-  }, [phase]);
+  }, [phase, scheduleNext]);
 
   // Paywall FOMO countdown
   useEffect(() => {
@@ -110,29 +125,31 @@ export function useWelcomePushCall(opts: { enabled: boolean }) {
 
   const rejectIncoming = useCallback(() => {
     stopWelcomeRingTone();
-    markWelcomePushSeen();
-    setPhase("DONE");
-  }, []);
+    setPhase("IDLE");
+    scheduleNext(WELCOME_PUSH_CONFIG.repeatEveryMs);
+  }, [scheduleNext]);
 
   const acceptIncoming = useCallback(() => {
     stopWelcomeRingTone();
+    if (ringTimer.current) {
+      clearTimeout(ringTimer.current);
+      ringTimer.current = null;
+    }
     setPhase("TEASER_PLAYING");
     teaserTimer.current = setTimeout(() => {
       setPhase("PAYWALL_BOOST");
-      markWelcomePushSeen();
     }, WELCOME_PUSH_CONFIG.teaserCutMs);
   }, []);
 
   const closePaywall = useCallback(() => {
     clearTimers();
-    markWelcomePushSeen();
-    setPhase("DONE");
-  }, [clearTimers]);
+    setPhase("IDLE");
+    scheduleNext(WELCOME_PUSH_CONFIG.repeatEveryMs);
+  }, [clearTimers, scheduleNext]);
 
   const hardDisconnectTeaser = useCallback(() => {
     if (teaserTimer.current) clearTimeout(teaserTimer.current);
     setPhase("PAYWALL_BOOST");
-    markWelcomePushSeen();
   }, []);
 
   return {

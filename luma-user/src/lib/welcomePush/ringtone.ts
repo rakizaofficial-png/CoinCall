@@ -1,5 +1,6 @@
 /**
- * Louder smartphone-style ring + vibrate for Welcome Push incoming lure.
+ * Classic mobile ringtone for Luma incoming lure / connecting.
+ * Dual-tone 440+480 Hz · 2s on · 4s off (phone-like).
  */
 
 let ctx: AudioContext | null = null;
@@ -17,48 +18,50 @@ function getCtx() {
   return ctx;
 }
 
-function tone(durationMs: number, freq: number, volume: number) {
+function dualTone(durationSec: number) {
   const audio = getCtx();
   if (!audio) return;
-  const osc = audio.createOscillator();
-  const gain = audio.createGain();
-  osc.type = "square";
-  osc.frequency.value = freq;
-  gain.gain.value = volume;
-  osc.connect(gain);
-  gain.connect(audio.destination);
   const now = audio.currentTime;
-  gain.gain.setValueAtTime(volume, now);
-  gain.gain.exponentialRampToValueAtTime(0.001, now + durationMs / 1000);
-  osc.start(now);
-  osc.stop(now + durationMs / 1000 + 0.02);
+  const master = audio.createGain();
+  master.gain.value = 0.0001;
+  master.connect(audio.destination);
+
+  for (const freq of [440, 480]) {
+    const osc = audio.createOscillator();
+    osc.type = "sine";
+    osc.frequency.value = freq;
+    osc.connect(master);
+    osc.start(now);
+    osc.stop(now + durationSec + 0.02);
+  }
+
+  master.gain.exponentialRampToValueAtTime(0.2, now + 0.04);
+  master.gain.setValueAtTime(0.2, now + durationSec - 0.08);
+  master.gain.exponentialRampToValueAtTime(0.0001, now + durationSec);
 }
 
-function vibratePulse() {
+function vibrate() {
   try {
     if (typeof navigator !== "undefined" && navigator.vibrate) {
-      navigator.vibrate([220, 100, 220, 100, 400]);
+      navigator.vibrate([400, 200, 400, 200, 400, 2000]);
     }
   } catch {
     /* ignore */
   }
 }
 
-/** Aggressive ring pattern — incoming smartphone feel */
+function pulse() {
+  vibrate();
+  dualTone(2.0);
+}
+
 export function startWelcomeRingTone() {
   stopWelcomeRingTone();
   const audio = getCtx();
   if (!audio) return;
   void audio.resume();
-
-  const pulse = () => {
-    vibratePulse();
-    tone(280, 520, 0.09);
-    window.setTimeout(() => tone(280, 620, 0.08), 300);
-    window.setTimeout(() => tone(180, 480, 0.07), 650);
-  };
   pulse();
-  timer = setInterval(pulse, 1800);
+  timer = setInterval(pulse, 6000);
 }
 
 export function stopWelcomeRingTone() {
@@ -73,4 +76,13 @@ export function stopWelcomeRingTone() {
   } catch {
     /* ignore */
   }
+}
+
+/** Alias used by connecting / handshake screens */
+export function startRingingTone() {
+  startWelcomeRingTone();
+}
+
+export function stopRingingTone() {
+  stopWelcomeRingTone();
 }

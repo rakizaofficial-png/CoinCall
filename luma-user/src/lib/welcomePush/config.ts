@@ -70,11 +70,15 @@ export const WELCOME_PAYWALL_TIERS: WelcomePaywallTier[] = [
 ];
 
 export const WELCOME_PUSH_CONFIG = {
-  /** Settle-in delay after home loads before incoming modal */
-  launchDelayMs: 3000,
+  /** First lure after home loads */
+  launchDelayMs: 8_000,
+  /** Then repeat every 3 minutes */
+  repeatEveryMs: 3 * 60_000,
+  /** Incoming modal + ringtone auto-end after 30 seconds */
+  ringDurationMs: 30_000,
   /** Teaser hard-cut timestamp */
   teaserCutMs: 3500,
   /** Paywall FOMO countdown */
   offerSeconds: 59,
-  storageKey: "luma_welcome_push_v1",
+  storageKey: "luma_welcome_push_v2",
 } as const;
