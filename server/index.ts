@@ -9,6 +9,7 @@ import {
   assertHostCanReceiveCalls,
   getHost,
   listHosts,
+  recordHostEarning,
   registerHostManagementRoutes,
 } from './hostManagement.ts';
 import { isPublicHttpAvatar, pickHostAvatarUrl } from './hostAvatar.ts';
@@ -718,6 +719,13 @@ app.post('/api/calls/:id/minute', (req, res) => {
   calls.set(call.id, call);
   persist();
 
+  recordHostEarning(call.hostId, amount, {
+    kind: 'call',
+    coinBalance: hostWallet.coinBalance,
+    incrementCalls: call.billedMinutes === 1,
+    broadcast: broadcastWs,
+  });
+
   broadcastWs({
     type: 'wallet:updated',
     payload: { userId, coinBalance: userWallet.coinBalance, xp: userWallet.xp },
@@ -1001,6 +1009,12 @@ app.post('/api/calls/:id/gift-requests/:reqId/respond', (req, res) => {
   wallets.set(call.hostId, hostWallet);
   pushLedger(call.hostId, gr.coins, `gift_from_${userId}_${gr.giftId}`, 'credit');
 
+  recordHostEarning(call.hostId, gr.coins, {
+    kind: 'gift',
+    coinBalance: hostWallet.coinBalance,
+    broadcast: broadcastWs,
+  });
+
   gr.status = 'accepted';
   gr.updatedAt = Date.now();
   call.giftRequest = gr;
@@ -1083,6 +1097,12 @@ app.post('/api/gifts/send', (req, res) => {
   hostWallet.xp += catalog.coins;
   wallets.set(hostId, hostWallet);
   pushLedger(hostId, catalog.coins, `gift_from_${userId}_${giftId}`, 'credit');
+
+  recordHostEarning(hostId, catalog.coins, {
+    kind: 'gift',
+    coinBalance: hostWallet.coinBalance,
+    broadcast: broadcastWs,
+  });
 
   const giftEvent = {
     id: randomUUID().slice(0, 10),
@@ -1792,6 +1812,17 @@ app.post('/api/wallet/credit', (req, res) => {
   wallets.set(userId, row);
   pushLedger(userId, floored, reason, 'credit');
   const reasonLower = reason.toLowerCase();
+  // Live call/gift paths already call recordHostEarning — avoid double-count on call_end sync
+  if (
+    /host_earn/.test(reasonLower) &&
+    !/call_end|call_earn_|gift_from_|call_minute/.test(reasonLower)
+  ) {
+    recordHostEarning(userId, floored, {
+      kind: 'other',
+      coinBalance: row.coinBalance,
+      broadcast: broadcastWs,
+    });
+  }
   const isRecharge =
     reasonLower.includes('iap') ||
     reasonLower.includes('recharge') ||

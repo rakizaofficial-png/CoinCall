@@ -168,7 +168,7 @@ export function AgenciesPanel({
                 <th>Cut</th>
                 <th>Month</th>
                 <th>Total</th>
-                {!limited ? <th>Manage</th> : null}
+                {!limited ? <th>Lifecycle</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -192,13 +192,37 @@ export function AgenciesPanel({
                   <td>{a.revenueTotal.toLocaleString()}</td>
                   {!limited ? (
                     <td>
-                      <button
-                        type="button"
-                        className="btn-pink"
-                        onClick={() => openManage(a)}
-                      >
-                        Manage
-                      </button>
+                      <div className="desk-row-actions">
+                        <button
+                          type="button"
+                          className={
+                            a.status === 'active' ? 'btn-gold' : 'btn-green'
+                          }
+                          onClick={() => void toggleStatus(a)}
+                        >
+                          {a.status === 'active'
+                            ? 'Suspend'
+                            : a.status === 'pending'
+                              ? 'Activate'
+                              : 'Activate'}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-ghost"
+                          onClick={() => openManage(a)}
+                        >
+                          Manage
+                        </button>
+                        {onOpenHosts ? (
+                          <button
+                            type="button"
+                            className="btn-ghost"
+                            onClick={onOpenHosts}
+                          >
+                            Hosts
+                          </button>
+                        ) : null}
+                      </div>
                     </td>
                   ) : null}
                 </tr>

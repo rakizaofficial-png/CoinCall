@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { HostRow } from '../api';
 import { connectAdminRealtime } from '../api';
 import {
@@ -76,6 +76,17 @@ function PresencePill({ bridge, online }: { bridge?: BridgeHostStatus; online?: 
   return <span className="badge none">Offline</span>;
 }
 
+function mergeServerHosts(
+  server: ManagedHost[],
+  optimistic: Map<string, Partial<ManagedHost>>,
+): ManagedHost[] {
+  if (!optimistic.size) return server;
+  return server.map((h) => {
+    const patch = optimistic.get(h.id);
+    return patch ? { ...h, ...patch } : h;
+  });
+}
+
 export function HostManagementPanel({
   firebaseHosts,
   agencyId,
@@ -111,10 +122,19 @@ export function HostManagementPanel({
     | { type: 'docs' | 'commission' | 'coins'; host: ManagedHost }
   >(null);
   const [formValue, setFormValue] = useState('');
+  const optimisticRef = useRef<Map<string, Partial<ManagedHost>>>(new Map());
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flash = (text: string) => {
+    setMsg(text);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setMsg(''), 2800);
+  };
 
   useEffect(() => {
     if (initialStatus) setStatus(initialStatus);
-  }, [initialStatus]);
+    else setStatus(agencyId ? 'all' : 'pending');
+  }, [agencyId, initialStatus]);
 
   const hosts = useMemo(() => {
     if (agencyId) return managed;
@@ -179,7 +199,7 @@ export function HostManagementPanel({
         sort,
         agencyId,
       });
-      setManaged(data.hosts || []);
+      setManaged(mergeServerHosts(data.hosts || [], optimisticRef.current));
       if (!agencyId) {
         const audit = await fetchAuditLogs(60);
         setLogs(audit.logs || []);
@@ -195,7 +215,7 @@ export function HostManagementPanel({
         setBridgeOnline(0);
       }
     } catch (e) {
-      setMsg(
+      flash(
         e instanceof Error
           ? e.message
           : 'Server sync failed — using Firebase only',
@@ -205,7 +225,7 @@ export function HostManagementPanel({
 
   useEffect(() => {
     void refreshServer();
-    const t = setInterval(() => void refreshServer(), 4000);
+    const t = setInterval(() => void refreshServer(), 3500);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [firebaseHosts.length, query, sort, agencyId]);
@@ -218,7 +238,9 @@ export function HostManagementPanel({
         type === 'live:room' ||
         type === 'live:ended' ||
         type === 'call:updated' ||
-        type === 'call:ended'
+        type === 'call:ended' ||
+        type === 'wallet:updated' ||
+        type === 'gift:received'
       ) {
         void refreshServer();
       }
@@ -226,6 +248,13 @@ export function HostManagementPanel({
     return () => off();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agencyId]);
+
+  useEffect(
+    () => () => {
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+    },
+    [],
+  );
 
   const markBusy = (id: string, on: boolean) => {
     setBusyIds((prev) => {
@@ -237,6 +266,8 @@ export function HostManagementPanel({
   };
 
   const patchLocal = (id: string, patch: Partial<ManagedHost>) => {
+    const prevOpt = optimisticRef.current.get(id) || {};
+    optimisticRef.current.set(id, { ...prevOpt, ...patch });
     setManaged((prev) => {
       const exists = prev.some((h) => h.id === id);
       if (!exists) {
@@ -247,6 +278,10 @@ export function HostManagementPanel({
       return prev.map((h) => (h.id === id ? { ...h, ...patch } : h));
     });
     setDetail((d) => (d?.id === id ? { ...d, ...patch } : d));
+  };
+
+  const clearOptimistic = (id: string) => {
+    optimisticRef.current.delete(id);
   };
 
   const act = async (
@@ -264,7 +299,7 @@ export function HostManagementPanel({
     const next = NEXT_STATUS[action];
     const snapshot = host ? { ...host } : null;
 
-    // Optimistic UI — row leaves current filter immediately; no page reload
+    // Instant UI — no alert/confirm; row leaves current filter tab immediately
     if (next) {
       patchLocal(id, {
         hostStatus: next,
@@ -283,7 +318,6 @@ export function HostManagementPanel({
     }
 
     markBusy(id, true);
-    setMsg('');
     try {
       const result = await runHostAction(id, action, {
         ...extra,
@@ -300,17 +334,25 @@ export function HostManagementPanel({
         hostId: host?.hostId,
       });
       if (result.host) {
+        clearOptimistic(id);
         setManaged((prev) => {
           const others = prev.filter((h) => h.id !== id);
           return [...others, result.host];
         });
         if (detail?.id === id) setDetail(result.host);
+      } else {
+        clearOptimistic(id);
       }
-      setMsg(`${action.replace(/_/g, ' ')} · ${host?.name || id}`);
-      // Stay on current filter tab — row already moved out of this view
+      flash(`${action.replace(/_/g, ' ')} · ${host?.name || id}`);
     } catch (e) {
-      if (snapshot) patchLocal(id, snapshot);
-      setMsg(e instanceof Error ? e.message : 'Action failed');
+      clearOptimistic(id);
+      if (snapshot) {
+        setManaged((prev) =>
+          prev.map((h) => (h.id === id ? snapshot : h)),
+        );
+        setDetail((d) => (d?.id === id ? snapshot : d));
+      }
+      flash(e instanceof Error ? e.message : 'Action failed');
     } finally {
       markBusy(id, false);
     }
@@ -342,11 +384,13 @@ export function HostManagementPanel({
               ? 'Suspended by admin'
               : undefined,
       );
+      for (const id of ids) clearOptimistic(id);
       setSelected(new Set());
-      setMsg(`Bulk ${action} · ${ids.length} hosts`);
+      flash(`Bulk ${action} · ${ids.length} hosts`);
       await refreshServer();
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : 'Bulk failed');
+      for (const id of ids) clearOptimistic(id);
+      flash(e instanceof Error ? e.message : 'Bulk failed');
       await refreshServer();
     } finally {
       setBusyIds(new Set());
@@ -377,14 +421,14 @@ export function HostManagementPanel({
     } else if (type === 'commission') {
       const n = Number(formValue);
       if (!Number.isFinite(n)) {
-        setMsg('Invalid commission');
+        flash('Invalid commission');
         return;
       }
       await act(host.id, 'set_commission', { commissionRate: n });
     } else if (type === 'coins') {
       const n = Number(formValue);
       if (!Number.isFinite(n)) {
-        setMsg('Invalid coin balance');
+        flash('Invalid coin balance');
         return;
       }
       await act(host.id, 'set_coins', { coinBalance: n });
@@ -393,15 +437,8 @@ export function HostManagementPanel({
     setFormValue('');
   };
 
-  const defaultStatus = agencyId ? 'all' : 'pending';
-  useEffect(() => {
-    if (agencyId) setStatus('all');
-    else setStatus(defaultStatus);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agencyId]);
-
   return (
-    <div className="desk-root">
+    <div className="desk-root desk-root--wide">
       <div className="desk-header">
         <div>
           <h2>{title || (agencyId ? 'Agency hosts' : 'Host management')}</h2>
@@ -414,6 +451,7 @@ export function HostManagementPanel({
           <p className="sub desk-live-line">
             Live bridge · <strong>{bridgeOnline}</strong> online ·{' '}
             <strong>{bridgeReady}</strong> ready
+            {agencyId ? ' · your hosts only' : ''}
           </p>
         </div>
         <div className="desk-header-actions">
@@ -421,7 +459,7 @@ export function HostManagementPanel({
             <button
               type="button"
               className="btn-ghost"
-              onClick={() => void exportHostsCsv().catch((e) => setMsg(String(e)))}
+              onClick={() => void exportHostsCsv().catch((e) => flash(String(e)))}
             >
               Export CSV
             </button>
@@ -445,11 +483,13 @@ export function HostManagementPanel({
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search name, App ID, country…"
         />
-        <div className="desk-filters">
+        <div className="desk-filters" role="tablist" aria-label="Lifecycle filters">
           {STATUS_FILTERS.map((f) => (
             <button
               key={f}
               type="button"
+              role="tab"
+              aria-selected={status === f}
               className={`desk-tab ${status === f ? 'on' : ''}`}
               onClick={() => setStatus(f)}
             >
@@ -516,12 +556,12 @@ export function HostManagementPanel({
         </div>
       ) : null}
 
-      <div className={`desk-layout ${agencyId ? 'single' : ''}`}>
-        <div className="desk-table-wrap">
+      <div className={`desk-layout ${detail || !agencyId ? '' : 'single'}`}>
+        <div className="desk-table-wrap desk-table-wrap--enterprise">
           {filtered.length === 0 ? (
             <div className="empty-state">No hosts in this filter</div>
           ) : (
-            <table className="desk-table">
+            <table className="desk-table desk-table--enterprise">
               <thead>
                 <tr>
                   {canAct ? (
@@ -538,13 +578,13 @@ export function HostManagementPanel({
                     </th>
                   ) : null}
                   <th>Profile</th>
-                  <th>Host</th>
+                  <th>Host / User</th>
                   <th>App ID</th>
                   <th>Country</th>
                   <th>Status</th>
                   <th>Presence</th>
                   <th>Earnings</th>
-                  <th>Actions</th>
+                  <th>Lifecycle</th>
                 </tr>
               </thead>
               <tbody>
@@ -611,7 +651,8 @@ export function HostManagementPanel({
                             {(h.revenueGenerated || 0).toLocaleString()}
                           </strong>
                           <small>
-                            pend {(h.pendingEarnings || 0).toLocaleString()}
+                            pend {(h.pendingEarnings || 0).toLocaleString()} · bal{' '}
+                            {(h.coinBalance || 0).toLocaleString()}
                           </small>
                         </div>
                       </td>
@@ -643,6 +684,9 @@ export function HostManagementPanel({
                           ) : null}
                           {canAct && st === 'approved' ? (
                             <>
+                              <span className="badge solid approved desk-action-done">
+                                Approved
+                              </span>
                               <button
                                 type="button"
                                 className="btn-gold"
@@ -693,28 +737,14 @@ export function HostManagementPanel({
                               Re-approve
                             </button>
                           ) : null}
-                          {!canAct ||
-                          (!needsReview &&
-                            st !== 'approved' &&
-                            st !== 'suspended' &&
-                            st !== 'banned' &&
-                            st !== 'rejected') ? (
-                            <button
-                              type="button"
-                              className="btn-ghost"
-                              onClick={() => setDetail(h)}
-                            >
-                              View
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              className="btn-ghost"
-                              onClick={() => setDetail(h)}
-                            >
-                              Open
-                            </button>
-                          )}
+                          <button
+                            type="button"
+                            className="btn-ghost desk-icon-btn"
+                            onClick={() => setDetail(h)}
+                            title="Open profile"
+                          >
+                            Open
+                          </button>
                         </div>
                       </td>
                     </tr>

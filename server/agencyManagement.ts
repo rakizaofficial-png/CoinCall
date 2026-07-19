@@ -122,6 +122,21 @@ export function getAgencyIdForHost(hostId: string) {
   return hostAgency.get(hostId) || null;
 }
 
+/** Roll host earnings into the linked agency ledger (live agency panel). */
+export function creditAgencyRevenue(hostId: string, amount: number) {
+  const n = Math.floor(Number(amount) || 0);
+  if (!hostId || n <= 0) return null;
+  const agencyId = hostAgency.get(hostId);
+  if (!agencyId) return null;
+  const agency = agencies.get(agencyId);
+  if (!agency) return null;
+  agency.revenueTotal = (agency.revenueTotal || 0) + n;
+  agency.revenueMonth = (agency.revenueMonth || 0) + n;
+  agency.updatedAt = Date.now();
+  agencies.set(agencyId, agency);
+  return agency;
+}
+
 export function publicAgency(a: Agency) {
   const { loginKey: _k, ...rest } = a;
   return rest;

@@ -2042,3 +2042,159 @@ html[data-theme='dark'],
 .shell[data-theme='dark'] .brand-text strong {
   color: #fff;
 }
+
+/* ——— Enterprise desktop host/agency desk ——— */
+.desk-root--wide {
+  width: 100%;
+  max-width: none;
+}
+
+.desk-table-wrap--enterprise {
+  overflow: auto;
+  max-height: calc(100vh - 240px);
+  border-radius: 14px;
+}
+
+.desk-table--enterprise {
+  min-width: 1080px;
+  width: 100%;
+}
+
+.desk-table--enterprise th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: #f8fafc !important;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  padding: 12px 14px;
+}
+
+.desk-table--enterprise td {
+  padding: 12px 14px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.desk-row-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.desk-row-actions .btn-green,
+.desk-row-actions .btn-gold,
+.desk-row-actions .btn-red,
+.desk-row-actions .btn-ghost {
+  padding: 6px 10px;
+  font-size: 12px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+
+.desk-action-done {
+  font-size: 11px !important;
+  padding: 4px 8px !important;
+}
+
+.desk-host-inline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.desk-avatar-fallback.sm {
+  width: 32px;
+  height: 32px;
+  font-size: 12px;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #e5e7eb;
+  color: #374151;
+  font-weight: 700;
+}
+
+.desk-earn strong {
+  display: block;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.desk-earn small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.desk-app-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  background: #f3f4f6;
+  padding: 3px 8px;
+  border-radius: 6px;
+  color: #111827;
+}
+
+.desk-toast {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  margin-bottom: 10px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  color: #065f46;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Kill mobile card stacking for host desks on laptop widths */
+@media (min-width: 961px) {
+  .desk-root .hm-card,
+  .desk-root .agency-card,
+  .desk-root .card.hm-card {
+    display: none !important;
+  }
+
+  .desk-layout {
+    grid-template-columns: minmax(0, 1.85fr) minmax(300px, 0.85fr);
+  }
+
+  .desk-table-wrap--enterprise {
+    min-height: 420px;
+  }
+}
+
+.badge.solid.pending {
+  background: #fef3c7 !important;
+  color: #92400e !important;
+}
+
+.badge.solid.under_review {
+  background: #e0e7ff !important;
+  color: #3730a3 !important;
+}
+
+.badge.solid.rejected,
+.badge.solid.suspended {
+  background: #ffedd5 !important;
+  color: #9a3412 !important;
+}
+
+.badge.solid.banned {
+  background: #fee2e2 !important;
+  color: #991b1b !important;
+}
+
+.badge.none {
+  background: #f3f4f6 !important;
+  color: #6b7280 !important;
+}
+

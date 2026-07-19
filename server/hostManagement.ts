@@ -7,6 +7,7 @@
 import { randomUUID } from 'crypto';
 import type { Express, Request, Response } from 'express';
 import {
+  creditAgencyRevenue,
   getAgency,
   getAgencyIdForHost,
 } from './agencyManagement.ts';
@@ -206,6 +207,45 @@ export function getHost(id: string) {
 /** Alias used by the call bridge */
 export function getManagedHost(id: string) {
   return getHost(id);
+}
+
+/**
+ * Credit live earnings from host app activity (calls, gifts, wallet host_earn).
+ * Updates the managed ledger + linked agency totals for agency-panel isolation.
+ */
+export function recordHostEarning(
+  hostId: string,
+  amount: number,
+  opts?: {
+    kind?: 'call' | 'gift' | 'other';
+    coinBalance?: number;
+    incrementCalls?: boolean;
+    broadcast?: Broadcast;
+  },
+): HostManagedRecord | null {
+  const n = Math.floor(Number(amount) || 0);
+  if (!hostId || n <= 0) return null;
+  const row = ensureHostRecord(hostId);
+  row.revenueGenerated = (row.revenueGenerated || 0) + n;
+  row.pendingEarnings = (row.pendingEarnings || 0) + n;
+  if (opts?.incrementCalls) row.totalCalls = (row.totalCalls || 0) + 1;
+  if (typeof opts?.coinBalance === 'number' && Number.isFinite(opts.coinBalance)) {
+    row.coinBalance = Math.max(0, Math.floor(opts.coinBalance));
+  }
+  row.updatedAt = now();
+  registry.set(hostId, row);
+  creditAgencyRevenue(hostId, n);
+  opts?.broadcast?.({
+    type: 'host:updated',
+    payload: {
+      id: hostId,
+      revenueGenerated: row.revenueGenerated,
+      pendingEarnings: row.pendingEarnings,
+      coinBalance: row.coinBalance,
+      kind: opts?.kind || 'other',
+    },
+  });
+  return row;
 }
 
 /**
