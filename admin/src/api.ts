@@ -60,8 +60,9 @@ export async function adminLogin(key: string, role = 'super_admin') {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ key, role, adminId: `admin_${role}` }),
   });
-  if (!res.ok) throw new Error('Wrong admin key');
-  return res.json();
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Wrong admin key');
+  return data;
 }
 
 export function listenHosts(cb: (hosts: HostRow[]) => void) {

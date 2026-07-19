@@ -7,8 +7,17 @@ import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import {
   assertHostCanReceiveCalls,
+  listHosts,
   registerHostManagementRoutes,
 } from './hostManagement.ts';
+import {
+  getAgencyIdForHost,
+  getAgency,
+  findAgencyByLoginKey,
+  linkDemoHostsIfEmpty,
+  publicAgency,
+  registerAgencyRoutes,
+} from './agencyManagement.ts';
 import {
   computeReadyToCall,
   getPresence,
@@ -337,11 +346,9 @@ app.post('/api/calls', (req, res) => {
     res.status(404).json({ error: 'Host is offline. Ask them to Go Online in CoinCall.' });
     return;
   }
-  if (host.isOnCall || host.isLive || !host.readyToCall) {
+  if (host.isOnCall || !host.readyToCall) {
     res.status(409).json({
-      error: host.isLive
-        ? 'Host is live — try again when they are waiting for calls'
-        : 'Host is busy on another call',
+      error: 'Host is busy on another call',
     });
     return;
   }
@@ -627,17 +634,111 @@ app.post('/api/calls/:id/gift-requests/:reqId/respond', (req, res) => {
   res.json({ ok: true, giftRequest: gr, hostWallet: walletPublic(hostWallet), userWallet: walletPublic(userWallet) });
 });
 
+/** User sends a gift to a host during live or call (spend + credit + notify). */
+app.post('/api/gifts/send', (req, res) => {
+  const userId = String(req.body?.userId || '').trim();
+  const hostId = String(req.body?.hostId || '').trim();
+  const giftId = String(req.body?.giftId || '').trim();
+  const roomId = req.body?.roomId ? String(req.body.roomId).trim() : undefined;
+  const callId = req.body?.callId ? String(req.body.callId).trim() : undefined;
+  const userName = String(req.body?.userName || 'Fan').slice(0, 40);
+
+  if (!userId || !hostId || !giftId) {
+    res.status(400).json({ error: 'userId, hostId, giftId required' });
+    return;
+  }
+
+  const catalog = GIFT_CATALOG_SERVER[giftId];
+  if (!catalog) {
+    res.status(400).json({ error: 'Invalid giftId', gifts: Object.keys(GIFT_CATALOG_SERVER) });
+    return;
+  }
+
+  const userWallet = ensureWallet(userId, { displayName: userName, role: 'user' });
+  if (userWallet.coinBalance < catalog.coins) {
+    res.status(402).json({
+      error: 'Insufficient coins',
+      need: catalog.coins,
+      wallet: walletPublic(userWallet),
+    });
+    return;
+  }
+
+  userWallet.coinBalance -= catalog.coins;
+  userWallet.xp += catalog.coins;
+  wallets.set(userId, userWallet);
+  pushLedger(userId, catalog.coins, `gift_to_${hostId}_${giftId}`, 'spend');
+
+  const hostWallet = ensureWallet(hostId, { role: 'host' });
+  hostWallet.coinBalance += catalog.coins;
+  hostWallet.xp += catalog.coins;
+  wallets.set(hostId, hostWallet);
+  pushLedger(hostId, catalog.coins, `gift_from_${userId}_${giftId}`, 'credit');
+
+  const giftEvent = {
+    id: randomUUID().slice(0, 10),
+    roomId: roomId || null,
+    callId: callId || null,
+    fromUserId: userId,
+    fromName: userName,
+    toHostId: hostId,
+    giftId,
+    giftName: catalog.name,
+    giftEmoji: catalog.emoji,
+    coins: catalog.coins,
+    combo: 1,
+    createdAt: Date.now(),
+  };
+
+  if (roomId && liveRooms.has(roomId)) {
+    const room = liveRooms.get(roomId)!;
+    room.giftCoins = Number(room.giftCoins || 0) + catalog.coins;
+    room.updatedAt = Date.now();
+    liveRooms.set(roomId, room);
+  }
+
+  broadcastWs({ type: 'gift:received', payload: giftEvent });
+  pushToHost(hostId, 'live_gift', giftEvent);
+
+  res.status(201).json({
+    ok: true,
+    gift: giftEvent,
+    userWallet: walletPublic(userWallet),
+    hostWallet: walletPublic(hostWallet),
+  });
+});
+
 app.post('/api/admin/login', (req, res) => {
   const key = String(req.body?.key || '');
+  const roleWanted = String(req.body?.role || 'super_admin');
+
+  if (roleWanted === 'agency' || String(key).startsWith('agency-')) {
+    const agency = findAgencyByLoginKey(key);
+    if (!agency || agency.status === 'suspended') {
+      res.status(401).json({ ok: false, error: 'Invalid agency key' });
+      return;
+    }
+    res.json({
+      ok: true,
+      role: 'agency',
+      roles: ['agency'],
+      adminId: `agency_${agency.id}`,
+      agencyId: agency.id,
+      agency: publicAgency(agency),
+      permissions: agency.permissions,
+    });
+    return;
+  }
+
   if (key !== ADMIN_KEY) {
     res.status(401).json({ ok: false, error: 'Wrong admin key' });
     return;
   }
-  const role = String(req.body?.role || 'super_admin');
   const allowed = ['super_admin', 'moderator', 'finance', 'support'];
+  const role = allowed.includes(roleWanted) ? roleWanted : 'super_admin';
   res.json({
     ok: true,
-    role: allowed.includes(role) ? role : 'super_admin',
+    role,
     roles: allowed,
     adminId: String(req.body?.adminId || 'admin'),
   });
@@ -1570,6 +1671,28 @@ function broadcastWs(event: unknown) {
 
 registerHostManagementRoutes(app, { requireAdmin, broadcastWs });
 
+registerAgencyRoutes(app, {
+  requireAdmin,
+  getHostRevenueSnapshot: () => {
+    const hosts = listHosts();
+    linkDemoHostsIfEmpty(hosts.map((h) => h.id));
+    return hosts.map((h) => {
+      const agencyId = getAgencyIdForHost(h.id) || undefined;
+      const agency = agencyId ? getAgency(agencyId) : undefined;
+      return {
+        hostId: h.id,
+        name: h.name,
+        revenueGenerated: h.revenueGenerated || 0,
+        pendingEarnings: h.pendingEarnings || 0,
+        paidEarnings: h.paidEarnings || 0,
+        type: (agencyId ? 'agency' : 'individual') as 'agency' | 'individual',
+        agencyId,
+        agencyName: agency?.name,
+      };
+    });
+  },
+});
+
 /** In-memory live rooms (Firebase is source of truth on clients; API mirrors for Luma) */
 const liveRooms = new Map<string, Record<string, unknown>>();
 
@@ -1582,8 +1705,24 @@ app.post('/api/live/rooms', (req, res) => {
   }
   liveRooms.set(id, { ...room, updatedAt: Date.now() });
   const hostId = String(room.hostId || '');
-  if (hostId && getPresence(hostId)) {
-    patchPresence(hostId, { isLive: true, isOnline: true });
+  if (hostId) {
+    const existing = getPresence(hostId);
+    if (existing) {
+      patchPresence(hostId, { isLive: true, isOnline: true });
+    } else {
+      // Host went live before heartbeat — still list them for other hosts
+      upsertPresence({
+        id: hostId,
+        name: String(room.hostName || 'Host'),
+        avatarUrl: room.hostAvatar ? String(room.hostAvatar) : undefined,
+        ratePerMinute: 80,
+        isOnline: true,
+        isLive: true,
+        isOnCall: false,
+        readyToCall: false,
+        lastSeen: Date.now(),
+      });
+    }
   }
   broadcastWs({ type: 'live:room', payload: room });
   res.json({ ok: true, room });
