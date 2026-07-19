@@ -32,9 +32,18 @@ export function AgenciesPanel({ limited }: { limited?: boolean }) {
     if (!name) return;
     const ownerName = window.prompt('Owner name') || 'Owner';
     const email = window.prompt('Email') || 'agency@demo.com';
+    const cutRaw = window.prompt('Commission % (0-80)', '30') || '30';
+    const commissionPercent = Number(cutRaw);
     setBusy(true);
     try {
-      const res = await createAgency({ name, ownerName, email });
+      const res = await createAgency({
+        name,
+        ownerName,
+        email,
+        commissionPercent: Number.isFinite(commissionPercent)
+          ? commissionPercent
+          : 30,
+      });
       setMsg(`Created · login key: ${res.loginKey}`);
       await load();
     } catch (e) {
@@ -162,6 +171,30 @@ export function AgenciesPanel({ limited }: { limited?: boolean }) {
                     onClick={() => void toggleStatus(a)}
                   >
                     {a.status === 'active' ? 'Suspend' : 'Activate'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-gold"
+                    onClick={() => {
+                      const raw = window.prompt(
+                        'Commission % (0-80)',
+                        String(a.commissionPercent),
+                      );
+                      if (raw == null) return;
+                      const n = Number(raw);
+                      if (!Number.isFinite(n) || n < 0 || n > 80) {
+                        setMsg('Commission must be 0–80');
+                        return;
+                      }
+                      void updateAgency(a.id, { commissionPercent: n }).then(
+                        () => {
+                          setMsg(`Commission → ${n}% · ${a.name}`);
+                          return load();
+                        },
+                      );
+                    }}
+                  >
+                    Set cut
                   </button>
                   <button
                     type="button"

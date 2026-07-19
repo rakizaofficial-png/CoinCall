@@ -260,6 +260,40 @@ export type AdminWalletRow = {
   avatarUrl?: string;
   role?: string;
   ledgerCount?: number;
+  appId?: string;
+  accountStatus?: 'active' | 'suspended' | 'banned';
+};
+
+export type AdminStatsPayload = {
+  stats: {
+    onlineHosts: number;
+    liveHosts: number;
+    liveRooms: number;
+    activeCalls: number;
+    activeUsers: number;
+    totalUsers: number;
+    totalWallets: number;
+    pendingWithdrawals: number;
+    paidWithdrawals: number;
+    revenueCoins: number;
+    totalCoinsInWallets: number;
+  };
+  series: {
+    days: string[];
+    revenue: number[];
+    users: number[];
+  };
+};
+
+export type LiveRoomAdmin = {
+  id: string;
+  hostId: string;
+  hostName: string;
+  hostAvatar?: string;
+  title?: string;
+  channel?: string;
+  viewers?: number;
+  isLive?: boolean;
 };
 
 export async function fetchAdminWallets() {
@@ -285,4 +319,35 @@ export async function adminCreditWallet(
   );
   if (!res.ok) throw new Error(await res.text());
   return res.json();
+}
+
+export async function setWalletAccountStatus(
+  userId: string,
+  accountStatus: 'active' | 'suspended' | 'banned',
+) {
+  const res = await fetch(
+    `${apiBaseUrl}/admin/wallets/${encodeURIComponent(userId)}/status`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: adminKeyHeader(), accountStatus }),
+    },
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function fetchAdminStats() {
+  const res = await fetch(
+    `${apiBaseUrl}/admin/stats?key=${encodeURIComponent(adminKeyHeader())}`,
+    { cache: 'no-store' },
+  );
+  if (!res.ok) throw new Error('Could not load stats');
+  return (await res.json()) as AdminStatsPayload;
+}
+
+export async function fetchLiveRoomsAdmin() {
+  const res = await fetch(`${apiBaseUrl}/live/rooms`, { cache: 'no-store' });
+  if (!res.ok) throw new Error('Could not load live rooms');
+  return (await res.json()) as { rooms: LiveRoomAdmin[] };
 }

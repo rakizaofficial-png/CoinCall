@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   adminCreditWallet,
   fetchAdminWallets,
+  setWalletAccountStatus,
   type AdminWalletRow,
 } from '../api';
 
@@ -149,9 +150,21 @@ export function UsersWalletsPanel() {
                 <h3>{w.displayName || 'User'}</h3>
                 <div className="meta">
                   <code>{w.userId}</code>
+                  {w.appId ? <> · ID {w.appId}</> : null}
                   <br />
                   {w.role} · XP {w.xp}
-                  {w.isPremium ? ' · VIP' : ''} · ledger {w.ledgerCount ?? 0}
+                  {w.isPremium ? ' · VIP' : ''} ·{' '}
+                  <span
+                    className={`badge ${
+                      w.accountStatus === 'banned'
+                        ? 'rejected'
+                        : w.accountStatus === 'suspended'
+                          ? 'pending'
+                          : 'active'
+                    }`}
+                  >
+                    {w.accountStatus || 'active'}
+                  </span>
                 </div>
               </div>
               <div className="actions" style={{ textAlign: 'right' }}>
@@ -177,6 +190,37 @@ export function UsersWalletsPanel() {
                   onClick={() => void credit(w.userId)}
                 >
                   Adjust
+                </button>
+                <button
+                  type="button"
+                  className="btn-gold"
+                  onClick={() =>
+                    void setWalletAccountStatus(
+                      w.userId,
+                      w.accountStatus === 'suspended' ? 'active' : 'suspended',
+                    ).then(() => load())
+                  }
+                >
+                  {w.accountStatus === 'suspended' ? 'Unsuspend' : 'Suspend'}
+                </button>
+                <button
+                  type="button"
+                  className="btn-red"
+                  onClick={() =>
+                    void setWalletAccountStatus(
+                      w.userId,
+                      w.accountStatus === 'banned' ? 'active' : 'banned',
+                    ).then(() => {
+                      setMsg(
+                        w.accountStatus === 'banned'
+                          ? 'Unbanned'
+                          : 'Banned instantly',
+                      );
+                      return load();
+                    })
+                  }
+                >
+                  {w.accountStatus === 'banned' ? 'Unban' : 'Ban'}
                 </button>
               </div>
             </div>

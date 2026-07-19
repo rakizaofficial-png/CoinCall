@@ -1,12 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import AgoraRTC, { type IAgoraRTCClient } from 'agora-rtc-sdk-ng';
 import {
   adminLogin,
   endCallRemote,
   fetchAdminReports,
   fetchAdminWithdrawals,
-  fetchMonitorToken,
+  fetchLiveRoomsAdmin,
   listenActiveCalls,
   listenHosts,
   listenReports,
@@ -14,19 +13,24 @@ import {
   resolveFirebaseReport,
   sendControl,
   setHostOnline,
-  setWithdrawalStatus,
   type ActiveCall,
   type HostRow,
+  type LiveRoomAdmin,
   type ReportAdminRow,
-  type WithdrawalRow,
 } from './api';
 import { AgenciesPanel } from './components/AgenciesPanel';
 import { AnimatedPage } from './components/AnimatedPage';
+import { DashboardAnalytics } from './components/DashboardAnalytics';
 import { HostManagementPanel } from './components/HostManagement';
 import { HostTypePanel } from './components/HostTypePanel';
+import {
+  LiveMonitorDock,
+  type MonitorTarget,
+} from './components/LiveMonitorDock';
+import { MoneyDesk } from './components/MoneyDesk';
 import { RevenuePanel } from './components/RevenuePanel';
 import { UsersWalletsPanel } from './components/UsersWallets';
-import { adminKey, agoraAppId, firebaseReady } from './firebase';
+import { adminKey, firebaseReady } from './firebase';
 import {
   canAccess,
   sectionsForRole,
@@ -69,16 +73,16 @@ const ICONS: Partial<Record<Tab, string>> = {
 };
 
 const LABELS: Record<Tab, string> = {
-  dashboard: 'Overview',
+  dashboard: 'Dashboard',
   agencies: 'Agencies',
   agency_hosts: 'Agency hosts',
   individual_hosts: 'Individual hosts',
-  hosts: 'Host KYC',
-  users: 'Luma users',
+  hosts: 'Host List',
+  users: 'User List',
   revenue: 'Revenue',
-  calls: 'Live calls',
+  calls: 'Live Monitor',
   control: 'Remote control',
-  payouts: 'Payouts',
+  payouts: 'Financials',
   reports: 'Reports',
 };
 
@@ -142,13 +146,13 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('dashboard');
   const [hosts, setHosts] = useState<HostRow[]>([]);
   const [calls, setCalls] = useState<ActiveCall[]>([]);
-  const [monitor, setMonitor] = useState<ActiveCall | null>(null);
-  const [monitorStatus, setMonitorStatus] = useState('');
-  const [withdrawals, setWithdrawals] = useState<WithdrawalRow[]>([]);
+  const [liveRooms, setLiveRooms] = useState<LiveRoomAdmin[]>([]);
+  const [monitor, setMonitor] = useState<MonitorTarget | null>(null);
   const [reports, setReports] = useState<ReportAdminRow[]>([]);
-  const clientRef = useRef<IAgoraRTCClient | null>(null);
-  const hostVideoRef = useRef<HTMLDivElement>(null);
-  const peerVideoRef = useRef<HTMLDivElement>(null);
+  const [theme, setTheme] = useState<'dark' | 'light'>(() =>
+    (localStorage.getItem('cc_admin_theme') as 'dark' | 'light') || 'dark',
+  );
+  const [openPayouts, setOpenPayouts] = useState(0);
 
   const allowed = useMemo(
     () => sectionsForRole(adminRole, agencyPerms),
@@ -158,6 +162,11 @@ export default function App() {
   useEffect(() => {
     if (!allowed.includes(tab)) setTab(allowed[0] || 'dashboard');
   }, [allowed, tab]);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem('cc_admin_theme', theme);
+  }, [theme]);
 
   useEffect(() => {
     if (!authed || !firebaseReady) return;
@@ -172,14 +181,39 @@ export default function App() {
   }, [authed]);
 
   useEffect(() => {
+    if (!authed) return;
+    let cancelled = false;
+    const loadLives = async () => {
+      try {
+        const data = await fetchLiveRoomsAdmin();
+        if (!cancelled) setLiveRooms(data.rooms || []);
+      } catch {
+        if (!cancelled) setLiveRooms([]);
+      }
+    };
+    void loadLives();
+    const t = setInterval(() => void loadLives(), 8000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [authed]);
+
+  useEffect(() => {
     if (!authed || (tab !== 'payouts' && tab !== 'dashboard')) return;
     let cancelled = false;
     const load = async () => {
       try {
         const data = await fetchAdminWithdrawals();
-        if (!cancelled) setWithdrawals(data.withdrawals || []);
+        if (!cancelled) {
+          const list = data.withdrawals || [];
+          setOpenPayouts(
+            list.filter((w) => w.status !== 'paid' && w.status !== 'failed')
+              .length,
+          );
+        }
       } catch {
-        if (!cancelled) setWithdrawals([]);
+        if (!cancelled) setOpenPayouts(0);
       }
     };
     void load();
@@ -207,63 +241,12 @@ export default function App() {
       .catch(() => undefined);
   }, [authed, tab]);
 
-  useEffect(() => {
-    if (!monitor) return;
-    let dead = false;
-    (async () => {
-      try {
-        setMonitorStatus('Joining silently…');
-        await leaveMonitor();
-        const uid = 900000 + Math.floor(Math.random() * 9999);
-        const token = await fetchMonitorToken(monitor.channel, uid);
-        const client = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
-        clientRef.current = client;
-        let slot = 0;
-        client.on('user-published', async (user, mediaType) => {
-          await client.subscribe(user, mediaType);
-          if (mediaType === 'video' && user.videoTrack) {
-            const el = slot === 0 ? hostVideoRef.current : peerVideoRef.current;
-            slot += 1;
-            if (el) user.videoTrack.play(el);
-          }
-          if (mediaType === 'audio' && user.audioTrack) user.audioTrack.play();
-        });
-        await client.join(
-          token.appId || agoraAppId,
-          monitor.channel,
-          token.token,
-          uid,
-        );
-        if (!dead) setMonitorStatus('Silent monitor ON · host cannot see you');
-      } catch (e) {
-        if (!dead)
-          setMonitorStatus(e instanceof Error ? e.message : 'Monitor failed');
-      }
-    })();
-    return () => {
-      dead = true;
-      void leaveMonitor();
-    };
-  }, [monitor?.id, monitor?.channel]);
-
-  async function leaveMonitor() {
-    const client = clientRef.current;
-    clientRef.current = null;
-    if (!client) return;
-    try {
-      await client.leave();
-    } catch {
-      /* ignore */
-    }
-  }
-
   const stats = useMemo(() => {
     const pending = hosts.filter(
       (h) => h.hostStatus === 'pending' || h.hostStatus === 'under_review',
     ).length;
     const approved = hosts.filter((h) => h.hostStatus === 'approved').length;
     const online = hosts.filter((h) => h.isOnline).length;
-    const openPayouts = withdrawals.filter((w) => w.status !== 'paid').length;
     const openReports = reports.filter((r) => r.status !== 'resolved').length;
     return {
       total: hosts.length,
@@ -271,10 +254,11 @@ export default function App() {
       approved,
       online,
       liveCalls: calls.length,
+      liveStreams: liveRooms.length,
       openPayouts,
       openReports,
     };
-  }, [hosts, calls, withdrawals, reports]);
+  }, [hosts, calls, liveRooms, openPayouts, reports]);
 
   async function onLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -342,7 +326,7 @@ export default function App() {
       id === 'hosts'
         ? stats.total
         : id === 'calls'
-          ? stats.liveCalls
+          ? stats.liveCalls + stats.liveStreams
           : id === 'payouts'
             ? stats.openPayouts
             : id === 'reports'
@@ -429,13 +413,13 @@ export default function App() {
   const isAgency = adminRole === 'agency';
 
   return (
-    <div className="shell">
+    <div className={`shell ${monitor ? 'shell-monitor-open' : ''}`} data-theme={theme}>
       <aside className="side">
         <div className="brand">
           <div className="brand-mark">CC</div>
           <div className="brand-text">
             <strong>CoinCall</strong>
-            <span>{isAgency ? 'Agency portal' : 'Admin · Web'}</span>
+            <span>{isAgency ? 'Agency portal' : 'Super Admin'}</span>
           </div>
         </div>
         <div className="side-role">
@@ -469,9 +453,18 @@ export default function App() {
           })}
         </nav>
 
-        <button className="logout" type="button" onClick={signOut}>
-          Sign out
-        </button>
+        <div className="side-footer">
+          <button
+            type="button"
+            className="theme-toggle"
+            onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
+          >
+            {theme === 'dark' ? 'Light mode' : 'Dark mode'}
+          </button>
+          <button className="logout" type="button" onClick={signOut}>
+            Sign out
+          </button>
+        </div>
       </aside>
 
       <main className="main">
@@ -493,39 +486,19 @@ export default function App() {
             {tab === 'dashboard' ? (
               <>
                 <PageHead
-                  title={isAgency ? 'Agency overview' : 'Overview'}
+                  title={isAgency ? 'Agency dashboard' : 'Super Admin dashboard'}
                   subtitle={
                     isAgency
-                      ? 'Your network pulse'
-                      : 'Hosts · agencies · revenue · live ops'
+                      ? 'Your hosts · earnings · withdrawals'
+                      : 'Active hosts · users · live · revenue'
                   }
                 />
-                <div className="stats">
-                  <div className="stat">
-                    <span>Hosts</span>
-                    <b>{stats.total}</b>
-                  </div>
-                  <div className="stat gold">
-                    <span>Pending</span>
-                    <b>{stats.pending}</b>
-                  </div>
-                  <div className="stat green">
-                    <span>Approved</span>
-                    <b>{stats.approved}</b>
-                  </div>
-                  <div className="stat teal">
-                    <span>Online</span>
-                    <b>{stats.online}</b>
-                  </div>
-                  <div className="stat blue">
-                    <span>Live 1:1</span>
-                    <b>{stats.liveCalls}</b>
-                  </div>
-                  <div className="stat">
-                    <span>Payouts</span>
-                    <b>{stats.openPayouts}</b>
-                  </div>
-                </div>
+                <DashboardAnalytics
+                  isAgency={isAgency}
+                  hostOnline={stats.online}
+                  liveCalls={stats.liveCalls}
+                  openPayouts={stats.openPayouts}
+                />
                 <div className="quick-grid">
                   {canAccess(adminRole, 'agencies', agencyPerms) ? (
                     <button
@@ -534,7 +507,7 @@ export default function App() {
                       onClick={() => setTab('agencies')}
                     >
                       <strong>Agencies</strong>
-                      <span>Partners · commission · portal permissions</span>
+                      <span>Create · commission · portal permissions</span>
                     </button>
                   ) : null}
                   {canAccess(adminRole, 'agency_hosts', agencyPerms) ? (
@@ -557,24 +530,14 @@ export default function App() {
                       <span>Independent creators</span>
                     </button>
                   ) : null}
-                  {canAccess(adminRole, 'revenue', agencyPerms) ? (
-                    <button
-                      type="button"
-                      className="quick-card"
-                      onClick={() => setTab('revenue')}
-                    >
-                      <strong>Revenue</strong>
-                      <span>Agency vs individual earnings</span>
-                    </button>
-                  ) : null}
                   {canAccess(adminRole, 'hosts', agencyPerms) ? (
                     <button
                       type="button"
                       className="quick-card"
                       onClick={() => setTab('hosts')}
                     >
-                      <strong>Host KYC</strong>
-                      <span>Approvals · audit · bulk actions</span>
+                      <strong>Host List</strong>
+                      <span>Profiles · KYC · ban · wallet</span>
                     </button>
                   ) : null}
                   {canAccess(adminRole, 'users', agencyPerms) ? (
@@ -583,8 +546,38 @@ export default function App() {
                       className="quick-card"
                       onClick={() => setTab('users')}
                     >
-                      <strong>Luma users</strong>
-                      <span>Wallets · purchase IDs</span>
+                      <strong>User List</strong>
+                      <span>Wallets · suspend · ban</span>
+                    </button>
+                  ) : null}
+                  {canAccess(adminRole, 'calls', agencyPerms) ? (
+                    <button
+                      type="button"
+                      className="quick-card"
+                      onClick={() => setTab('calls')}
+                    >
+                      <strong>Live Monitor</strong>
+                      <span>Silent watch · streams &amp; 1:1</span>
+                    </button>
+                  ) : null}
+                  {canAccess(adminRole, 'payouts', agencyPerms) ? (
+                    <button
+                      type="button"
+                      className="quick-card"
+                      onClick={() => setTab('payouts')}
+                    >
+                      <strong>Financials</strong>
+                      <span>Money Desk · pending / approved</span>
+                    </button>
+                  ) : null}
+                  {canAccess(adminRole, 'revenue', agencyPerms) ? (
+                    <button
+                      type="button"
+                      className="quick-card"
+                      onClick={() => setTab('revenue')}
+                    >
+                      <strong>Revenue</strong>
+                      <span>Agency vs individual earnings</span>
                     </button>
                   ) : null}
                 </div>
@@ -611,13 +604,56 @@ export default function App() {
             {tab === 'calls' ? (
               <>
                 <PageHead
-                  title="Live 1:1 calls"
-                  subtitle={
-                    agencyPerms?.canMonitor
-                      ? 'Silent monitor enabled for your agency'
-                      : 'Live call board'
-                  }
+                  title="Live Monitor"
+                  subtitle="Secret surveillance · streams & private 1:1 · hosts never see you"
                 />
+                <h3 className="section-title">Live streams</h3>
+                <div className="list">
+                  {liveRooms.length === 0 ? (
+                    <div className="empty-state">No live streams right now.</div>
+                  ) : (
+                    liveRooms.map((r) => (
+                      <div
+                        className="card"
+                        key={r.id}
+                        style={{ gridTemplateColumns: '1fr auto' }}
+                      >
+                        <div>
+                          <h3>{r.hostName || 'Host'}</h3>
+                          <div className="meta">
+                            <span className="badge live">LIVE</span>
+                            {r.title || 'Live'} · {r.viewers || 0} viewers
+                          </div>
+                        </div>
+                        <div className="actions">
+                          {(agencyPerms?.canMonitor || !isAgency) && (
+                            <button
+                              type="button"
+                              className="btn-pink"
+                              onClick={() =>
+                                setMonitor({
+                                  id: r.id,
+                                  kind: 'live',
+                                  title: r.hostName || 'Live host',
+                                  subtitle: r.title || 'Live stream',
+                                  channel:
+                                    r.channel ||
+                                    `live_${r.hostId || r.id}`,
+                                })
+                              }
+                            >
+                              Watch silently
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <h3 className="section-title" style={{ marginTop: 28 }}>
+                  Private 1:1 calls
+                </h3>
                 <div className="list">
                   {calls.length === 0 ? (
                     <div className="empty-state">No active calls.</div>
@@ -633,8 +669,9 @@ export default function App() {
                             {c.hostName} ↔ {c.peerName}
                           </h3>
                           <div className="meta">
-                            <span className="badge live">LIVE</span>
-                            {formatClock(c.seconds)} · {c.coinsEarned || 0} coins
+                            <span className="badge live">1:1</span>
+                            {formatClock(c.seconds)} · {c.coinsEarned || 0}{' '}
+                            coins
                           </div>
                         </div>
                         <div className="actions">
@@ -642,9 +679,17 @@ export default function App() {
                             <button
                               type="button"
                               className="btn-pink"
-                              onClick={() => setMonitor(c)}
+                              onClick={() =>
+                                setMonitor({
+                                  id: c.id,
+                                  kind: 'call',
+                                  title: `${c.hostName} ↔ ${c.peerName}`,
+                                  subtitle: 'Private video call',
+                                  channel: c.channel,
+                                })
+                              }
                             >
-                              Enter silent
+                              Watch silently
                             </button>
                           )}
                           {!isAgency ? (
@@ -661,105 +706,10 @@ export default function App() {
                     ))
                   )}
                 </div>
-                {monitor ? (
-                  <div className="section-panel" style={{ marginTop: 20 }}>
-                    <PageHead
-                      title={`Monitor · ${monitor.hostName}`}
-                      subtitle={monitorStatus}
-                      action={
-                        <button
-                          type="button"
-                          className="btn-ghost"
-                          onClick={() => {
-                            setMonitor(null);
-                            void leaveMonitor();
-                          }}
-                        >
-                          Leave
-                        </button>
-                      }
-                    />
-                    <div className="monitor">
-                      <div className="video-box">
-                        <label>Host</label>
-                        <div ref={hostVideoRef} />
-                      </div>
-                      <div className="video-box">
-                        <label>Peer</label>
-                        <div ref={peerVideoRef} />
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
               </>
             ) : null}
 
-            {tab === 'payouts' ? (
-              <>
-                <PageHead
-                  title="Payouts"
-                  subtitle={
-                    isAgency
-                      ? 'Request status for your hosts'
-                      : 'Mark paid / failed'
-                  }
-                />
-                <div className="list">
-                  {withdrawals.length === 0 ? (
-                    <div className="empty-state">No withdrawal requests.</div>
-                  ) : (
-                    withdrawals.map((w) => (
-                      <div
-                        className="card"
-                        key={w.id}
-                        style={{ gridTemplateColumns: '1fr auto' }}
-                      >
-                        <div>
-                          <h3>
-                            {w.amountCoins} · {w.gateway}
-                          </h3>
-                          <div className="meta">
-                            {w.hostId} · {w.status}
-                          </div>
-                        </div>
-                        {!isAgency ? (
-                          <div className="actions">
-                            <button
-                              type="button"
-                              className="btn-green"
-                              onClick={() =>
-                                void setWithdrawalStatus(w.id, 'paid').then(
-                                  () =>
-                                    fetchAdminWithdrawals().then((d) =>
-                                      setWithdrawals(d.withdrawals || []),
-                                    ),
-                                )
-                              }
-                            >
-                              Mark paid
-                            </button>
-                            <button
-                              type="button"
-                              className="btn-red"
-                              onClick={() =>
-                                void setWithdrawalStatus(w.id, 'failed').then(
-                                  () =>
-                                    fetchAdminWithdrawals().then((d) =>
-                                      setWithdrawals(d.withdrawals || []),
-                                    ),
-                                )
-                              }
-                            >
-                              Fail
-                            </button>
-                          </div>
-                        ) : null}
-                      </div>
-                    ))
-                  )}
-                </div>
-              </>
-            ) : null}
+            {tab === 'payouts' ? <MoneyDesk readOnly={isAgency} /> : null}
 
             {tab === 'reports' ? (
               <>
@@ -876,6 +826,8 @@ export default function App() {
           </AnimatedPage>
         </AnimatePresence>
       </main>
+
+      <LiveMonitorDock target={monitor} onClose={() => setMonitor(null)} />
     </div>
   );
 }
