@@ -305,6 +305,11 @@ export function CallScreen({ navigation, route }: Props) {
       notify('Gift request', 'Available on live user calls.');
       return;
     }
+    // Host must never gift / request as themselves to themselves
+    if (user.id === route.params.hostId) {
+      notify('Gift', 'Hosts cannot gift themselves!');
+      return;
+    }
     if (pendingGiftReq?.status === 'pending') {
       notify('Waiting', 'User still has a pending gift request.');
       return;
@@ -459,72 +464,12 @@ export function CallScreen({ navigation, route }: Props) {
           }}
         />
         <IconButton
-          icon={cameraOff ? VideoOff : Video}
-          label="Video"
-          active={!cameraOff}
-          onPress={() => {
-            setCameraOff((v) => {
-              const next = !v;
-              void setAgoraCameraOff(next);
-              return next;
-            });
-          }}
-        />
-        <IconButton
           icon={SwitchCamera}
           label="Flip"
           onPress={() => void switchAgoraCamera()}
         />
-        <IconButton
-          icon={Gift}
-          label="Gift"
-          active={Boolean(pendingGiftReq)}
-          onPress={() => {
-            if (!isBridge) {
-              notify('Gift', 'Gift requests work on live user calls.');
-              return;
-            }
-            setGiftPickerOpen(true);
-          }}
-        />
-        <IconButton
-          icon={Sparkles}
-          label="Filter"
-          active={beautyPreset !== 'off'}
-          onPress={() => {
-            const next = nextBeauty(beautyPreset);
-            setBeautyPreset(next);
-            void setAgoraBeauty(next);
-          }}
-        />
         <IconButton icon={PhoneOff} label="End" danger onPress={hangUp} />
       </View>
-
-      {giftPickerOpen ? (
-        <View style={styles.giftSheet}>
-          <Text style={styles.giftSheetTitle}>Request a gift</Text>
-          <Text style={styles.giftSheetSub}>
-            {peerName} will see this and can Accept or Decline
-          </Text>
-          <View style={styles.giftGrid}>
-            {GIFT_CATALOG.map((g) => (
-              <Pressable
-                key={g.id}
-                style={styles.giftItem}
-                disabled={giftBusy}
-                onPress={() => void sendGiftRequest(g.id)}
-              >
-                <Text style={styles.giftEmoji}>{g.emoji}</Text>
-                <Text style={styles.giftName}>{g.name}</Text>
-                <Text style={styles.giftCoins}>{g.coins}</Text>
-              </Pressable>
-            ))}
-          </View>
-          <Pressable onPress={() => setGiftPickerOpen(false)}>
-            <Text style={styles.giftClose}>Close</Text>
-          </Pressable>
-        </View>
-      ) : null}
     </View>
   );
 }

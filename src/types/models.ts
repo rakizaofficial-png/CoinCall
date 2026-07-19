@@ -49,6 +49,8 @@ export interface User {
   giftsEnabled?: boolean;
   withdrawalsAllowed?: boolean;
   walletFrozen?: boolean;
+  /** Public 6-digit search id */
+  appId?: string;
 }
 
 export interface Host {

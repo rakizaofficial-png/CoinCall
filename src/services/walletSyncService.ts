@@ -9,7 +9,7 @@ export async function syncHostWalletBalance(input: {
 }) {
   const base = env.apiBaseUrl.replace(/\/$/, '');
   // Profile sync only — server ignores client coinBalance (anti-fraud)
-  await fetch(`${base}/wallet/sync`, {
+  const res = await fetch(`${base}/wallet/sync`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -20,14 +20,26 @@ export async function syncHostWalletBalance(input: {
       displayName: input.displayName,
       role: 'host',
     }),
-  }).catch(() => undefined);
+  }).catch(() => null);
+
+  const data = res
+    ? ((await res.json().catch(() => ({}))) as {
+        wallet?: { appId?: string; coinBalance?: number };
+      })
+    : null;
 
   if (isFirebaseReady()) {
-    await update(ref(getFirebaseDb(), `hosts/${input.hostId}`), {
+    const patch: Record<string, unknown> = {
       coinBalance: input.coinBalance,
       walletUpdatedAt: Date.now(),
-    }).catch(() => undefined);
+    };
+    if (data?.wallet?.appId) patch.appId = data.wallet.appId;
+    await update(ref(getFirebaseDb(), `hosts/${input.hostId}`), patch).catch(
+      () => undefined,
+    );
   }
+
+  return data?.wallet ?? null;
 }
 
 export async function creditHostEarnings(input: {

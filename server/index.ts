@@ -95,6 +95,8 @@ type CallRecord = {
   hostUidAgora: number;
   userUidAgora: number;
   giftRequest?: GiftRequestRecord | null;
+  /** How many full minutes have been billed user → host */
+  billedMinutes?: number;
 };
 
 type GiftRequestStatus = 'pending' | 'accepted' | 'declined' | 'expired';
@@ -491,6 +493,111 @@ app.post('/api/calls/:id/end', (req, res) => {
   res.json({ call });
 });
 
+/**
+ * Bill one call minute: deduct rate from user wallet, credit host.
+ * Returns 402 when the user cannot cover the next minute.
+ */
+app.post('/api/calls/:id/minute', (req, res) => {
+  const call = calls.get(String(req.params.id));
+  if (!call) {
+    res.status(404).json({ error: 'Call not found' });
+    return;
+  }
+  if (call.status !== 'accepted') {
+    res.status(409).json({ error: `Call is ${call.status}` });
+    return;
+  }
+  const userId = String(req.body?.userId || req.headers['x-user-id'] || '').trim();
+  if (!userId || userId !== call.userId) {
+    res.status(403).json({ error: 'Only the caller can bill this call' });
+    return;
+  }
+  if (!requireUserMatch(req, res, userId)) return;
+
+  const amount = Math.max(1, Math.floor(Number(call.ratePerMinute) || 80));
+  const userWallet = ensureWallet(userId, { role: 'user', displayName: call.userName });
+  if (userWallet.coinBalance < amount) {
+    res.status(402).json({
+      error: 'Coins exhausted',
+      wallet: walletPublic(userWallet),
+      need: amount,
+    });
+    return;
+  }
+
+  userWallet.coinBalance -= amount;
+  userWallet.xp += amount;
+  wallets.set(userId, userWallet);
+  pushLedger(userId, amount, `call_minute_${call.id}`, 'spend');
+
+  const hostWallet = ensureWallet(call.hostId, {
+    role: 'host',
+    displayName: call.hostName,
+  });
+  hostWallet.coinBalance += amount;
+  hostWallet.xp += amount;
+  wallets.set(call.hostId, hostWallet);
+  pushLedger(call.hostId, amount, `call_earn_${call.id}`, 'credit');
+
+  call.billedMinutes = (call.billedMinutes || 0) + 1;
+  call.updatedAt = Date.now();
+  calls.set(call.id, call);
+  persist();
+
+  broadcastWs({
+    type: 'wallet:updated',
+    payload: { userId, coinBalance: userWallet.coinBalance, xp: userWallet.xp },
+  });
+  broadcastWs({
+    type: 'wallet:updated',
+    payload: {
+      userId: call.hostId,
+      coinBalance: hostWallet.coinBalance,
+      xp: hostWallet.xp,
+    },
+  });
+  pushToHost(call.hostId, 'call_minute', {
+    callId: call.id,
+    amount,
+    billedMinutes: call.billedMinutes,
+    hostWallet: walletPublic(hostWallet),
+  });
+
+  res.json({
+    ok: true,
+    amount,
+    billedMinutes: call.billedMinutes,
+    userWallet: walletPublic(userWallet),
+    hostWallet: walletPublic(hostWallet),
+  });
+});
+
+/** Lookup user/host profile by public 6-digit appId */
+app.get('/api/profiles/search', (req, res) => {
+  const appId = String(req.query.appId || req.query.q || '')
+    .trim()
+    .replace(/\D/g, '');
+  if (!/^\d{6}$/.test(appId)) {
+    res.status(400).json({ error: 'Enter a 6-digit appId' });
+    return;
+  }
+  for (const w of wallets.values()) {
+    if (w.appId === appId) {
+      res.json({
+        profile: {
+          userId: w.userId,
+          appId: w.appId,
+          displayName: w.displayName,
+          avatarUrl: w.avatarUrl,
+          role: w.role,
+        },
+      });
+      return;
+    }
+  }
+  res.status(404).json({ error: 'User not found' });
+});
+
 /** Token helper for a call participant */
 app.get('/api/calls/:id/token', (req, res) => {
   const call = calls.get(String(req.params.id));
@@ -690,6 +797,10 @@ app.post('/api/gifts/send', (req, res) => {
 
   if (!userId || !hostId || !giftId) {
     res.status(400).json({ error: 'userId, hostId, giftId required' });
+    return;
+  }
+  if (userId === hostId) {
+    res.status(403).json({ error: 'Hosts cannot gift themselves!' });
     return;
   }
   if (!requireUserMatch(req, res, userId)) return;
@@ -972,6 +1083,8 @@ type WalletRow = {
   displayName: string;
   avatarUrl?: string;
   role: 'user' | 'host';
+  /** Public 6-digit search id (e.g. "583920") */
+  appId?: string;
 };
 
 type WithdrawalRequest = {
@@ -1246,6 +1359,21 @@ const IAP_PRODUCTS = [
   },
 ];
 
+function allocateAppId(): string {
+  for (let i = 0; i < 40; i++) {
+    const id = String(Math.floor(100000 + Math.random() * 900000));
+    let taken = false;
+    for (const w of wallets.values()) {
+      if (w.appId === id) {
+        taken = true;
+        break;
+      }
+    }
+    if (!taken) return id;
+  }
+  return String(Date.now()).slice(-6);
+}
+
 function ensureWallet(userId: string, patch?: Partial<WalletRow>): WalletRow {
   let row = wallets.get(userId);
   if (!row) {
@@ -1257,9 +1385,14 @@ function ensureWallet(userId: string, patch?: Partial<WalletRow>): WalletRow {
       displayName: patch?.displayName || 'Luma Fan',
       avatarUrl: patch?.avatarUrl,
       role: patch?.role || 'user',
+      appId: patch?.appId || allocateAppId(),
     };
     wallets.set(userId, row);
     return row;
+  }
+  if (!row.appId) {
+    row.appId = allocateAppId();
+    wallets.set(userId, row);
   }
   if (patch) {
     if (patch.displayName) row.displayName = patch.displayName;
@@ -1268,6 +1401,7 @@ function ensureWallet(userId: string, patch?: Partial<WalletRow>): WalletRow {
     if (patch.isPremium !== undefined) row.isPremium = patch.isPremium;
     if (patch.coinBalance !== undefined) row.coinBalance = patch.coinBalance;
     if (patch.xp !== undefined) row.xp = patch.xp;
+    if (patch.appId) row.appId = patch.appId;
     wallets.set(userId, row);
   }
   return row;
@@ -1281,6 +1415,7 @@ function walletPublic(row: WalletRow) {
     isPremium: row.isPremium,
     displayName: row.displayName,
     avatarUrl: row.avatarUrl,
+    appId: row.appId,
   };
 }
 

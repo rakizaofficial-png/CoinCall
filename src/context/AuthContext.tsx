@@ -113,6 +113,7 @@ function createMockUser(
     avatarUrl: `https://i.pravatar.cc/300?u=${encodeURIComponent(partial.name)}`,
     isOnline: false,
     hostStatus: 'none',
+    appId: String(Math.floor(100000 + Math.random() * 900000)),
     ...partial,
     role: 'host',
   };

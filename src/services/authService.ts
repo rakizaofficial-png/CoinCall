@@ -63,10 +63,12 @@ function mapHostUser(uid: string, data: Record<string, unknown>, fallbackName: s
     giftsEnabled: data.giftsEnabled !== false,
     withdrawalsAllowed: data.withdrawalsAllowed !== false,
     walletFrozen: Boolean(data.walletFrozen),
+    appId: data.appId ? String(data.appId) : undefined,
   };
 }
 
 function blankHostProfile(uid: string, name: string, email?: string): User {
+  const appId = String(Math.floor(100000 + Math.random() * 900000));
   return {
     id: uid,
     name,
@@ -80,6 +82,7 @@ function blankHostProfile(uid: string, name: string, email?: string): User {
     avatarUrl: `https://i.pravatar.cc/300?u=${encodeURIComponent(uid)}`,
     isOnline: false,
     hostStatus: 'none',
+    appId,
   };
 }
 
@@ -124,13 +127,18 @@ export async function loadHostProfile(fbUser: FirebaseUser): Promise<User> {
       async (snap) => {
         unsub();
         if (snap.exists()) {
-          resolve(
-            mapHostUser(
-              fbUser.uid,
-              snap.val() as Record<string, unknown>,
-              fbUser.displayName || 'Host',
-            ),
+          const raw = snap.val() as Record<string, unknown>;
+          const mapped = mapHostUser(
+            fbUser.uid,
+            raw,
+            fbUser.displayName || 'Host',
           );
+          if (!mapped.appId) {
+            const appId = String(Math.floor(100000 + Math.random() * 900000));
+            mapped.appId = appId;
+            void update(snapRef, { appId });
+          }
+          resolve(mapped);
           return;
         }
         const profile = blankHostProfile(

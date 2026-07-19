@@ -4,18 +4,22 @@ import {
   Gift,
   Heart,
   Radio,
+  Search,
   Users,
   Wallet,
 } from 'lucide-react-native';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Avatar } from '../../components/ui/Avatar';
 import { GlassCard } from '../../components/ui/GlassCard';
 import { PrimaryButton } from '../../components/ui/PrimaryButton';
 import { useApp } from '../../context/AppContext';
 import { useLiveStudio } from '../../context/LiveStudioContext';
+import { env } from '../../config/env';
 import { radii } from '../../theme/colors';
 import { useTheme } from '../../theme/ThemeContext';
+import { notify } from '../../utils/notify';
 
 export function DashboardScreen({ navigation }: { navigation: any }) {
   const insets = useSafeAreaInsets();
@@ -29,6 +33,8 @@ export function DashboardScreen({ navigation }: { navigation: any }) {
     hostEarnings,
   } = useApp();
   const { todayLiveGiftCoins, monthlyEarn, liveSeconds, myLiveRoom } = useLiveStudio();
+  const [appIdQuery, setAppIdQuery] = useState('');
+  const [searchBusy, setSearchBusy] = useState(false);
 
   const todayEarn =
     hostEarnings.call +
@@ -36,6 +42,49 @@ export function DashboardScreen({ navigation }: { navigation: any }) {
     hostEarnings.task +
     hostEarnings.invite +
     todayLiveGiftCoins;
+
+  const searchByAppId = async () => {
+    const q = appIdQuery.trim().replace(/\D/g, '');
+    if (!/^\d{6}$/.test(q)) {
+      notify('Search', 'Enter a 6-digit app ID');
+      return;
+    }
+    setSearchBusy(true);
+    try {
+      const api = env.apiBaseUrl.replace(/\/$/, '');
+      const res = await fetch(
+        `${api}/profiles/search?appId=${encodeURIComponent(q)}`,
+      );
+      const data = (await res.json()) as {
+        error?: string;
+        profile?: {
+          userId: string;
+          displayName: string;
+          avatarUrl?: string;
+          role: string;
+        };
+      };
+      if (!res.ok || !data.profile) {
+        notify('User not found', data.error || 'No profile for that ID');
+        return;
+      }
+      const p = data.profile;
+      notify('Found', `${p.displayName} · ${p.role}`);
+      if (p.role === 'user') {
+        navigation.navigate('DirectChat', {
+          peerId: p.userId,
+          peerName: p.displayName,
+          peerAvatar: p.avatarUrl,
+        });
+      } else {
+        navigation.navigate('HostProfile', { hostId: p.userId });
+      }
+    } catch (e) {
+      notify('Search failed', e instanceof Error ? e.message : 'Try again');
+    } finally {
+      setSearchBusy(false);
+    }
+  };
 
   return (
     <ScrollView
@@ -52,9 +101,38 @@ export function DashboardScreen({ navigation }: { navigation: any }) {
             Welcome back
           </Text>
           <Text style={[styles.name, { color: colors.text }]}>{user.name}</Text>
+          {user.appId ? (
+            <Text style={[styles.appId, { color: colors.textMuted }]}>
+              ID {user.appId}
+            </Text>
+          ) : null}
         </View>
         <Pressable onPress={() => navigation.navigate('Profile')}>
           <Avatar uri={user.avatarUrl} size={52} online={hostOnline} ring />
+        </Pressable>
+      </View>
+
+      <View
+        style={[
+          styles.searchRow,
+          { backgroundColor: colors.bgCard, borderColor: colors.border },
+        ]}
+      >
+        <Search size={16} color={colors.textMuted} />
+        <TextInput
+          value={appIdQuery}
+          onChangeText={setAppIdQuery}
+          placeholder="Search 6-digit ID…"
+          placeholderTextColor={colors.textMuted}
+          keyboardType="number-pad"
+          maxLength={6}
+          style={[styles.searchInput, { color: colors.text }]}
+          onSubmitEditing={() => void searchByAppId()}
+        />
+        <Pressable onPress={() => void searchByAppId()} disabled={searchBusy}>
+          <Text style={{ color: colors.primary, fontWeight: '800' }}>
+            {searchBusy ? '…' : 'Go'}
+          </Text>
         </Pressable>
       </View>
 
@@ -140,6 +218,18 @@ const styles = StyleSheet.create({
   },
   hello: { fontWeight: '600' },
   name: { fontSize: 26, fontWeight: '900', marginTop: 2 },
+  appId: { fontSize: 12, fontWeight: '700', marginTop: 2 },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: radii.lg,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 14,
+  },
+  searchInput: { flex: 1, fontSize: 14, fontWeight: '600', paddingVertical: 0 },
   hero: { borderRadius: radii.xl, padding: 20, marginBottom: 14 },
   heroLabel: { color: 'rgba(255,255,255,0.85)', fontWeight: '600' },
   heroValue: { color: '#fff', fontSize: 48, fontWeight: '900', marginTop: 4 },
