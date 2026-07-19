@@ -35,6 +35,13 @@ import {
   type HostWorkspaceMode,
 } from './presenceStore.ts';
 import { loadSnapshot, scheduleSave, saveNow, type PersistedSnapshot } from './persistStore.ts';
+import {
+  closeMongo,
+  initMongo,
+  loadMongoSnapshot,
+  mongoConfigured,
+  persistenceLabel,
+} from './mongoStore.ts';
 
 const { RtcRole, RtcTokenBuilder } = agoraToken as {
   RtcRole: { PUBLISHER: number; SUBSCRIBER: number };
@@ -59,6 +66,16 @@ const APP_ID = process.env.AGORA_APP_ID || '';
 const APP_CERT = process.env.AGORA_APP_CERTIFICATE || '';
 const PORT = Number(process.env.PORT || 4000);
 const ADMIN_KEY = process.env.ADMIN_API_KEY || 'coincall-admin';
+if (!process.env.ADMIN_API_KEY) {
+  console.warn(
+    '[security] ADMIN_API_KEY unset — using demo default. Set a strong key before real money.',
+  );
+}
+
+/** Non-admin client credits must match allowlist + per-request cap */
+const CLIENT_CREDIT_MAX = 500;
+const CLIENT_CREDIT_REASONS =
+  /^(check-?in|spin|lucky|referral|mission|vip|welcome|reward|daily|host_earn|call_earn|gift)/i;
 
 type CallStatus = 'ringing' | 'accepted' | 'rejected' | 'ended' | 'missed';
 
@@ -593,6 +610,7 @@ app.post('/api/calls/:id/gift-requests/:reqId/respond', (req, res) => {
 
   const action = String(req.body?.action || '').toLowerCase();
   const userId = String(req.body?.userId || call.userId).trim();
+  if (!requireUserMatch(req, res, userId)) return;
 
   if (action === 'decline' || action === 'reject') {
     gr.status = 'declined';
@@ -673,6 +691,7 @@ app.post('/api/gifts/send', (req, res) => {
     res.status(400).json({ error: 'userId, hostId, giftId required' });
     return;
   }
+  if (!requireUserMatch(req, res, userId)) return;
 
   const catalog = GIFT_CATALOG_SERVER[giftId];
   if (!catalog) {
@@ -998,11 +1017,13 @@ const iapReceipts = new Set<string>();
 })();
 
 function flushWalletsToDisk() {
+  // Legacy wallets.json kept as secondary backup; primary is coincall-snapshot.json
   saveWalletSnapshot({
     wallets: [...wallets.values()],
     ledger: Object.fromEntries([...walletLedger.entries()]),
     iapReceipts: [...iapReceipts],
   });
+  persist();
 }
 setInterval(flushWalletsToDisk, 15_000);
 
@@ -1291,24 +1312,34 @@ app.post('/api/wallet/me', (req, res) => {
   res.json({ wallet: walletPublic(row), created: !existed });
 });
 
+/**
+ * Host/user profile sync — does NOT accept client coinBalance (anti-fraud).
+ * Returns authoritative server wallet; may update displayName/role only.
+ */
 app.post('/api/wallet/sync', (req, res) => {
   const userId = String(req.body?.userId || '').trim();
-  const coinBalance = Number(req.body?.coinBalance);
-  if (!userId || !Number.isFinite(coinBalance) || coinBalance < 0) {
-    res.status(400).json({ error: 'userId and non-negative coinBalance required' });
+  if (!userId) {
+    res.status(400).json({ error: 'userId required' });
     return;
   }
+  if (!requireUserMatch(req, res, userId)) return;
   const row = ensureWallet(userId, {
     displayName: String(req.body?.displayName || 'Host'),
     role: req.body?.role === 'host' ? 'host' : 'user',
   });
-  row.coinBalance = Math.floor(coinBalance);
+  if (req.body?.displayName) {
+    row.displayName = String(req.body.displayName).slice(0, 40);
+  }
+  if (req.body?.role === 'host' || req.body?.role === 'user') {
+    row.role = req.body.role;
+  }
   wallets.set(userId, row);
-  broadcastWs({
-    type: 'wallet:updated',
-    payload: { userId, coinBalance: row.coinBalance, xp: row.xp },
+  persist();
+  res.json({
+    ok: true,
+    wallet: walletPublic(row),
+    note: 'coinBalance is server-authoritative; client balance ignored',
   });
-  res.json({ ok: true, wallet: walletPublic(row) });
 });
 
 app.post('/api/wallet/credit', (req, res) => {
@@ -1320,25 +1351,42 @@ app.post('/api/wallet/credit', (req, res) => {
     return;
   }
   if (!requireUserMatch(req, res, userId)) return;
+  const adminOk =
+    String(req.headers['x-admin-key'] || req.query.key || '').trim() === ADMIN_KEY;
+  const floored = Math.floor(amount);
+  if (!adminOk) {
+    if (floored > CLIENT_CREDIT_MAX) {
+      res.status(400).json({
+        error: `Client credit capped at ${CLIENT_CREDIT_MAX} (use admin for larger)`,
+      });
+      return;
+    }
+    if (!CLIENT_CREDIT_REASONS.test(reason)) {
+      res.status(400).json({
+        error: 'Credit reason not allowlisted',
+        hint: 'check-in, spin, referral, mission, VIP, welcome, reward, host_earn, …',
+      });
+      return;
+    }
+  }
   const row = ensureWallet(userId, {
     displayName: String(req.body?.displayName || 'Host'),
     role: req.body?.role === 'host' ? 'host' : 'user',
   });
-  row.coinBalance += Math.floor(amount);
-  row.xp += Math.floor(amount);
+  row.coinBalance += floored;
+  row.xp += floored;
   wallets.set(userId, row);
-  pushLedger(userId, Math.floor(amount), reason, 'credit');
+  pushLedger(userId, floored, reason, 'credit');
   const reasonLower = reason.toLowerCase();
   const isRecharge =
     reasonLower.includes('iap') ||
     reasonLower.includes('recharge') ||
     reasonLower.includes('topup') ||
-    reasonLower.includes('purchase') ||
-    req.body?.role === 'user';
+    reasonLower.includes('purchase');
   if (isRecharge) {
     recordUserRecharge({
       userId,
-      coins: Math.floor(amount),
+      coins: floored,
       userName: String(req.body?.displayName || req.body?.userName || row.displayName),
       roomId: String(req.body?.roomId || '').trim() || undefined,
     });
@@ -1373,12 +1421,23 @@ app.post('/api/wallet/premium', (req, res) => {
     return;
   }
   if (!requireUserMatch(req, res, userId)) return;
+  const adminOk =
+    String(req.headers['x-admin-key'] || req.query.key || '').trim() === ADMIN_KEY;
+  const allowFreeVip =
+    process.env.ALLOW_FREE_VIP === '1' || process.env.NODE_ENV !== 'production';
+  if (isPremium && !adminOk && !allowFreeVip) {
+    res.status(403).json({
+      error: 'VIP requires verified IAP (or admin). Set ALLOW_FREE_VIP=1 only for demos.',
+    });
+    return;
+  }
   const row = ensureWallet(userId);
   row.isPremium = isPremium;
   if (isPremium && planId) {
     pushLedger(userId, 0, `VIP plan · ${planId}`, 'credit');
   }
   wallets.set(userId, row);
+  persist();
   broadcastWs({
     type: 'wallet:updated',
     payload: { userId, coinBalance: row.coinBalance, xp: row.xp, isPremium },
@@ -1528,16 +1587,13 @@ app.post('/api/host/withdrawals', async (req, res) => {
     });
     return;
   }
+  if (!requireUserMatch(req, res, hostId)) return;
 
-  // Prefer client-synced balance if provided (Firebase is source of truth on host app)
-  const knownBalance = Number(req.body?.knownBalance);
+  // Server balance is authoritative — never trust client knownBalance
   const row = ensureWallet(hostId, {
     role: 'host',
     displayName: String(req.body?.displayName || 'Host'),
   });
-  if (Number.isFinite(knownBalance) && knownBalance >= 0) {
-    row.coinBalance = Math.floor(knownBalance);
-  }
 
   if (row.coinBalance < amountCoins) {
     res.status(402).json({ error: 'Insufficient host balance', wallet: walletPublic(row) });
@@ -1546,6 +1602,7 @@ app.post('/api/host/withdrawals', async (req, res) => {
 
   row.coinBalance -= amountCoins;
   wallets.set(hostId, row);
+  pushLedger(hostId, amountCoins, `withdrawal_${gateway}`, 'spend');
 
   const request: WithdrawalRequest = {
     id: `wd_${randomUUID()}`,
@@ -1590,6 +1647,7 @@ app.post('/api/host/withdrawals', async (req, res) => {
     wallets.set(hostId, row);
   }
 
+  persist();
   broadcastWs({
     type: 'withdrawal:created',
     payload: request,
@@ -1839,6 +1897,55 @@ function restoreFromDisk() {
 
 restoreFromDisk();
 
+async function applyMongoOrDisk() {
+  const ok = await initMongo();
+  if (!ok) return;
+  const snap = await loadMongoSnapshot();
+  if (!snap) {
+    console.log('[persist] Mongo empty — keeping disk/in-memory state');
+    return;
+  }
+  for (const w of snap.wallets || []) {
+    const row = w as unknown as WalletRow;
+    if (row?.userId) wallets.set(row.userId, row);
+  }
+  for (const block of snap.walletLedger || []) {
+    if (block?.userId && Array.isArray(block.entries)) {
+      walletLedger.set(block.userId, block.entries as unknown as LedgerEntry[]);
+    }
+  }
+  if (Array.isArray(snap.withdrawals)) {
+    withdrawals.length = 0;
+    withdrawals.push(...(snap.withdrawals as unknown as WithdrawalRequest[]));
+  }
+  if (Array.isArray(snap.reports)) {
+    reports.length = 0;
+    reports.push(...(snap.reports as unknown as ReportRow[]));
+  }
+  for (const token of snap.iapReceipts || []) iapReceipts.add(String(token));
+  if (Array.isArray(snap.massTextHistory)) {
+    massTextHistory.length = 0;
+    massTextHistory.push(
+      ...(snap.massTextHistory as unknown as typeof massTextHistory),
+    );
+  }
+  if (Array.isArray(snap.supportTickets)) {
+    supportTickets.length = 0;
+    supportTickets.push(
+      ...(snap.supportTickets as unknown as SupportTicket[]),
+    );
+  }
+  for (const room of snap.liveRooms || []) {
+    const id = String((room as { id?: string }).id || '');
+    if (id && (room as { isLive?: boolean }).isLive) {
+      liveRooms.set(id, room);
+    }
+  }
+  console.log(
+    `[persist] restored from Mongo wallets=${wallets.size} withdrawals=${withdrawals.length}`,
+  );
+}
+
 app.get('/api/ready', (_req, res) => {
   pruneHosts();
   res.json({
@@ -1849,7 +1956,8 @@ app.get('/api/ready', (_req, res) => {
     wallets: wallets.size,
     liveRooms: [...liveRooms.values()].filter((r) => r.isLive).length,
     withdrawals: withdrawals.length,
-    persistence: process.env.DATA_DIR ? 'data_dir' : 'local_dot_data',
+    persistence: persistenceLabel(),
+    mongoConfigured: mongoConfigured(),
     realtime: 'ws',
     iapStubAllowed:
       process.env.ALLOW_IAP_STUB === '1' || process.env.NODE_ENV !== 'production',
@@ -2108,6 +2216,16 @@ app.get('/api/live/token', (req, res) => {
       res.status(400).json({ error: 'hostId or channel required' });
       return;
     }
+    const adminOk = String(req.query.key || req.headers['x-admin-key'] || '') === ADMIN_KEY;
+    if (
+      !adminOk &&
+      !channel.startsWith('live_') &&
+      !channel.startsWith('party_') &&
+      !channel.startsWith('call_')
+    ) {
+      res.status(403).json({ error: 'Channel not allowed' });
+      return;
+    }
     const uid = Number(req.query.uid || Math.floor(100000 + Math.random() * 800000));
     // Publisher privilege so RTC subscribe works even if project role checks are strict
     res.json(mintToken(channel, uid, 'publisher'));
@@ -2282,6 +2400,11 @@ httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`Payout: POST /api/host/withdrawals`);
   console.log(`Hosts:  GET /api/hosts`);
   console.log(`Calls:  POST /api/calls`);
+  console.log(`Persist: ${persistenceLabel()}`);
+});
+
+void applyMongoOrDisk().catch((e) => {
+  console.warn('[persist] mongo boot skipped', e);
 });
 
 function flushPersist() {
@@ -2290,6 +2413,7 @@ function flushPersist() {
   } catch {
     /* ignore */
   }
+  void closeMongo();
 }
 
 process.on('SIGTERM', () => {

@@ -2,10 +2,12 @@
  * Durable JSON snapshot for critical API state.
  * Survives process restarts on the same machine/volume.
  * On Render free tier the disk is ephemeral across deploys — set DATA_DIR
- * to a persistent disk mount when available, or later swap for MongoDB.
+ * to a persistent disk mount when available, and/or MONGODB_URI for Mongo.
+ * Disk writes always succeed independently of Mongo.
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { saveMongoSnapshot } from './mongoStore.ts';
 
 const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), '.data');
 const SNAPSHOT = path.join(DATA_DIR, 'coincall-snapshot.json');
@@ -33,6 +35,14 @@ export function ensureDataDir() {
   }
 }
 
+function writeDisk(snap: PersistedSnapshot) {
+  ensureDataDir();
+  const tmp = `${SNAPSHOT}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(snap));
+  fs.renameSync(tmp, SNAPSHOT);
+  void saveMongoSnapshot(snap);
+}
+
 export function loadSnapshot(): PersistedSnapshot | null {
   try {
     ensureDataDir();
@@ -52,11 +62,7 @@ export function scheduleSave(build: () => PersistedSnapshot) {
   saveTimer = setTimeout(() => {
     saveTimer = null;
     try {
-      ensureDataDir();
-      const snap = build();
-      const tmp = `${SNAPSHOT}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify(snap));
-      fs.renameSync(tmp, SNAPSHOT);
+      writeDisk(build());
     } catch (e) {
       console.warn('[persist] save failed', e);
     }
@@ -69,11 +75,7 @@ export function saveNow(build: () => PersistedSnapshot) {
     saveTimer = null;
   }
   try {
-    ensureDataDir();
-    const snap = build();
-    const tmp = `${SNAPSHOT}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(snap));
-    fs.renameSync(tmp, SNAPSHOT);
+    writeDisk(build());
   } catch (e) {
     console.warn('[persist] saveNow failed', e);
   }

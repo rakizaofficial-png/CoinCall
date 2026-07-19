@@ -69,6 +69,35 @@ async function main() {
     }
   });
 
+  await check('POST /wallet/credit requires X-User-Id', async () => {
+    const res = await fetch(`${API}/wallet/credit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: 'smoke_noauth', amount: 1, reason: 'reward:smoke' }),
+    });
+    if (res.status !== 401) throw new Error(`expected 401 got ${res.status}`);
+  });
+
+  await check('POST /calls/route AI fallback', async () => {
+    const d = await json('/calls/route', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hostId: 'offline_host_smoke_xyz' }),
+    });
+    if (!d.decision?.transport) throw new Error('no decision');
+    if (
+      d.decision.transport !== 'ai_prerecorded' &&
+      d.decision.transport !== 'agora_live'
+    ) {
+      throw new Error(`unexpected transport ${d.decision.transport}`);
+    }
+  });
+
+  await check('GET /ai-hosts', async () => {
+    const d = await json('/ai-hosts');
+    if (!Array.isArray(d.hosts) || d.hosts.length < 1) throw new Error('no ai hosts');
+  });
+
   await check('POST /host/mass-text', async () => {
     await json('/host/mass-text', {
       method: 'POST',

@@ -8,12 +8,15 @@ export async function syncHostWalletBalance(input: {
   displayName?: string;
 }) {
   const base = env.apiBaseUrl.replace(/\/$/, '');
+  // Profile sync only — server ignores client coinBalance (anti-fraud)
   await fetch(`${base}/wallet/sync`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-User-Id': input.hostId,
+    },
     body: JSON.stringify({
       userId: input.hostId,
-      coinBalance: input.coinBalance,
       displayName: input.displayName,
       role: 'host',
     }),
@@ -37,11 +40,16 @@ export async function creditHostEarnings(input: {
   const base = env.apiBaseUrl.replace(/\/$/, '');
   const res = await fetch(`${base}/wallet/credit`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-User-Id': input.hostId,
+    },
     body: JSON.stringify({
       userId: input.hostId,
       amount: input.amount,
-      reason: input.reason,
+      reason: input.reason.startsWith('host_earn')
+        ? input.reason
+        : `host_earn:${input.reason}`,
       displayName: input.displayName,
       role: 'host',
     }),
