@@ -60,7 +60,8 @@ const { RtcRole, RtcTokenBuilder } = agoraToken as {
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+// Host presence / live rooms used to POST huge data: avatar URLs — allow 2mb
+app.use(express.json({ limit: '2mb' }));
 
 const APP_ID = process.env.AGORA_APP_ID || '';
 const APP_CERT = process.env.AGORA_APP_CERTIFICATE || '';
@@ -1851,6 +1852,80 @@ type LiveCommentRow = {
 };
 const liveComments = new Map<string, LiveCommentRow[]>();
 
+/** 1:1 DMs between Luma users and CoinCall hosts */
+type DmMessageRow = {
+  id: string;
+  fromId: string;
+  toId: string;
+  fromName: string;
+  fromAvatar?: string;
+  text: string;
+  createdAt: number;
+  kind: 'text' | 'image';
+};
+type DmThreadMeta = {
+  id: string;
+  userId: string;
+  userName: string;
+  userAvatar?: string;
+  hostId: string;
+  hostName: string;
+  hostAvatar?: string;
+  lastMessage: string;
+  updatedAt: number;
+};
+const dmMessages = new Map<string, DmMessageRow[]>();
+const dmThreads = new Map<string, DmThreadMeta>();
+
+function dmChatId(a: string, b: string) {
+  return [a, b].sort().join('_');
+}
+
+function upsertDmThread(input: {
+  userId: string;
+  userName: string;
+  userAvatar?: string;
+  hostId: string;
+  hostName: string;
+  hostAvatar?: string;
+  lastMessage: string;
+  at: number;
+}) {
+  const id = dmChatId(input.userId, input.hostId);
+  const prev = dmThreads.get(id);
+  dmThreads.set(id, {
+    id,
+    userId: input.userId,
+    userName: input.userName || prev?.userName || 'Fan',
+    userAvatar: input.userAvatar || prev?.userAvatar,
+    hostId: input.hostId,
+    hostName: input.hostName || prev?.hostName || 'Host',
+    hostAvatar: input.hostAvatar || prev?.hostAvatar,
+    lastMessage: input.lastMessage,
+    updatedAt: input.at,
+  });
+  return dmThreads.get(id)!;
+}
+
+function pushDmMessage(row: Omit<DmMessageRow, 'id' | 'createdAt'> & { createdAt?: number }) {
+  const chatId = dmChatId(row.fromId, row.toId);
+  const list = dmMessages.get(chatId) || [];
+  const msg: DmMessageRow = {
+    id: randomUUID().slice(0, 12),
+    createdAt: row.createdAt || Date.now(),
+    fromId: row.fromId,
+    toId: row.toId,
+    fromName: row.fromName,
+    fromAvatar: row.fromAvatar,
+    text: row.text,
+    kind: row.kind || 'text',
+  };
+  list.push(msg);
+  while (list.length > 200) list.shift();
+  dmMessages.set(chatId, list);
+  return { chatId, msg };
+}
+
 function pushLiveComment(roomId: string, row: Omit<LiveCommentRow, 'id' | 'createdAt'> & { createdAt?: number }) {
   const list = liveComments.get(roomId) || [];
   const comment: LiveCommentRow = {
@@ -1899,6 +1974,10 @@ function buildSnapshot(): PersistedSnapshot {
     iapReceipts: [...iapReceipts],
     supportTickets: supportTickets as Array<Record<string, unknown>>,
     liveRooms: [...liveRooms.values()] as Array<Record<string, unknown>>,
+    dmChats: [...dmThreads.values()].map((t) => ({
+      ...t,
+      messages: dmMessages.get(t.id) || [],
+    })) as Array<Record<string, unknown>>,
   };
 }
 
@@ -1945,8 +2024,27 @@ function restoreFromDisk() {
       liveRooms.set(id, room);
     }
   }
+  for (const chat of snap.dmChats || []) {
+    const id = String((chat as { id?: string }).id || '');
+    if (!id) continue;
+    const row = chat as DmThreadMeta & { messages?: DmMessageRow[] };
+    dmThreads.set(id, {
+      id,
+      userId: String(row.userId || ''),
+      userName: String(row.userName || 'Fan'),
+      userAvatar: row.userAvatar ? String(row.userAvatar) : undefined,
+      hostId: String(row.hostId || ''),
+      hostName: String(row.hostName || 'Host'),
+      hostAvatar: row.hostAvatar ? String(row.hostAvatar) : undefined,
+      lastMessage: String(row.lastMessage || ''),
+      updatedAt: Number(row.updatedAt || Date.now()),
+    });
+    if (Array.isArray(row.messages)) {
+      dmMessages.set(id, row.messages);
+    }
+  }
   console.log(
-    `[persist] restored wallets=${wallets.size} withdrawals=${withdrawals.length} liveRooms=${liveRooms.size}`,
+    `[persist] restored wallets=${wallets.size} withdrawals=${withdrawals.length} liveRooms=${liveRooms.size} dm=${dmThreads.size}`,
   );
 }
 
@@ -2464,6 +2562,80 @@ app.post('/api/admin/support/tickets/:id/status', (req, res) => {
   res.json({ ok: true, ticket });
 });
 
+/** -------- Direct messages (Luma user ↔ Host) -------- */
+app.post('/api/dm/send', (req, res) => {
+  const fromId = String(req.body?.fromId || '').trim();
+  const toId = String(req.body?.toId || '').trim();
+  const text = String(req.body?.text || '').trim().slice(0, 500);
+  const fromName = String(req.body?.fromName || 'User').trim().slice(0, 40) || 'User';
+  const fromAvatar = req.body?.fromAvatar ? String(req.body.fromAvatar).slice(0, 500) : undefined;
+  const fromRole = String(req.body?.fromRole || 'user') === 'host' ? 'host' : 'user';
+  const peerName = String(req.body?.peerName || '').trim().slice(0, 40);
+  const peerAvatar = req.body?.peerAvatar ? String(req.body.peerAvatar).slice(0, 500) : undefined;
+
+  if (!fromId || !toId || !text) {
+    res.status(400).json({ error: 'fromId, toId, text required' });
+    return;
+  }
+
+  const { chatId, msg } = pushDmMessage({
+    fromId,
+    toId,
+    fromName,
+    fromAvatar,
+    text,
+    kind: 'text',
+  });
+
+  const userId = fromRole === 'user' ? fromId : toId;
+  const hostId = fromRole === 'host' ? fromId : toId;
+  const userName = fromRole === 'user' ? fromName : peerName || 'Fan';
+  const hostName = fromRole === 'host' ? fromName : peerName || 'Host';
+  const userAvatar = fromRole === 'user' ? fromAvatar : peerAvatar;
+  const hostAvatar = fromRole === 'host' ? fromAvatar : peerAvatar;
+
+  const thread = upsertDmThread({
+    userId,
+    userName,
+    userAvatar,
+    hostId,
+    hostName,
+    hostAvatar,
+    lastMessage: text,
+    at: msg.createdAt,
+  });
+
+  const payload = { chatId, message: msg, thread };
+  broadcastWs({ type: 'dm:message', payload });
+  pushToHost(hostId, 'dm_message', payload);
+  persist();
+  res.status(201).json({ ok: true, ...payload });
+});
+
+app.get('/api/dm/threads', (req, res) => {
+  const userId = String(req.query.userId || '').trim();
+  const hostId = String(req.query.hostId || '').trim();
+  let threads = [...dmThreads.values()];
+  if (userId) threads = threads.filter((t) => t.userId === userId);
+  if (hostId) threads = threads.filter((t) => t.hostId === hostId);
+  threads.sort((a, b) => b.updatedAt - a.updatedAt);
+  res.json({ threads });
+});
+
+app.get('/api/dm/messages', (req, res) => {
+  const a = String(req.query.a || req.query.userId || '').trim();
+  const b = String(req.query.b || req.query.hostId || '').trim();
+  if (!a || !b) {
+    res.status(400).json({ error: 'a and b (userId/hostId) required' });
+    return;
+  }
+  const chatId = dmChatId(a, b);
+  res.json({
+    chatId,
+    messages: dmMessages.get(chatId) || [],
+  });
+});
+
 const httpServer = createServer(app);
 const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
 
@@ -2531,6 +2703,43 @@ wss.on('connection', (socket, req) => {
             toHostId: raw.toHostId || payload.toHostId,
           },
         });
+      }
+
+      if (type === 'dm:send') {
+        const fromId = String(
+          payload.fromId || (raw as { fromId?: string }).fromId || raw.fromUserId || userId,
+        );
+        const toId = String(
+          payload.toId || (raw as { toId?: string }).toId || raw.toHostId || '',
+        );
+        const dmText = String(payload.text || text || '').trim().slice(0, 500);
+        if (fromId && toId && dmText) {
+          const fromRole = String(payload.fromRole || (raw as { fromRole?: string }).fromRole || 'user') === 'host' ? 'host' : 'user';
+          const fromName = String(
+            payload.fromName || (raw as { fromName?: string }).fromName || userName || 'User',
+          ).slice(0, 40);
+          const { chatId, msg } = pushDmMessage({
+            fromId,
+            toId,
+            fromName,
+            text: dmText,
+            kind: 'text',
+          });
+          const uId = fromRole === 'user' ? fromId : toId;
+          const hId = fromRole === 'host' ? fromId : toId;
+          const thread = upsertDmThread({
+            userId: uId,
+            userName: fromRole === 'user' ? fromName : String(payload.peerName || 'Fan'),
+            hostId: hId,
+            hostName: fromRole === 'host' ? fromName : String(payload.peerName || 'Host'),
+            lastMessage: dmText,
+            at: msg.createdAt,
+          });
+          const dmPayload = { chatId, message: msg, thread };
+          broadcastWs({ type: 'dm:message', payload: dmPayload });
+          pushToHost(hId, 'dm_message', dmPayload);
+          persist();
+        }
       }
 
       if (type === 'gift:request') {

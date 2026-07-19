@@ -62,6 +62,16 @@ export async function publishHostPresence(input: {
   isOnCall?: boolean;
   workspaceMode?: 'waiting_1v1' | 'solo_calling';
 }) {
+  let avatarUrl = input.avatarUrl;
+  if (
+    avatarUrl &&
+    (avatarUrl.startsWith('data:') ||
+      avatarUrl.startsWith('blob:') ||
+      avatarUrl.length > 500)
+  ) {
+    avatarUrl = undefined;
+  }
+
   const res = await fetch(`${base()}/hosts/presence`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -71,6 +81,7 @@ export async function publishHostPresence(input: {
       isOnCall: false,
       workspaceMode: 'waiting_1v1',
       ...input,
+      avatarUrl,
     }),
   });
   if (!res.ok) {

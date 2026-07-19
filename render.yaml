@@ -24,6 +24,8 @@ services:
         sync: false
 
   # Host app (Expo web export) — hosts Go Online & accept Luma calls
+  # EXPO_PUBLIC_* must be set in the dashboard (baked at build). Code also
+  # ships public Firebase/Agora fallbacks so login works if env is missing.
   - type: web
     name: coincall-host
     runtime: static
