@@ -19,6 +19,10 @@ import {
   registerAgencyRoutes,
 } from './agencyManagement.ts';
 import {
+  loadWalletSnapshot,
+  saveWalletSnapshot,
+} from './persist.ts';
+import {
   computeReadyToCall,
   getPresence,
   listPresence,
@@ -30,6 +34,7 @@ import {
   type HostPresence,
   type HostWorkspaceMode,
 } from './presenceStore.ts';
+import { loadSnapshot, scheduleSave, saveNow, type PersistedSnapshot } from './persistStore.ts';
 
 const { RtcRole, RtcTokenBuilder } = agoraToken as {
   RtcRole: { PUBLISHER: number; SUBSCRIBER: number };
@@ -134,6 +139,19 @@ function isListablePresence(h: HostPresence): boolean {
   return gate.ok;
 }
 
+function requireUserMatch(req: express.Request, res: express.Response, userId: string): boolean {
+  const headerId = String(req.headers['x-user-id'] || '').trim();
+  const adminKeyHdr = String(req.headers['x-admin-key'] || req.query.key || '').trim();
+  if (adminKeyHdr && adminKeyHdr === ADMIN_KEY) return true;
+  if (!userId) {
+    res.status(400).json({ error: 'userId required' });
+    return false;
+  }
+  if (headerId && headerId === userId) return true;
+  res.status(401).json({ error: 'X-User-Id must match userId (or admin key)' });
+  return false;
+}
+
 function requireAdmin(req: express.Request, res: express.Response): boolean {
   const key = String(req.headers['x-admin-key'] || req.query.key || '');
   if (key !== ADMIN_KEY) {
@@ -184,6 +202,8 @@ app.get('/api/health', (_req, res) => {
     activeCalls: [...calls.values()].filter(
       (c) => c.status === 'ringing' || c.status === 'accepted',
     ).length,
+    realtime: 'ws',
+    stack: 'express+ws+agora+firebase-clients',
   });
 });
 
@@ -195,6 +215,11 @@ app.get('/api/agora/token', (req, res) => {
     const channel = String(req.query.channel || '').trim();
     if (!channel) {
       res.status(400).json({ error: 'channel is required' });
+      return;
+    }
+    const adminOk = String(req.query.key || req.headers['x-admin-key'] || '') === ADMIN_KEY;
+    if (!adminOk && !channel.startsWith('call_') && !channel.startsWith('live_') && !channel.startsWith('party_')) {
+      res.status(403).json({ error: 'Channel not allowed' });
       return;
     }
     const uid = Number(req.query.uid || 0);
@@ -956,7 +981,31 @@ const wallets = new Map<string, WalletRow>();
 const walletLedger = new Map<string, LedgerEntry[]>();
 const withdrawals: WithdrawalRequest[] = [];
 const reports: ReportRow[] = [];
+
 const iapReceipts = new Set<string>();
+
+(function hydrateWalletsFromDisk() {
+  const snap = loadWalletSnapshot();
+  if (!snap) return;
+  for (const w of snap.wallets || []) {
+    wallets.set(w.userId, { ...w } as WalletRow);
+  }
+  for (const [uid, list] of Object.entries(snap.ledger || {})) {
+    walletLedger.set(uid, list as LedgerEntry[]);
+  }
+  for (const tok of snap.iapReceipts || []) iapReceipts.add(tok);
+  console.log(`[persist] restored ${wallets.size} wallets from disk`);
+})();
+
+function flushWalletsToDisk() {
+  saveWalletSnapshot({
+    wallets: [...wallets.values()],
+    ledger: Object.fromEntries([...walletLedger.entries()]),
+    iapReceipts: [...iapReceipts],
+  });
+}
+setInterval(flushWalletsToDisk, 15_000);
+
 
 /** Active app users (WS / heartbeat) — mass text targets */
 type ActiveUserRow = {
@@ -1129,6 +1178,7 @@ function pushLedger(
   const list = walletLedger.get(userId) || [];
   list.unshift(entry);
   walletLedger.set(userId, list.slice(0, 100));
+  persist();
   return entry;
 }
 
@@ -1269,6 +1319,7 @@ app.post('/api/wallet/credit', (req, res) => {
     res.status(400).json({ error: 'userId and positive amount required' });
     return;
   }
+  if (!requireUserMatch(req, res, userId)) return;
   const row = ensureWallet(userId, {
     displayName: String(req.body?.displayName || 'Host'),
     role: req.body?.role === 'host' ? 'host' : 'user',
@@ -1321,6 +1372,7 @@ app.post('/api/wallet/premium', (req, res) => {
     res.status(400).json({ error: 'userId required' });
     return;
   }
+  if (!requireUserMatch(req, res, userId)) return;
   const row = ensureWallet(userId);
   row.isPremium = isPremium;
   if (isPremium && planId) {
@@ -1348,6 +1400,7 @@ app.post('/api/wallet/spend', (req, res) => {
     res.status(400).json({ error: 'userId and positive amount required' });
     return;
   }
+  if (!requireUserMatch(req, res, userId)) return;
   const row = ensureWallet(userId);
   if (row.coinBalance < amount) {
     res.status(402).json({ error: 'Insufficient coins', wallet: walletPublic(row) });
@@ -1396,6 +1449,7 @@ app.post('/api/wallet/iap/verify', (req, res) => {
     res.status(400).json({ error: 'userId, productId, purchaseToken required' });
     return;
   }
+  if (!requireUserMatch(req, res, userId)) return;
   if (iapReceipts.has(purchaseToken)) {
     res.status(409).json({ error: 'Purchase already redeemed' });
     return;
@@ -1403,11 +1457,31 @@ app.post('/api/wallet/iap/verify', (req, res) => {
 
   const googleReady = Boolean(process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON);
   const appleReady = Boolean(process.env.APPLE_IAP_SHARED_SECRET);
+  const allowStub =
+    process.env.ALLOW_IAP_STUB === '1' || process.env.NODE_ENV !== 'production';
   if (platform === 'google' && !googleReady) {
+    if (!allowStub) {
+      res.status(503).json({
+        error: 'Google Play IAP not configured. Set GOOGLE_PLAY_SERVICE_ACCOUNT_JSON.',
+      });
+      return;
+    }
     console.warn('[IAP] GOOGLE_PLAY_SERVICE_ACCOUNT_JSON missing — stub accept');
   }
   if (platform === 'apple' && !appleReady) {
+    if (!allowStub) {
+      res.status(503).json({
+        error: 'Apple IAP not configured. Set APPLE_IAP_SHARED_SECRET.',
+      });
+      return;
+    }
     console.warn('[IAP] APPLE_IAP_SHARED_SECRET missing — stub accept');
+  }
+  if (platform === 'web' && !allowStub) {
+    res.status(503).json({
+      error: 'Web IAP stub disabled in production. Set ALLOW_IAP_STUB=1 for demo only.',
+    });
+    return;
   }
 
   iapReceipts.add(purchaseToken);
@@ -1697,6 +1771,91 @@ registerAgencyRoutes(app, {
 /** In-memory live rooms (Firebase is source of truth on clients; API mirrors for Luma) */
 const liveRooms = new Map<string, Record<string, unknown>>();
 
+function buildSnapshot(): PersistedSnapshot {
+  return {
+    version: 1,
+    savedAt: Date.now(),
+    wallets: [...wallets.values()] as Array<Record<string, unknown>>,
+    walletLedger: [...walletLedger.entries()].map(([userId, entries]) => ({
+      userId,
+      entries: entries as Array<Record<string, unknown>>,
+    })),
+    withdrawals: withdrawals as Array<Record<string, unknown>>,
+    reports: reports as Array<Record<string, unknown>>,
+    massTextHistory: massTextHistory as Array<Record<string, unknown>>,
+    iapReceipts: [...iapReceipts],
+    supportTickets: supportTickets as Array<Record<string, unknown>>,
+    liveRooms: [...liveRooms.values()] as Array<Record<string, unknown>>,
+  };
+}
+
+function persist() {
+  scheduleSave(buildSnapshot);
+}
+
+function restoreFromDisk() {
+  const snap = loadSnapshot();
+  if (!snap) return;
+  for (const w of snap.wallets || []) {
+    const row = w as unknown as WalletRow;
+    if (row?.userId) wallets.set(row.userId, row);
+  }
+  for (const block of snap.walletLedger || []) {
+    if (block?.userId && Array.isArray(block.entries)) {
+      walletLedger.set(block.userId, block.entries as unknown as LedgerEntry[]);
+    }
+  }
+  if (Array.isArray(snap.withdrawals)) {
+    withdrawals.length = 0;
+    withdrawals.push(...(snap.withdrawals as unknown as WithdrawalRequest[]));
+  }
+  if (Array.isArray(snap.reports)) {
+    reports.length = 0;
+    reports.push(...(snap.reports as unknown as ReportRow[]));
+  }
+  for (const token of snap.iapReceipts || []) iapReceipts.add(String(token));
+  if (Array.isArray(snap.massTextHistory)) {
+    massTextHistory.length = 0;
+    massTextHistory.push(
+      ...(snap.massTextHistory as unknown as typeof massTextHistory),
+    );
+  }
+  if (Array.isArray(snap.supportTickets)) {
+    supportTickets.length = 0;
+    supportTickets.push(
+      ...(snap.supportTickets as unknown as SupportTicket[]),
+    );
+  }
+  for (const room of snap.liveRooms || []) {
+    const id = String((room as { id?: string }).id || '');
+    if (id && (room as { isLive?: boolean }).isLive) {
+      liveRooms.set(id, room);
+    }
+  }
+  console.log(
+    `[persist] restored wallets=${wallets.size} withdrawals=${withdrawals.length} liveRooms=${liveRooms.size}`,
+  );
+}
+
+restoreFromDisk();
+
+app.get('/api/ready', (_req, res) => {
+  pruneHosts();
+  res.json({
+    ok: true,
+    agoraConfigured: Boolean(APP_ID && APP_CERT),
+    onlineHosts: presenceCountOnline(),
+    readyHosts: listPresence().filter((h) => h.readyToCall).length,
+    wallets: wallets.size,
+    liveRooms: [...liveRooms.values()].filter((r) => r.isLive).length,
+    withdrawals: withdrawals.length,
+    persistence: process.env.DATA_DIR ? 'data_dir' : 'local_dot_data',
+    realtime: 'ws',
+    iapStubAllowed:
+      process.env.ALLOW_IAP_STUB === '1' || process.env.NODE_ENV !== 'production',
+  });
+});
+
 app.post('/api/live/rooms', (req, res) => {
   const room = { ...(req.body as Record<string, unknown>) };
   const id = String(room?.id || '');
@@ -1733,6 +1892,7 @@ app.post('/api/live/rooms', (req, res) => {
     }
   }
   broadcastWs({ type: 'live:room', payload: room });
+  persist();
   res.json({ ok: true, room });
 });
 
@@ -1898,6 +2058,7 @@ app.post('/api/host/mass-text', (req, res) => {
     title: 'Mass texting sent',
     body: `Sent to ${targets.length} users`,
   });
+  persist();
 
   res.json({
     ok: true,
@@ -2121,4 +2282,21 @@ httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`Payout: POST /api/host/withdrawals`);
   console.log(`Hosts:  GET /api/hosts`);
   console.log(`Calls:  POST /api/calls`);
+});
+
+function flushPersist() {
+  try {
+    saveNow(buildSnapshot);
+  } catch {
+    /* ignore */
+  }
+}
+
+process.on('SIGTERM', () => {
+  flushPersist();
+  process.exit(0);
+});
+process.on('SIGINT', () => {
+  flushPersist();
+  process.exit(0);
 });
