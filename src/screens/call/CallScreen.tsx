@@ -30,8 +30,11 @@ import { endBridgeCall, fetchCallToken, watchBridgeCallEnd } from '../../service
 import { listenGiftRequestEvents } from '../../services/giftRequestService';
 import {
   endActiveCall,
+  endCallSession,
+  listenCallSessionEnded,
   publishActiveCall,
   updateActiveCall,
+  upsertCallSession,
 } from '../../services/realtimeService';
 import { radii } from '../../theme/colors';
 import { useTheme } from '../../theme/ThemeContext';
@@ -98,6 +101,7 @@ export function CallScreen({ navigation, route }: Props) {
   const [disconnected, setDisconnected] = useState(false);
   const agoraReady = isAgoraConfigured() && Platform.OS === 'web';
   const activeCallIdRef = useRef<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const localRef = useRef<HTMLDivElement | null>(null);
   const remoteRef = useRef<HTMLDivElement | null>(null);
   const leavingRef = useRef(false);
@@ -141,11 +145,30 @@ export function CallScreen({ navigation, route }: Props) {
     return () => clearInterval(t);
   }, [isBridge, rate]);
 
+  // Publish shared Firebase session for BOTH demo + bridge calls
   useEffect(() => {
-    if (isBridge) return;
-    if (!call || call.status !== 'active' || !peerHost) return;
     let cancelled = false;
     (async () => {
+      if (isBridge && bridgeCallId) {
+        const callerId = route.params.hostId || 'caller';
+        const record = await upsertCallSession({
+          id: bridgeCallId,
+          channel,
+          hostId: user.id,
+          hostName: user.name,
+          hostAvatar: user.avatarUrl,
+          userId: callerId,
+          userName: peerName,
+          userAvatar: peerAvatar,
+          ratePerMinute: rate,
+        });
+        if (!cancelled && record) {
+          activeCallIdRef.current = record.id;
+          setSessionId(record.id);
+        }
+        return;
+      }
+      if (!call || call.status !== 'active' || !peerHost) return;
       const record = await publishActiveCall({
         channel,
         hostUid: user.id,
@@ -154,20 +177,37 @@ export function CallScreen({ navigation, route }: Props) {
         peerId: peerHost.id,
         peerName: peerHost.name,
       });
-      if (!cancelled && record) activeCallIdRef.current = record.id;
+      if (!cancelled && record) {
+        activeCallIdRef.current = record.id;
+        setSessionId(record.id);
+        await upsertCallSession({
+          id: record.id,
+          channel,
+          hostId: user.id,
+          hostName: user.name,
+          hostAvatar: user.avatarUrl,
+          userId: peerHost.id,
+          userName: peerHost.name,
+          userAvatar: peerHost.avatarUrl,
+          ratePerMinute: rate,
+        });
+      }
     })();
     return () => {
       cancelled = true;
-      const id = activeCallIdRef.current;
-      activeCallIdRef.current = null;
-      void endActiveCall(id);
     };
   }, [
+    bridgeCallId,
     call?.status,
     channel,
     isBridge,
+    peerAvatar,
+    peerHost?.avatarUrl,
     peerHost?.id,
     peerHost?.name,
+    peerName,
+    rate,
+    route.params.hostId,
     user.avatarUrl,
     user.id,
     user.name,
@@ -180,6 +220,15 @@ export function CallScreen({ navigation, route }: Props) {
       coinsEarned: call.coinsSpent,
     });
   }, [call?.seconds, call?.coinsSpent, isBridge]);
+
+  // Synced end: when callSessions/{id}.status === ended, BOTH sides leave
+  useEffect(() => {
+    const sid = bridgeCallId || sessionId;
+    if (!sid) return;
+    return listenCallSessionEnded(sid, () => {
+      void leaveAfterDisconnect();
+    });
+  }, [bridgeCallId, leaveAfterDisconnect, sessionId]);
 
   useEffect(() => {
     if (!agoraReady || !channel || !surfacesReady) return;
@@ -278,6 +327,11 @@ export function CallScreen({ navigation, route }: Props) {
 
   const hangUp = async () => {
     if (leavingRef.current) return;
+    const sid = bridgeCallId || sessionId || activeCallIdRef.current;
+    // Status → ended first so BOTH sides leave via RTDB listener
+    if (sid) {
+      await endCallSession(sid, 'host_hangup').catch(() => undefined);
+    }
     if (bridgeCallId) {
       try {
         await endBridgeCall(bridgeCallId);

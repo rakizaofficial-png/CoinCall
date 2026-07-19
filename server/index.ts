@@ -18,6 +18,7 @@ import {
   publicAgency,
   registerAgencyRoutes,
 } from './agencyManagement.ts';
+import { registerVideoLibraryRoutes } from './videoLibrary.ts';
 import {
   loadWalletSnapshot,
   saveWalletSnapshot,
@@ -2371,6 +2372,8 @@ function broadcastWs(event: unknown) {
 }
 
 registerHostManagementRoutes(app, { requireAdmin, broadcastWs });
+
+registerVideoLibraryRoutes(app, { requireAdmin });
 
 registerAgencyRoutes(app, {
   requireAdmin,

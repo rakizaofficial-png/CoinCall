@@ -35,6 +35,7 @@ import {
 import { MoneyDesk } from './components/MoneyDesk';
 import { RevenuePanel } from './components/RevenuePanel';
 import { UsersWalletsPanel } from './components/UsersWallets';
+import { VideoLibraryPanel } from './components/VideoLibraryPanel';
 import { adminKey, firebaseReady } from './firebase';
 import {
   canAccess,
@@ -75,6 +76,7 @@ const ICONS: Partial<Record<Tab, string>> = {
   payouts: 'M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6',
   reports: 'M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z',
   control: 'M12 15a3 3 0 100-6 3 3 0 000 6z',
+  videos: 'M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z',
 };
 
 const LABELS: Record<Tab, string> = {
@@ -89,6 +91,7 @@ const LABELS: Record<Tab, string> = {
   control: 'Remote control',
   payouts: 'Financials',
   reports: 'Reports',
+  videos: 'Videos',
 };
 
 const GROUPS: Record<Tab, string> = {
@@ -103,6 +106,7 @@ const GROUPS: Record<Tab, string> = {
   reports: 'Finance',
   calls: 'Live',
   control: 'Live',
+  videos: 'Content',
 };
 
 function PageHead({
@@ -695,6 +699,7 @@ export default function App() {
               <HostManagementPanel firebaseHosts={hosts} />
             ) : null}
             {tab === 'users' ? <UsersWalletsPanel /> : null}
+            {tab === 'videos' ? <VideoLibraryPanel /> : null}
             {tab === 'revenue' ? <RevenuePanel agencyId={agencyId} /> : null}
 
             {tab === 'calls' ? (

@@ -23,6 +23,10 @@ import {
   type HostEarningsPayload,
   type HostGiftHistoryRow,
 } from '../../services/hostEarningsApi';
+import {
+  fetchHostWeeklyEarnings,
+  type WeeklyEarningsRow,
+} from '../../services/realtimeService';
 import { radii } from '../../theme/colors';
 import { useTheme } from '../../theme/ThemeContext';
 
@@ -31,14 +35,30 @@ export function EarningsScreen({ navigation }: { navigation: any }) {
   const { colors } = useTheme();
   const { user } = useApp();
   const [payload, setPayload] = useState<HostEarningsPayload | null>(null);
+  const [weekly, setWeekly] = useState<WeeklyEarningsRow | null>(null);
+  const [fbStats, setFbStats] = useState<{
+    totalCallCoins: number;
+    totalMinutes: number;
+    totalCalls: number;
+  } | null>(null);
+  const [fbBalance, setFbBalance] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
 
   const load = useCallback(async () => {
     if (!user.id) return;
     setLoading(true);
     try {
-      const data = await fetchHostEarnings(user.id);
-      setPayload(data);
+      const [data, fb] = await Promise.all([
+        fetchHostEarnings(user.id).catch(() => null),
+        fetchHostWeeklyEarnings(user.id).catch(() => null),
+      ]);
+      if (data) setPayload(data);
+      else setPayload(null);
+      if (fb) {
+        setWeekly(fb.week);
+        setFbStats(fb.stats);
+        setFbBalance(fb.walletBalance);
+      }
     } catch {
       setPayload(null);
     } finally {
@@ -55,10 +75,27 @@ export function EarningsScreen({ navigation }: { navigation: any }) {
   const summary = payload?.summary;
   const calls: HostCallHistoryRow[] = payload?.calls || [];
   const gifts: HostGiftHistoryRow[] = payload?.gifts || [];
-  const callCoins = summary?.callCoins ?? 0;
-  const giftCoins = summary?.giftCoins ?? 0;
-  const totalCoins = summary?.totalCoins ?? 0;
-  const balance = summary?.walletBalance ?? user.coinBalance;
+  const callCoins = Math.max(
+    summary?.callCoins ?? 0,
+    fbStats?.totalCallCoins ?? 0,
+    weekly?.coins ?? 0,
+  );
+  const giftCoins = Math.max(summary?.giftCoins ?? 0, weekly?.giftCoins ?? 0);
+  const totalCoins = Math.max(summary?.totalCoins ?? 0, callCoins + giftCoins);
+  const balance =
+    fbBalance && fbBalance > 0
+      ? fbBalance
+      : (summary?.walletBalance ?? user.coinBalance);
+  const totalCalls = Math.max(
+    summary?.totalCalls ?? 0,
+    fbStats?.totalCalls ?? 0,
+    weekly?.callCount ?? 0,
+  );
+  const totalDurationSec = Math.max(
+    summary?.totalDurationSec ?? 0,
+    (fbStats?.totalMinutes ?? 0) * 60,
+    (weekly?.callMinutes ?? 0) * 60,
+  );
 
   return (
     <Screen
@@ -93,12 +130,12 @@ export function EarningsScreen({ navigation }: { navigation: any }) {
           {
             icon: Users,
             label: 'Calls',
-            value: summary?.totalCalls ?? 0,
+            value: totalCalls,
           },
           {
             icon: Clock,
             label: 'Call time',
-            value: formatDuration(summary?.totalDurationSec ?? 0),
+            value: formatDuration(totalDurationSec),
           },
           {
             icon: Gift,
@@ -113,6 +150,28 @@ export function EarningsScreen({ navigation }: { navigation: any }) {
           </GlassCard>
         ))}
       </View>
+
+      <GlassCard>
+        <Text style={[styles.section, { color: colors.text }]}>
+          This week · withdrawal ledger
+        </Text>
+        <Text style={{ color: colors.textMuted, fontSize: 12, marginBottom: 10 }}>
+          {weekly?.weekKey || 'Current week'} · persists across refresh
+        </Text>
+        {(
+          [
+            ['Weekly call coins', weekly?.coins ?? 0],
+            ['Weekly minutes', weekly?.callMinutes ?? 0],
+            ['Weekly calls', weekly?.callCount ?? 0],
+            ['Weekly gifts', weekly?.giftCoins ?? 0],
+          ] as const
+        ).map(([label, value]) => (
+          <View key={label} style={styles.breakRow}>
+            <Text style={{ color: colors.textSecondary }}>{label}</Text>
+            <Text style={{ color: colors.text, fontWeight: '800' }}>{value}</Text>
+          </View>
+        ))}
+      </GlassCard>
 
       <GlassCard>
         <Text style={[styles.section, { color: colors.text }]}>Revenue breakdown</Text>

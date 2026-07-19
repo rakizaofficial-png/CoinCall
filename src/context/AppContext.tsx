@@ -154,19 +154,19 @@ type AppContextValue = {
 const AppContext = createContext<AppContextValue | undefined>(undefined);
 
 const defaultUser: User = {
-  id: 'me',
-  name: 'Luna Beauty',
+  id: '',
+  name: '',
   role: 'host',
-  coinBalance: 1280,
+  coinBalance: 0,
   diamonds: 0,
   gems: 0,
   level: 1,
-  isVerified: true,
-  avatarUrl: 'https://i.pravatar.cc/300?u=coincall-host',
-  isOnline: true,
-  hostStatus: 'approved',
-  hostId: 'H100001',
-  country: 'United Arab Emirates',
+  isVerified: false,
+  avatarUrl: '',
+  isOnline: false,
+  hostStatus: 'none',
+  hostId: undefined,
+  country: undefined,
 };
 
 function addEarn(
@@ -210,8 +210,36 @@ export function AppProvider({
     ...defaultUser,
     ...initialUser,
     role: 'host',
-    hostStatus: 'approved',
+    hostStatus: initialUser?.hostStatus || 'approved',
   });
+
+  // Isolate identity: always mirror authenticated host profile (never stale demo)
+  useEffect(() => {
+    if (!initialUser?.id) return;
+    const authId = initialUser.id;
+    setUser((u) => ({
+      ...u,
+      id: authId,
+      name: initialUser.name || u.name,
+      avatarUrl: initialUser.avatarUrl || u.avatarUrl,
+      hostId: initialUser.hostId || u.hostId,
+      country: initialUser.country || u.country,
+      hostStatus: initialUser.hostStatus || u.hostStatus,
+      isVerified: initialUser.isVerified ?? u.isVerified,
+      email: initialUser.email || u.email,
+      phone: initialUser.phone || u.phone,
+    }));
+  }, [
+    initialUser?.id,
+    initialUser?.name,
+    initialUser?.avatarUrl,
+    initialUser?.hostId,
+    initialUser?.country,
+    initialUser?.hostStatus,
+    initialUser?.isVerified,
+    initialUser?.email,
+    initialUser?.phone,
+  ]);
   const [hosts, setHosts] = useState<Host[]>(MOCK_HOSTS);
   const [news, setNews] = useState<NewsItem[]>(MOCK_NEWS);
   const [rooms, setRooms] = useState<PartyRoom[]>(MOCK_ROOMS);
