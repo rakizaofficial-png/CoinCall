@@ -20,10 +20,11 @@ import {
   type WithdrawalRow,
 } from './api';
 import { HostManagementPanel } from './components/HostManagement';
+import { UsersWalletsPanel } from './components/UsersWallets';
 import { adminKey, agoraAppId, firebaseReady } from './firebase';
 import './styles.css';
 
-type Tab = 'dashboard' | 'hosts' | 'calls' | 'control' | 'payouts' | 'reports';
+type Tab = 'dashboard' | 'hosts' | 'users' | 'calls' | 'control' | 'payouts' | 'reports';
 type AdminRole = 'super_admin' | 'moderator' | 'finance' | 'support';
 
 function formatClock(sec = 0) {
@@ -214,6 +215,7 @@ export default function App() {
           [
             ['dashboard', 'Dashboard'],
             ['hosts', `Hosts (${stats.total})`],
+            ['users', 'Luma users'],
             ['calls', `Live 1:1 (${stats.liveCalls})`],
             ['payouts', `Payouts (${withdrawals.filter((w) => w.status !== 'paid').length})`],
             ['reports', `Reports (${reports.filter((r) => r.status !== 'resolved').length})`],
@@ -282,13 +284,15 @@ export default function App() {
               </div>
             </div>
             <div className="warn">
-              Use <strong>Hosts</strong> for full management: KYC review, bulk actions,
-              permissions, finance, monitoring, and audit logs.
+              Use <strong>Hosts</strong> for KYC / live control. Use <strong>Luma users</strong> for
+              auto-created profiles, coin balances, and purchase IDs.
             </div>
           </>
         ) : null}
 
         {tab === 'hosts' ? <HostManagementPanel firebaseHosts={hosts} /> : null}
+
+        {tab === 'users' ? <UsersWalletsPanel /> : null}
 
         {tab === 'calls' ? (
           <>

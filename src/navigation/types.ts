@@ -6,9 +6,9 @@ export type AuthStackParamList = {
 export type MainTabParamList = {
   Home: undefined;
   Live: undefined;
-  Messages: undefined;
-  Broadcast: undefined;
-  Me: undefined;
+  Party: undefined;
+  Chat: undefined;
+  Profile: undefined;
 };
 
 export type RootStackParamList = {

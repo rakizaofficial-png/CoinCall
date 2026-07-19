@@ -1,100 +1,78 @@
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { BlurView } from 'expo-blur';
-import {
-  Home,
-  Megaphone,
-  MessageCircle,
-  Radio,
-  UserRound,
-} from 'lucide-react-native';
+import { Home, MessageSquare, Radio, UserRound, Users } from 'lucide-react-native';
 import { Platform, StyleSheet, View } from 'react-native';
-import { FontBootstrap } from '../components/premium/PremiumChrome';
-import { BroadcastScreen } from '../features/broadcast/BroadcastScreen';
-import { HomeScreen } from '../features/home/HomeScreen';
-import { LiveHubScreen } from '../features/live/LiveHubScreen';
-import { MessagesScreen } from '../features/messages/MessagesScreen';
-import { MeScreen } from '../features/me/MeScreen';
-import { premium } from '../theme/premium';
+import { ChatHubScreen } from '../features/chat/ChatHubScreen';
+import { DashboardScreen } from '../features/dashboard/DashboardScreen';
+import { LiveDiscoverScreen } from '../features/live/LiveDiscoverScreen';
+import { PartyHubScreen } from '../features/party/PartyHubScreen';
+import { ProfileScreen } from '../screens/main/ProfileScreen';
+import { useTheme } from '../theme/ThemeContext';
 import type { MainTabParamList } from './types';
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
 
 export function MainTabNavigator() {
+  const { colors, isDark } = useTheme();
+
   return (
-    <>
-      <FontBootstrap />
-      <Tab.Navigator
-        initialRouteName="Home"
-        screenOptions={({ route }) => ({
-          headerShown: false,
-          tabBarActiveTintColor: premium.rose,
-          tabBarInactiveTintColor: premium.textMute,
-          tabBarLabelStyle: {
-            fontWeight: '700',
-            fontSize: 10,
-            marginBottom: 2,
-            fontFamily: Platform.OS === 'web' ? premium.fonts.body : undefined,
-          },
-          tabBarStyle: {
-            position: 'absolute',
-            backgroundColor:
-              Platform.OS === 'ios' ? 'transparent' : 'rgba(10,12,18,0.94)',
-            borderTopColor: premium.line,
-            borderTopWidth: StyleSheet.hairlineWidth,
-            height: 74,
-            paddingBottom: 12,
-            paddingTop: 8,
-            elevation: 0,
-          },
-          tabBarBackground:
-            Platform.OS === 'ios'
-              ? () => (
-                  <BlurView
-                    intensity={70}
-                    tint="dark"
-                    style={StyleSheet.absoluteFill}
-                  />
-                )
-              : undefined,
-          tabBarIcon: ({ color, size, focused }) => {
-            const Icon =
-              route.name === 'Home'
-                ? Home
-                : route.name === 'Live'
-                  ? Radio
-                  : route.name === 'Messages'
-                    ? MessageCircle
-                    : route.name === 'Broadcast'
-                      ? Megaphone
-                      : UserRound;
-            return (
-              <View
-                style={[
-                  styles.iconWrap,
-                  focused && { backgroundColor: 'rgba(255,77,109,0.16)' },
-                ]}
-              >
-                <Icon size={size} color={color} strokeWidth={2.2} />
-              </View>
-            );
-          },
-        })}
-      >
-        <Tab.Screen name="Home" component={HomeScreen} options={{ title: 'Home' }} />
-        <Tab.Screen name="Live" component={LiveHubScreen} options={{ title: 'Live' }} />
-        <Tab.Screen
-          name="Messages"
-          component={MessagesScreen}
-          options={{ title: 'Messages' }}
-        />
-        <Tab.Screen
-          name="Broadcast"
-          component={BroadcastScreen}
-          options={{ title: 'Broadcast' }}
-        />
-        <Tab.Screen name="Me" component={MeScreen} options={{ title: 'Me' }} />
-      </Tab.Navigator>
-    </>
+    <Tab.Navigator
+      initialRouteName="Home"
+      screenOptions={({ route }) => ({
+        headerShown: false,
+        tabBarActiveTintColor: colors.tabActive,
+        tabBarInactiveTintColor: colors.tabInactive,
+        tabBarLabelStyle: { fontWeight: '700', fontSize: 11, marginBottom: 2 },
+        tabBarStyle: {
+          position: 'absolute',
+          backgroundColor: Platform.OS === 'ios' ? 'transparent' : colors.bgElevated,
+          borderTopColor: colors.border,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          height: 72,
+          paddingBottom: 12,
+          paddingTop: 8,
+          elevation: 0,
+        },
+        tabBarBackground:
+          Platform.OS === 'ios'
+            ? () => (
+                <BlurView
+                  intensity={60}
+                  tint={isDark ? 'dark' : 'light'}
+                  style={StyleSheet.absoluteFill}
+                />
+              )
+            : undefined,
+        tabBarIcon: ({ color, size, focused }) => {
+          const Icon =
+            route.name === 'Home'
+              ? Home
+              : route.name === 'Live'
+                ? Radio
+                : route.name === 'Party'
+                  ? Users
+                  : route.name === 'Chat'
+                    ? MessageSquare
+                    : UserRound;
+          return (
+            <View
+              style={[
+                styles.iconWrap,
+                focused && { backgroundColor: `${colors.primary}33` },
+              ]}
+            >
+              <Icon size={size} color={color} strokeWidth={2.2} />
+            </View>
+          );
+        },
+      })}
+    >
+      <Tab.Screen name="Home" component={DashboardScreen} options={{ title: 'Home' }} />
+      <Tab.Screen name="Live" component={LiveDiscoverScreen} options={{ title: 'Live' }} />
+      <Tab.Screen name="Party" component={PartyHubScreen} options={{ title: 'Party' }} />
+      <Tab.Screen name="Chat" component={ChatHubScreen} options={{ title: 'Chat' }} />
+      <Tab.Screen name="Profile" component={ProfileScreen} options={{ title: 'Profile' }} />
+    </Tab.Navigator>
   );
 }
 

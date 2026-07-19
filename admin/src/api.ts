@@ -248,3 +248,40 @@ export function listenReports(cb: (rows: ReportAdminRow[]) => void) {
 export async function resolveFirebaseReport(id: string) {
   await update(ref(requireDb(), `reports/${id}`), { status: 'resolved', resolvedAt: Date.now() });
 }
+
+
+export type AdminWalletRow = {
+  userId: string;
+  coinBalance: number;
+  xp: number;
+  isPremium: boolean;
+  displayName: string;
+  avatarUrl?: string;
+  role?: string;
+  ledgerCount?: number;
+};
+
+export async function fetchAdminWallets() {
+  const res = await fetch(
+    `${apiBaseUrl}/admin/wallets?key=${encodeURIComponent(adminKeyHeader())}`,
+  );
+  if (!res.ok) throw new Error('Could not load wallets');
+  return (await res.json()) as { wallets: AdminWalletRow[]; count: number };
+}
+
+export async function adminCreditWallet(
+  userId: string,
+  amount: number,
+  reason: string,
+) {
+  const res = await fetch(
+    `${apiBaseUrl}/admin/wallets/${encodeURIComponent(userId)}/credit`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: adminKeyHeader(), amount, reason }),
+    },
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}

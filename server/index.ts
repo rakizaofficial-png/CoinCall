@@ -1429,6 +1429,49 @@ app.get('/api/host/withdrawals/:hostId', (req, res) => {
   });
 });
 
+
+app.get('/api/admin/wallets', (req, res) => {
+  const key = String(req.query.key || req.headers['x-admin-key'] || '');
+  if (key !== ADMIN_KEY) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+  const all = [...wallets.values()]
+    .map((w) => ({
+      ...walletPublic(w),
+      role: w.role,
+      ledgerCount: (walletLedger.get(w.userId) || []).length,
+    }))
+    .sort((a, b) => b.coinBalance - a.coinBalance);
+  res.json({ wallets: all, count: all.length });
+});
+
+app.post('/api/admin/wallets/:userId/credit', (req, res) => {
+  const key = String(req.body?.key || req.headers['x-admin-key'] || '');
+  if (key !== ADMIN_KEY) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+  const userId = String(req.params.userId || '').trim();
+  const amount = Number(req.body?.amount || 0);
+  const reason = String(req.body?.reason || 'Admin credit').trim();
+  if (!userId || !Number.isFinite(amount) || amount === 0) {
+    res.status(400).json({ error: 'userId and non-zero amount required' });
+    return;
+  }
+  const row = ensureWallet(userId);
+  const delta = Math.floor(amount);
+  row.coinBalance = Math.max(0, row.coinBalance + delta);
+  if (delta > 0) row.xp += delta;
+  wallets.set(userId, row);
+  pushLedger(userId, Math.abs(delta), reason, delta > 0 ? 'credit' : 'spend');
+  broadcastWs({
+    type: 'wallet:updated',
+    payload: { userId, coinBalance: row.coinBalance, xp: row.xp },
+  });
+  res.json({ ok: true, wallet: walletPublic(row) });
+});
+
 app.get('/api/admin/withdrawals', (req, res) => {
   const key = String(req.query.key || req.headers['x-admin-key'] || '');
   if (key !== ADMIN_KEY) {
