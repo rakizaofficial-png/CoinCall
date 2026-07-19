@@ -14,7 +14,7 @@ export type HostPresence = {
   isOnline: boolean;
   isLive: boolean;
   isOnCall: boolean;
-  /** Ready for a new 1v1 call (online, not busy, not live). */
+  /** Ready for a new 1v1 call (online, not already on a call — live hosts can still be called). */
   readyToCall: boolean;
   workspaceMode?: HostWorkspaceMode;
   hostStatus?: string;
@@ -28,9 +28,10 @@ const hosts = new Map<string, HostPresence>();
 export function computeReadyToCall(input: {
   isOnline: boolean;
   isOnCall: boolean;
-  isLive: boolean;
+  isLive?: boolean;
 }): boolean {
-  return Boolean(input.isOnline && !input.isOnCall && !input.isLive);
+  // Live hosts stay callable — accepting a call ends/pauses live on the host app.
+  return Boolean(input.isOnline && !input.isOnCall);
 }
 
 export function pruneHosts(now = Date.now()) {

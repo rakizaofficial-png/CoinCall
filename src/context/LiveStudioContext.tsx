@@ -166,6 +166,35 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
     let unsub: (() => void) | undefined;
     void import('../services/realtimeWs').then(({ subscribeRealtime }) => {
       unsub = subscribeRealtime((event) => {
+        if (event.type === 'gift:received') {
+          const p = event.payload as {
+            toHostId?: string;
+            roomId?: string;
+            fromName?: string;
+            giftName?: string;
+            giftEmoji?: string;
+            giftId?: string;
+            coins?: number;
+            createdAt?: number;
+          };
+          if (p.toHostId && p.toHostId !== user.id) return;
+          if (p.roomId && activeRoomId && p.roomId !== activeRoomId) return;
+          const overlay = {
+            id: `ws_${Date.now()}`,
+            fromUserId: String((event.payload as { fromUserId?: string }).fromUserId || 'fan'),
+            fromName: p.fromName || 'Fan',
+            giftId: p.giftId || 'rose',
+            giftName: p.giftName || 'Gift',
+            giftEmoji: p.giftEmoji || '🎁',
+            coins: Number(p.coins) || 0,
+            combo: 1,
+            createdAt: p.createdAt || Date.now(),
+          };
+          setGifts((prev) => [overlay, ...prev].slice(0, 50));
+          setGiftOverlay(overlay);
+          setTimeout(() => setGiftOverlay(null), 2800);
+          return;
+        }
         if (event.type !== 'recharge:updated') return;
         const p = event.payload as {
           users?: RechargeUserRow[];
@@ -203,7 +232,7 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
       });
     });
     return () => unsub?.();
-  }, [activeRoomId]);
+  }, [activeRoomId, user.id]);
 
   useEffect(() => {
     if (!myLiveRoom?.isLive) {
@@ -252,7 +281,7 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
       avatarUrl: user.avatarUrl,
     });
     setBridgeLive(true);
-    void publishHostPresence({
+    await publishHostPresence({
       id: user.id,
       name: user.name,
       avatarUrl: user.avatarUrl,
@@ -262,7 +291,7 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
       isLive: true,
       isOnCall: false,
       workspaceMode: 'waiting_1v1',
-    });
+    }).catch(() => undefined);
     await postRoomComment(room.id, {
       userId: 'system',
       userName: 'System',
@@ -340,7 +369,7 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
       createdAt: Date.now(),
       kind: 'system',
     });
-    notify('Party LIVE', 'Chat section is ready for room · user · mass text');
+    notify('Party LIVE', 'Viewers can gift you and request a private call');
     return room;
   }, [goLiveDraft, setHostOnline, user]);
 

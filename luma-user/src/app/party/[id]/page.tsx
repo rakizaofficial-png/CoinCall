@@ -156,7 +156,7 @@ export default function PartyAudiencePage({
           </div>
         </div>
 
-        <GiftSheet open={giftOpen} onClose={() => setGiftOpen(false)} />
+        <GiftSheet open={giftOpen} onClose={() => setGiftOpen(false)} hostId={id} />
       </main>
     </LoungeShell>
   );

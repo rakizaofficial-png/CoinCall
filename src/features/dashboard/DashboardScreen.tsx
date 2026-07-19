@@ -127,50 +127,6 @@ export function DashboardScreen({ navigation }: { navigation: any }) {
           </Pressable>
         </View>
       </GlassCard>
-
-      <Text style={[styles.section, { color: colors.text }]}>Quick start</Text>
-      <Pressable
-        style={[styles.quickCard, { backgroundColor: colors.bgCard, borderColor: colors.border }]}
-        onPress={() => navigation.navigate('GoLive', { mode: 'solo' })}
-      >
-        <LinearGradient
-          colors={[`${colors.primary}55`, colors.bgElevated]}
-          style={styles.quickGrad}
-        >
-          <Text style={styles.quickTitle}>Go Live</Text>
-          <Text style={styles.quickSub}>Camera + beauty + gifts + chat</Text>
-        </LinearGradient>
-      </Pressable>
-      <Pressable
-        style={[
-          styles.quickCard,
-          { backgroundColor: colors.bgCard, borderColor: colors.border, marginTop: 12 },
-        ]}
-        onPress={() => navigation.navigate('Party')}
-      >
-        <LinearGradient
-          colors={[`${colors.accent}44`, colors.bgElevated]}
-          style={styles.quickGrad}
-        >
-          <Text style={styles.quickTitle}>Party Room</Text>
-          <Text style={styles.quickSub}>Seats · room chat · mass text</Text>
-        </LinearGradient>
-      </Pressable>
-      <Pressable
-        style={[
-          styles.quickCard,
-          { backgroundColor: colors.bgCard, borderColor: colors.border, marginTop: 12 },
-        ]}
-        onPress={() => navigation.navigate('Calling')}
-      >
-        <LinearGradient
-          colors={[`${colors.online}33`, colors.bgElevated]}
-          style={styles.quickGrad}
-        >
-          <Text style={styles.quickTitle}>1v1 Calling</Text>
-          <Text style={styles.quickSub}>Go Online — show on user app</Text>
-        </LinearGradient>
-      </Pressable>
     </ScrollView>
   );
 }
@@ -218,13 +174,4 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   toggleText: { color: '#fff', fontWeight: '900' },
-  section: { fontWeight: '900', fontSize: 18, marginTop: 18, marginBottom: 10 },
-  quickCard: {
-    borderRadius: radii.lg,
-    overflow: 'hidden',
-    borderWidth: 1,
-  },
-  quickGrad: { padding: 16, minHeight: 110, justifyContent: 'flex-end' },
-  quickTitle: { color: '#fff', fontWeight: '900', fontSize: 16 },
-  quickSub: { color: 'rgba(255,255,255,0.75)', marginTop: 4, fontSize: 12 },
 });

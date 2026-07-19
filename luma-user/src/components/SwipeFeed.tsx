@@ -401,7 +401,11 @@ export function SwipeFeed() {
           </div>
         </div>
 
-        <GiftSheet open={giftOpen} onClose={() => setGiftOpen(false)} />
+        <GiftSheet
+          open={giftOpen}
+          onClose={() => setGiftOpen(false)}
+          hostId={current?.host.id}
+        />
       </div>
     </LoungeShell>
   );

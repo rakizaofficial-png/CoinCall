@@ -1697,14 +1697,21 @@ registerAgencyRoutes(app, {
 const liveRooms = new Map<string, Record<string, unknown>>();
 
 app.post('/api/live/rooms', (req, res) => {
-  const room = req.body as Record<string, unknown>;
+  const room = { ...(req.body as Record<string, unknown>) };
   const id = String(room?.id || '');
   if (!id) {
     res.status(400).json({ error: 'id required' });
     return;
   }
-  liveRooms.set(id, { ...room, updatedAt: Date.now() });
   const hostId = String(room.hostId || '');
+  // Never store multi-MB data: URLs — they break the user live app
+  for (const key of ['hostAvatar', 'thumbnailUrl'] as const) {
+    const v = room[key];
+    if (typeof v === 'string' && (v.startsWith('data:') || v.startsWith('blob:') || v.length > 2000)) {
+      room[key] = `https://i.pravatar.cc/400?u=${encodeURIComponent(hostId || id)}`;
+    }
+  }
+  liveRooms.set(id, { ...room, updatedAt: Date.now() });
   if (hostId) {
     const existing = getPresence(hostId);
     if (existing) {
@@ -1729,7 +1736,22 @@ app.post('/api/live/rooms', (req, res) => {
 });
 
 app.get('/api/live/rooms', (_req, res) => {
-  const rooms = [...liveRooms.values()].filter((r) => r.isLive);
+  const rooms = [...liveRooms.values()]
+    .filter((r) => r.isLive)
+    .map((r) => {
+      const hostId = String(r.hostId || r.id || 'host');
+      const out = { ...r };
+      for (const key of ['hostAvatar', 'thumbnailUrl'] as const) {
+        const v = out[key];
+        if (
+          typeof v === 'string' &&
+          (v.startsWith('data:') || v.startsWith('blob:') || v.length > 2000)
+        ) {
+          out[key] = `https://i.pravatar.cc/400?u=${encodeURIComponent(hostId)}`;
+        }
+      }
+      return out;
+    });
   res.json({ rooms });
 });
 

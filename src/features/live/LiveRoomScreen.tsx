@@ -1,18 +1,11 @@
 import { LinearGradient } from 'expo-linear-gradient';
-import * as ImagePicker from 'expo-image-picker';
 import {
+  FlipHorizontal,
   Gift,
-  Heart,
-  LifeBuoy,
-  Lock,
-  Megaphone,
-  MessageSquare,
   Mic,
   MicOff,
-  Share2,
   Sparkles,
   Users,
-  VideoOff,
   X,
 } from 'lucide-react-native';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -23,23 +16,12 @@ import {
   Pressable,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
-import Animated, {
-  useAnimatedStyle,
-  useSharedValue,
-  withSequence,
-  withTiming,
-} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { HostChatSection } from '../../components/HostChatSection';
-import { GIFT_CATALOG, PHOTO_UNLOCK_MIN_COINS } from '../../data/gifts';
-import { useApp } from '../../context/AppContext';
 import { useLiveStudio } from '../../context/LiveStudioContext';
 import {
   setAgoraBeauty,
-  setAgoraCameraOff,
   setAgoraMuted,
   startAgoraLiveBroadcast,
   stopAgoraCall,
@@ -47,8 +29,7 @@ import {
 } from '../../services/agoraService';
 import { radii } from '../../theme/colors';
 import { useTheme } from '../../theme/ThemeContext';
-import { notify, promptText } from '../../utils/notify';
-import * as Clipboard from 'expo-clipboard';
+import { notify } from '../../utils/notify';
 
 type Props = {
   navigation: any;
@@ -56,41 +37,25 @@ type Props = {
 };
 
 function formatLive(sec: number) {
-  const h = Math.floor(sec / 3600);
-  const m = Math.floor((sec % 3600) / 60)
+  const m = Math.floor(sec / 60)
     .toString()
     .padStart(2, '0');
   const s = (sec % 60).toString().padStart(2, '0');
-  return h > 0 ? `${h}:${m}:${s}` : `${m}:${s}`;
+  return `${m}:${s}`;
 }
 
 export function LiveRoomScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
-  const { user } = useApp();
   const {
     liveRooms,
     myLiveRoom,
     comments,
     gifts,
     giftOverlay,
-    lockedPhotos,
-    rechargeTicker,
-    rechargeUsers,
     liveSeconds,
-    sendGift,
-    likeRoom,
     stopLive,
     openRoom,
-    setAnnouncement,
-    renameRoom,
-    massTextAllActive,
-    contactAdminSupport,
-    addGiftLockedPhoto,
-    simulateViewerRecharge,
-    muteUser,
-    kickUser,
-    blockUserInRoom,
   } = useLiveStudio();
 
   const roomId = route.params.roomId;
@@ -100,39 +65,14 @@ export function LiveRoomScreen({ navigation, route }: Props) {
     liveRooms.find((r) => r.id === roomId) ||
     myLiveRoom;
 
-  const [giftsOpen, setGiftsOpen] = useState(false);
-  const [modsOpen, setModsOpen] = useState(false);
-  const [rankOpen, setRankOpen] = useState(false);
-  const [rankPeriod, setRankPeriod] = useState<'daily' | 'weekly' | 'monthly'>('daily');
-  const [following, setFollowing] = useState(false);
   const [muted, setMuted] = useState(false);
-  const [camOff, setCamOff] = useState(false);
   const [beauty, setBeauty] = useState(true);
-  const [joinToast, setJoinToast] = useState<string | null>(null);
-  const [previewPhoto, setPreviewPhoto] = useState<string | null>(null);
-  const [rechargeBoardOpen, setRechargeBoardOpen] = useState(false);
+  const [giftsOpen, setGiftsOpen] = useState(false);
   const localMountReady = useRef(false);
-  const hearts = useSharedValue(0);
-  const seenCommentIds = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     openRoom(roomId);
   }, [openRoom, roomId]);
-
-  useEffect(() => {
-    comments.forEach((c) => {
-      if (seenCommentIds.current.has(c.id)) return;
-      seenCommentIds.current.add(c.id);
-      if (c.kind === 'system' && /joined|started/i.test(c.text)) {
-        setJoinToast(c.text);
-        setTimeout(() => setJoinToast(null), 2400);
-      }
-      if (c.kind === 'system' && /left|ended/i.test(c.text)) {
-        setJoinToast(c.text);
-        setTimeout(() => setJoinToast(null), 2400);
-      }
-    });
-  }, [comments]);
 
   useEffect(() => {
     if (!hostMode || Platform.OS !== 'web' || !room) return;
@@ -169,42 +109,22 @@ export function LiveRoomScreen({ navigation, route }: Props) {
     };
   }, [beauty, hostMode, room?.channel, room?.id]);
 
-  const leaderboard = useMemo(() => {
-    const now = Date.now();
-    const windowMs =
-      rankPeriod === 'daily'
-        ? 24 * 3600_000
-        : rankPeriod === 'weekly'
-          ? 7 * 24 * 3600_000
-          : 30 * 24 * 3600_000;
-    const map = new Map<string, { name: string; avatar: string; coins: number }>();
-    gifts.forEach((g) => {
-      if (now - g.createdAt > windowMs) return;
-      const prev = map.get(g.fromId) || {
-        name: g.fromName,
-        avatar: g.fromAvatar,
-        coins: 0,
-      };
-      prev.coins += g.coins * (g.combo || 1);
-      map.set(g.fromId, prev);
-    });
-    return Array.from(map.entries())
-      .map(([id, v]) => ({ id, ...v }))
-      .sort((a, b) => b.coins - a.coins)
-      .slice(0, 10);
-  }, [gifts, rankPeriod]);
-
-  const vipUsers = leaderboard.slice(0, 3);
-
-  const heartStyle = useAnimatedStyle(() => ({
-    opacity: hearts.value,
-    transform: [{ translateY: (1 - hearts.value) * -40 }, { scale: 0.8 + hearts.value * 0.4 }],
-  }));
-
-  const onLike = () => {
-    likeRoom();
-    hearts.value = withSequence(withTiming(1, { duration: 200 }), withTiming(0, { duration: 700 }));
-  };
+  const feed = useMemo(() => {
+    const giftLines = gifts.slice(0, 20).map((g) => ({
+      id: `g_${g.id}`,
+      text: `${g.fromName} sent ${g.giftEmoji} ${g.giftName}`,
+      kind: 'gift' as const,
+    }));
+    const commentLines = comments
+      .filter((c) => c.kind !== 'system' || /joined|gift/i.test(c.text))
+      .slice(0, 30)
+      .map((c) => ({
+        id: c.id,
+        text: c.kind === 'system' ? c.text : `${c.userName}: ${c.text}`,
+        kind: (c.kind === 'gift' ? 'gift' : 'chat') as 'gift' | 'chat',
+      }));
+    return [...giftLines, ...commentLines].slice(0, 40);
+  }, [comments, gifts]);
 
   const onEnd = async () => {
     await stopLive();
@@ -212,30 +132,10 @@ export function LiveRoomScreen({ navigation, route }: Props) {
     navigation.goBack();
   };
 
-  const onShare = async () => {
-    const link = `https://coincall-host.onrender.com/?room=${roomId}`;
-    await Clipboard.setStringAsync(link);
-    notify('Shared', 'Live link copied');
-  };
-
-  const pickLockedPhoto = async () => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      notify('Permission', 'Allow photos to add locked gift images');
-      return;
-    }
-    const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      quality: 0.75,
-    });
-    if (res.canceled || !res.assets?.[0]?.uri) return;
-    await addGiftLockedPhoto(res.assets[0].uri, 'Exclusive', PHOTO_UNLOCK_MIN_COINS);
-  };
-
   if (!room) {
     return (
       <View style={[styles.root, styles.center]}>
-        <Text style={{ color: '#fff' }}>Room not found</Text>
+        <Text style={{ color: '#fff' }}>Live not found</Text>
         <Pressable onPress={() => navigation.goBack()}>
           <Text style={{ color: colors.accent, marginTop: 12 }}>Go back</Text>
         </Pressable>
@@ -252,31 +152,21 @@ export function LiveRoomScreen({ navigation, route }: Props) {
         <Image source={{ uri: room.thumbnailUrl || room.hostAvatar }} style={styles.cover} />
       )}
       <LinearGradient
-        colors={['rgba(0,0,0,0.55)', 'transparent', 'rgba(0,0,0,0.75)']}
+        colors={['rgba(0,0,0,0.55)', 'transparent', 'rgba(0,0,0,0.78)']}
         style={StyleSheet.absoluteFill}
         pointerEvents="none"
       />
 
+      {/* Top bar */}
       <View style={[styles.top, { paddingTop: insets.top + 8 }]}>
         <View style={styles.hostChip}>
           <Image source={{ uri: room.hostAvatar }} style={styles.hostAv} />
-          <View>
-            <Text style={styles.hostName}>{room.hostName}</Text>
-            <Text style={styles.hostMeta}>
-              Lv{room.level} · {room.badge}
+          <View style={{ flexShrink: 1 }}>
+            <Text style={styles.hostName} numberOfLines={1}>
+              {room.hostName}
             </Text>
+            <Text style={styles.timer}>{formatLive(hostMode ? liveSeconds : 0)}</Text>
           </View>
-          {!hostMode ? (
-            <Pressable
-              style={[styles.followBtn, following && styles.followOn]}
-              onPress={() => {
-                setFollowing((v) => !v);
-                notify(following ? 'Unfollowed' : 'Following', room.hostName);
-              }}
-            >
-              <Text style={styles.followText}>{following ? 'Following' : 'Follow'}</Text>
-            </Pressable>
-          ) : null}
           <View style={styles.livePill}>
             <Text style={styles.livePillText}>LIVE</Text>
           </View>
@@ -284,89 +174,32 @@ export function LiveRoomScreen({ navigation, route }: Props) {
         <View style={styles.topRight}>
           <View style={styles.statPill}>
             <Users size={14} color="#fff" />
-            <Text style={styles.statText}>{room.viewers}</Text>
+            <Text style={styles.statText}>{Math.max(room.viewers, 0)}</Text>
           </View>
-          <Text style={styles.timer}>{formatLive(hostMode ? liveSeconds : 0)}</Text>
           <Pressable onPress={hostMode ? onEnd : () => navigation.goBack()} style={styles.close}>
             <X size={18} color="#fff" />
           </Pressable>
         </View>
       </View>
 
-      {room.announcement ? (
-        <View style={styles.announce}>
-          <Text style={styles.announceText} numberOfLines={2}>
-            📌 {room.announcement}
-          </Text>
-        </View>
-      ) : null}
-
-      <Pressable style={styles.leader} onPress={() => setRankOpen(true)}>
-        {leaderboard.slice(0, 5).map((u, i) => (
-          <View key={u.id} style={styles.leaderItem}>
-            <Text style={styles.leaderRank}>{i + 1}</Text>
-            <Image source={{ uri: u.avatar }} style={styles.leaderAv} />
-          </View>
-        ))}
-      </Pressable>
-
-      {vipUsers.length > 0 ? (
-        <View style={styles.vipRow}>
-          <Text style={styles.vipLabel}>VIP</Text>
-          {vipUsers.map((u) => (
-            <Image key={u.id} source={{ uri: u.avatar }} style={styles.vipAv} />
-          ))}
-        </View>
-      ) : null}
-
-      {joinToast ? (
-        <View style={styles.joinToast} pointerEvents="none">
-          <Text style={styles.joinToastText}>{joinToast}</Text>
-        </View>
-      ) : null}
-
-      {room.mode === 'party' && room.seats ? (
-        <View style={styles.partySeats}>
-          {room.seats.map((seat) => (
-            <View
-              key={seat.index}
-              style={[styles.partySeat, seat.hostId ? styles.partySeatOn : null]}
-            >
-              {seat.hostId ? (
-                <Image source={{ uri: seat.avatarUrl }} style={styles.partyAv} />
-              ) : (
-                <Text style={styles.partyEmpty}>{seat.locked ? '🔒' : '+'}</Text>
-              )}
-              <Text style={styles.partySeatLabel} numberOfLines={1}>
-                {seat.name || (seat.kind === 'video' ? 'Video' : 'Audio')}
+      {/* Viewer + gift feed (no Room / User / Mass) */}
+      <View style={styles.feed}>
+        <FlatList
+          data={feed}
+          keyExtractor={(item) => item.id}
+          showsVerticalScrollIndicator={false}
+          inverted
+          renderItem={({ item }) => (
+            <View style={[styles.feedRow, item.kind === 'gift' && styles.feedGift]}>
+              <Text style={styles.feedText} numberOfLines={2}>
+                {item.text}
               </Text>
             </View>
-          ))}
-        </View>
-      ) : null}
-
-      {rechargeTicker ? (
-        <View style={styles.rechargeTicker} pointerEvents="none">
-          <Text style={styles.rechargeTickerText}>
-            💎 ID {rechargeTicker.userId || '—'} · {rechargeTicker.userName} · +
-            {rechargeTicker.coins}
-          </Text>
-        </View>
-      ) : null}
-
-      {hostMode && rechargeUsers.length > 0 ? (
-        <Pressable
-          style={styles.rechargeChip}
-          onPress={() => setRechargeBoardOpen(true)}
-        >
-          <Text style={styles.rechargeChipText}>
-            Recharges · {rechargeUsers.length}
-          </Text>
-        </Pressable>
-      ) : null}
-
-      <View style={styles.chatSection}>
-        <HostChatSection compact onOpenImage={(url) => setPreviewPhoto(url)} />
+          )}
+          ListEmptyComponent={
+            <Text style={styles.feedEmpty}>Waiting for viewers…</Text>
+          }
+        />
       </View>
 
       {giftOverlay ? (
@@ -374,329 +207,83 @@ export function LiveRoomScreen({ navigation, route }: Props) {
           <Text style={styles.giftEmoji}>{giftOverlay.giftEmoji}</Text>
           <Text style={styles.giftLabel}>
             {giftOverlay.fromName} sent {giftOverlay.giftName}
-            {giftOverlay.combo > 1 ? ` x${giftOverlay.combo}` : ''}
           </Text>
         </View>
       ) : null}
 
-      <Animated.View style={[styles.heartBurst, heartStyle]} pointerEvents="none">
-        <Heart size={48} color="#FF6B8A" fill="#FF6B8A" />
-      </Animated.View>
-
-      <View style={[styles.bottom, { paddingBottom: insets.bottom + 10 }]}>
-        <Pressable style={styles.iconBtn} onPress={onLike}>
-          <Heart size={20} color="#FF6B8A" />
-        </Pressable>
-        <Pressable style={styles.iconBtn} onPress={() => setGiftsOpen(true)}>
-          <Gift size={20} color="#F5C14C" />
-        </Pressable>
-        <Pressable
-          style={styles.iconBtn}
-          onPress={() =>
-            promptText('Admin support', 'Create support ticket for admin', (msg) => {
-              void contactAdminSupport(msg);
-            })
-          }
-        >
-          <LifeBuoy size={18} color="#9B8CFF" />
-        </Pressable>
-        <Pressable style={styles.iconBtn} onPress={onShare}>
-          <Share2 size={18} color="#fff" />
-        </Pressable>
-        {hostMode ? (
-          <Pressable style={styles.iconBtn} onPress={() => setModsOpen((v) => !v)}>
-            <Users size={18} color="#fff" />
-          </Pressable>
-        ) : null}
-      </View>
-
+      {/* Host controls: mic · flip · filter · gifts seen */}
       {hostMode ? (
-        <View style={[styles.hostControls, { bottom: insets.bottom + 72 }]}>
+        <View style={[styles.controls, { paddingBottom: insets.bottom + 16 }]}>
           <Pressable
-            style={styles.hCtrl}
+            style={styles.ctrl}
             onPress={async () => {
               const next = !muted;
               setMuted(next);
               await setAgoraMuted(next);
             }}
           >
-            {muted ? <MicOff size={18} color="#fff" /> : <Mic size={18} color="#fff" />}
+            {muted ? <MicOff size={20} color="#fff" /> : <Mic size={20} color="#fff" />}
+            <Text style={styles.ctrlLabel}>Mic</Text>
           </Pressable>
+
           <Pressable
-            style={styles.hCtrl}
-            onPress={async () => {
-              const next = !camOff;
-              setCamOff(next);
-              await setAgoraCameraOff(next);
-            }}
+            style={styles.ctrl}
+            onPress={() => void switchAgoraCamera()}
           >
-            <VideoOff size={18} color="#fff" />
+            <FlipHorizontal size={20} color="#fff" />
+            <Text style={styles.ctrlLabel}>Flip</Text>
           </Pressable>
-          <Pressable style={styles.hCtrl} onPress={() => void switchAgoraCamera()}>
-            <Text style={{ color: '#fff', fontWeight: '800', fontSize: 11 }}>Flip</Text>
-          </Pressable>
+
           <Pressable
-            style={[styles.hCtrl, beauty && { backgroundColor: 'rgba(108,124,255,0.7)' }]}
+            style={[styles.ctrl, beauty && styles.ctrlOn]}
             onPress={async () => {
               const next = !beauty;
               setBeauty(next);
               await setAgoraBeauty(next ? 'snap' : 'off');
+              notify('Filter', next ? 'Beauty on' : 'Beauty off');
             }}
           >
-            <Sparkles size={18} color="#fff" />
+            <Sparkles size={20} color="#fff" />
+            <Text style={styles.ctrlLabel}>Filter</Text>
           </Pressable>
-          <Pressable
-            style={[styles.hCtrl, { backgroundColor: 'rgba(155,140,255,0.55)' }]}
-            onPress={() => {
-              notify('Live chat', 'Type in the chat box at the bottom · tap 📷 for photos');
-            }}
-          >
-            <MessageSquare size={18} color="#fff" />
+
+          <Pressable style={styles.ctrl} onPress={() => setGiftsOpen(true)}>
+            <Gift size={20} color="#F5C14C" />
+            <Text style={styles.ctrlLabel}>Gifts</Text>
           </Pressable>
-          <Pressable
-            style={[styles.hCtrl, { backgroundColor: 'rgba(245,193,76,0.65)' }]}
-            onPress={() =>
-              promptText(
-                'Mass text all active users',
-                'This message goes to every online user',
-                (msg) => {
-                  void massTextAllActive(msg);
-                },
-              )
-            }
-          >
-            <Megaphone size={18} color="#fff" />
+
+          <Pressable style={[styles.ctrl, styles.endCtrl]} onPress={() => void onEnd()}>
+            <X size={20} color="#fff" />
+            <Text style={styles.ctrlLabel}>End</Text>
           </Pressable>
         </View>
-      ) : null}
+      ) : (
+        <View style={[styles.controls, { paddingBottom: insets.bottom + 16 }]}>
+          <Pressable style={styles.ctrl} onPress={() => setGiftsOpen(true)}>
+            <Gift size={20} color="#F5C14C" />
+            <Text style={styles.ctrlLabel}>Gift</Text>
+          </Pressable>
+        </View>
+      )}
 
       {giftsOpen ? (
         <View style={styles.giftSheet}>
-          <Text style={styles.sheetTitle}>Send a gift</Text>
-          <Text style={styles.sheetSub}>
-            Luxury gifts unlock locked photos · tap again for combo
+          <Text style={styles.sheetTitle}>
+            {hostMode ? 'Recent gifts' : 'Send a gift'}
           </Text>
-          {lockedPhotos.length > 0 ? (
-            <View style={styles.lockedRow}>
-              <Text style={styles.lockedTitle}>Locked photos · open with gift</Text>
-              <FlatList
-                horizontal
-                data={lockedPhotos}
-                keyExtractor={(p) => p.id}
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{ gap: 10 }}
-                renderItem={({ item }) => {
-                  const open =
-                    hostMode || Boolean(item.unlockedBy?.[user.id]);
-                  return (
-                    <Pressable
-                      style={styles.lockedCard}
-                      onPress={() => {
-                        if (open) {
-                          setPreviewPhoto(item.url);
-                          return;
-                        }
-                        notify(
-                          'Locked',
-                          `Send a gift ≥ ${item.unlockCoins || PHOTO_UNLOCK_MIN_COINS} coins to open`,
-                        );
-                      }}
-                    >
-                      <Image
-                        source={{ uri: item.url }}
-                        style={[styles.lockedImg, !open && styles.lockedBlur]}
-                        blurRadius={open ? 0 : 18}
-                      />
-                      {!open ? (
-                        <View style={styles.lockedOverlay}>
-                          <Lock size={18} color="#fff" />
-                          <Text style={styles.lockedNeed}>
-                            {item.unlockCoins || PHOTO_UNLOCK_MIN_COINS}+
-                          </Text>
-                        </View>
-                      ) : null}
-                    </Pressable>
-                  );
-                }}
-              />
-            </View>
-          ) : null}
-          <View style={styles.giftGrid}>
-            {GIFT_CATALOG.map((g) => (
-              <Pressable
-                key={g.id}
-                style={[
-                  styles.giftItem,
-                  g.tier === 'legendary' && { borderColor: '#F5C14C', borderWidth: 1 },
-                  g.tier === 'luxury' && { borderColor: '#9B8CFF', borderWidth: 1 },
-                ]}
-                onPress={() => {
-                  void sendGift(g.id);
-                  setGiftsOpen(false);
-                }}
-              >
-                <Text style={styles.giftItemEmoji}>{g.emoji}</Text>
-                <Text style={styles.giftItemName}>{g.name}</Text>
-                <Text style={styles.giftItemCoins}>{g.coins}</Text>
-                <Text style={styles.giftTier}>
-                  {g.unlocksPhotos ? 'unlocks 📷' : g.tier}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
+          {gifts.length === 0 ? (
+            <Text style={styles.sheetSub}>No gifts yet — viewers can send from Luma</Text>
+          ) : (
+            gifts.slice(0, 15).map((g) => (
+              <Text key={g.id} style={styles.histLine}>
+                {g.giftEmoji} {g.fromName} · {g.giftName} · {g.coins}
+              </Text>
+            ))
+          )}
           <Pressable onPress={() => setGiftsOpen(false)}>
             <Text style={styles.closeSheet}>Close</Text>
           </Pressable>
         </View>
-      ) : null}
-
-      {rankOpen ? (
-        <View style={styles.giftSheet}>
-          <Text style={styles.sheetTitle}>Gift ranking</Text>
-          <View style={styles.rankTabs}>
-            {(['daily', 'weekly', 'monthly'] as const).map((p) => (
-              <Pressable
-                key={p}
-                onPress={() => setRankPeriod(p)}
-                style={[styles.rankTab, rankPeriod === p && styles.rankTabOn]}
-              >
-                <Text style={styles.rankTabText}>{p}</Text>
-              </Pressable>
-            ))}
-          </View>
-          {leaderboard.length === 0 ? (
-            <Text style={{ color: 'rgba(255,255,255,0.6)' }}>No senders yet</Text>
-          ) : (
-            leaderboard.map((u, i) => (
-              <View key={u.id} style={styles.rankRow}>
-                <Text style={styles.leaderRank}>{i + 1}</Text>
-                <Image source={{ uri: u.avatar }} style={styles.leaderAv} />
-                <Text style={{ color: '#fff', flex: 1, fontWeight: '700' }}>{u.name}</Text>
-                <Text style={{ color: '#F5C14C', fontWeight: '900' }}>{u.coins}</Text>
-              </View>
-            ))
-          )}
-          <Text style={[styles.sheetSub, { marginTop: 12 }]}>Gift history</Text>
-          {gifts.slice(0, 12).map((g) => (
-            <Text key={g.id} style={styles.histLine}>
-              {g.giftEmoji} {g.fromName} · {g.giftName}
-              {g.combo > 1 ? ` x${g.combo}` : ''} · {g.coins}
-            </Text>
-          ))}
-          <Pressable onPress={() => setRankOpen(false)}>
-            <Text style={styles.closeSheet}>Close</Text>
-          </Pressable>
-        </View>
-      ) : null}
-
-      {modsOpen && hostMode ? (
-        <View style={styles.modSheet}>
-          <Text style={styles.sheetTitle}>Moderator</Text>
-          <Pressable
-            style={styles.modBtn}
-            onPress={() => {
-              promptText('Room name', 'Change live room name', (title) => {
-                void renameRoom(title);
-              }, room.title);
-            }}
-          >
-            <Text style={styles.modText}>Change room name</Text>
-          </Pressable>
-          <Pressable
-            style={styles.modBtn}
-            onPress={() => {
-              const msg = 'Be respectful · No spam';
-              void setAnnouncement(msg);
-            }}
-          >
-            <Text style={styles.modText}>Pin announcement</Text>
-          </Pressable>
-          <Pressable
-            style={styles.modBtn}
-            onPress={() => {
-              promptText(
-                'Mass text all active users',
-                'Message every online user',
-                (msg) => {
-                  void massTextAllActive(msg);
-                },
-              );
-            }}
-          >
-            <Text style={styles.modText}>Mass text all active users</Text>
-          </Pressable>
-          <Pressable style={styles.modBtn} onPress={() => setRechargeBoardOpen(true)}>
-            <Text style={styles.modText}>Recharge board (user ID + coins)</Text>
-          </Pressable>
-          <Pressable style={styles.modBtn} onPress={() => void pickLockedPhoto()}>
-            <Text style={styles.modText}>Add locked photo (gift unlock)</Text>
-          </Pressable>
-          <Pressable style={styles.modBtn} onPress={() => void simulateViewerRecharge()}>
-            <Text style={styles.modText}>Demo: viewer recharge</Text>
-          </Pressable>
-          <Pressable
-            style={styles.modBtn}
-            onPress={() =>
-              promptText('Admin support', 'Create support ticket for admin', (msg) => {
-                void contactAdminSupport(msg);
-              })
-            }
-          >
-            <Text style={styles.modText}>Create admin support ticket</Text>
-          </Pressable>
-          <Pressable
-            style={styles.modBtn}
-            onPress={() => muteUser('viewer_demo')}
-          >
-            <Text style={styles.modText}>Mute recent commenter</Text>
-          </Pressable>
-          <Pressable style={styles.modBtn} onPress={() => kickUser('viewer_demo')}>
-            <Text style={styles.modText}>Kick user</Text>
-          </Pressable>
-          <Pressable style={styles.modBtn} onPress={() => blockUserInRoom('viewer_demo')}>
-            <Text style={styles.modText}>Block user</Text>
-          </Pressable>
-          <Pressable onPress={() => setModsOpen(false)}>
-            <Text style={styles.closeSheet}>Close</Text>
-          </Pressable>
-        </View>
-      ) : null}
-
-      {rechargeBoardOpen ? (
-        <View style={styles.giftSheet}>
-          <Text style={styles.sheetTitle}>User recharges</Text>
-          <Text style={styles.sheetSub}>
-            User ID + coins · updates every recharge
-          </Text>
-          {rechargeUsers.length === 0 ? (
-            <Text style={{ color: 'rgba(255,255,255,0.6)' }}>No recharges yet</Text>
-          ) : (
-            rechargeUsers.slice(0, 30).map((u) => (
-              <View key={u.userId} style={styles.rechargeRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.rechargeId}>{u.userId}</Text>
-                  <Text style={styles.rechargeName}>{u.userName}</Text>
-                </View>
-                <View style={{ alignItems: 'flex-end' }}>
-                  <Text style={styles.rechargeCoins}>+{u.lastCoins}</Text>
-                  <Text style={styles.rechargeTotal}>
-                    total {u.totalCoins} · x{u.rechargeCount}
-                  </Text>
-                </View>
-              </View>
-            ))
-          )}
-          <Pressable onPress={() => setRechargeBoardOpen(false)}>
-            <Text style={styles.closeSheet}>Close</Text>
-          </Pressable>
-        </View>
-      ) : null}
-
-      {previewPhoto ? (
-        <Pressable style={styles.photoPreview} onPress={() => setPreviewPhoto(null)}>
-          <Image source={{ uri: previewPhoto }} style={styles.photoPreviewImg} />
-          <Text style={styles.closeSheet}>Tap to close</Text>
-        </Pressable>
       ) : null}
     </View>
   );
@@ -717,78 +304,30 @@ const styles = StyleSheet.create({
   top: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'flex-start',
     paddingHorizontal: 12,
-    zIndex: 2,
+    zIndex: 5,
   },
   hostChip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     backgroundColor: 'rgba(0,0,0,0.45)',
-    padding: 6,
-    paddingRight: 10,
-    borderRadius: radii.full,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    borderRadius: 999,
+    maxWidth: '70%',
   },
   hostAv: { width: 36, height: 36, borderRadius: 18 },
   hostName: { color: '#fff', fontWeight: '800', fontSize: 13 },
-  hostMeta: { color: 'rgba(255,255,255,0.7)', fontSize: 10 },
+  timer: { color: 'rgba(255,255,255,0.7)', fontSize: 11, fontWeight: '600' },
   livePill: {
-    marginLeft: 6,
-    backgroundColor: '#FF3B6B',
+    backgroundColor: '#E11D48',
     paddingHorizontal: 8,
     paddingVertical: 3,
-    borderRadius: 8,
+    borderRadius: 999,
   },
-  livePillText: { color: '#fff', fontWeight: '900', fontSize: 10 },
-  followBtn: {
-    marginLeft: 6,
-    backgroundColor: '#6C7CFF',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 10,
-  },
-  followOn: { backgroundColor: 'rgba(255,255,255,0.2)' },
-  followText: { color: '#fff', fontWeight: '800', fontSize: 11 },
-  vipRow: {
-    position: 'absolute',
-    left: 12,
-    top: 100,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    zIndex: 2,
-  },
-  vipLabel: { color: '#F5C14C', fontWeight: '900', fontSize: 11 },
-  vipAv: { width: 28, height: 28, borderRadius: 14, borderWidth: 1, borderColor: '#F5C14C' },
-  joinToast: {
-    position: 'absolute',
-    top: '28%',
-    alignSelf: 'center',
-    backgroundColor: 'rgba(108,124,255,0.55)',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 16,
-    zIndex: 6,
-  },
-  joinToastText: { color: '#fff', fontWeight: '800' },
-  sheetSub: { color: 'rgba(255,255,255,0.55)', marginBottom: 10, fontSize: 12 },
-  giftTier: { color: 'rgba(255,255,255,0.45)', fontSize: 9, marginTop: 2 },
-  rankTabs: { flexDirection: 'row', gap: 8, marginBottom: 12 },
-  rankTab: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-  },
-  rankTabOn: { backgroundColor: 'rgba(108,124,255,0.7)' },
-  rankTabText: { color: '#fff', fontWeight: '800', fontSize: 12, textTransform: 'capitalize' },
-  rankRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 8,
-  },
-  histLine: { color: 'rgba(255,255,255,0.75)', fontSize: 12, marginBottom: 4 },
+  livePillText: { color: '#fff', fontSize: 10, fontWeight: '900' },
   topRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   statPill: {
     flexDirection: 'row',
@@ -797,252 +336,95 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.45)',
     paddingHorizontal: 10,
     paddingVertical: 6,
-    borderRadius: radii.full,
+    borderRadius: 999,
   },
-  statText: { color: '#fff', fontWeight: '700', fontSize: 12 },
-  timer: { color: '#fff', fontWeight: '800', fontVariant: ['tabular-nums'] },
+  statText: { color: '#fff', fontWeight: '800', fontSize: 12 },
   close: {
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: 'rgba(0,0,0,0.5)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  announce: {
-    marginTop: 10,
-    marginHorizontal: 12,
-    backgroundColor: 'rgba(108,124,255,0.35)',
-    borderRadius: 12,
-    padding: 10,
-    zIndex: 2,
-  },
-  announceText: { color: '#fff', fontWeight: '600', fontSize: 12 },
-  leader: {
+  feed: {
     position: 'absolute',
-    right: 12,
-    top: 120,
-    gap: 6,
-    zIndex: 2,
-  },
-  leaderItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    borderRadius: 20,
-    padding: 4,
-    paddingRight: 8,
-  },
-  leaderRank: { color: '#F5C14C', fontWeight: '900', fontSize: 11, marginLeft: 4 },
-  leaderAv: { width: 28, height: 28, borderRadius: 14 },
-  comments: {
-    flexGrow: 0,
-    maxHeight: 160,
-  },
-  chatSection: {
-    position: 'absolute',
-    left: 10,
-    right: 10,
-    bottom: 88,
-    zIndex: 3,
-    maxHeight: 300,
-  },
-  partySeats: {
-    position: 'absolute',
-    right: 10,
-    top: 200,
-    width: 92,
-    gap: 6,
-    zIndex: 2,
-  },
-  partySeat: {
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    borderRadius: 12,
-    padding: 6,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-  },
-  partySeatOn: { borderColor: 'rgba(108,124,255,0.8)' },
-  partyAv: { width: 36, height: 36, borderRadius: 18 },
-  partyEmpty: { color: '#fff', fontSize: 18, fontWeight: '800' },
-  partySeatLabel: { color: '#fff', fontSize: 10, marginTop: 4, fontWeight: '700' },
-  rechargeTicker: {
-    position: 'absolute',
-    top: 120,
-    alignSelf: 'center',
-    backgroundColor: 'rgba(245,193,76,0.95)',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    zIndex: 8,
-  },
-  rechargeTickerText: { color: '#1a1200', fontWeight: '900', fontSize: 12 },
-  rechargeChip: {
-    position: 'absolute',
-    top: 168,
-    right: 12,
-    backgroundColor: 'rgba(245,193,76,0.9)',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 12,
+    left: 12,
+    right: 90,
+    bottom: 110,
+    maxHeight: 180,
     zIndex: 4,
   },
-  rechargeChipText: { color: '#1a1200', fontWeight: '900', fontSize: 11 },
-  rechargeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(255,255,255,0.08)',
-    gap: 10,
+  feedRow: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginBottom: 6,
+    maxWidth: '100%',
   },
-  rechargeId: { color: '#F5C14C', fontWeight: '800', fontSize: 12 },
-  rechargeName: { color: 'rgba(255,255,255,0.7)', fontSize: 11, marginTop: 2 },
-  rechargeCoins: { color: '#fff', fontWeight: '900', fontSize: 15 },
-  rechargeTotal: { color: 'rgba(255,255,255,0.5)', fontSize: 10, marginTop: 2 },
-  lockedRow: { marginBottom: 12 },
-  lockedTitle: {
-    color: 'rgba(255,255,255,0.7)',
-    fontWeight: '700',
-    fontSize: 12,
-    marginBottom: 8,
-  },
-  lockedCard: {
-    width: 72,
-    height: 72,
-    borderRadius: 12,
-    overflow: 'hidden',
-    backgroundColor: '#222',
-  },
-  lockedImg: { width: '100%', height: '100%' },
-  lockedBlur: { opacity: 0.85 },
-  lockedOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.35)',
-    gap: 2,
-  },
-  lockedNeed: { color: '#F5C14C', fontWeight: '900', fontSize: 11 },
-  photoPreview: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.88)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 40,
-    padding: 20,
-  },
-  photoPreviewImg: {
-    width: '100%',
-    maxWidth: 420,
-    height: '70%',
-    borderRadius: 16,
-    resizeMode: 'contain',
-  },
+  feedGift: { backgroundColor: 'rgba(245,193,76,0.28)' },
+  feedText: { color: '#fff', fontSize: 12, fontWeight: '600' },
+  feedEmpty: { color: 'rgba(255,255,255,0.45)', fontSize: 12, marginBottom: 8 },
   giftBurst: {
-    position: 'absolute',
-    top: '35%',
-    left: 0,
-    right: 0,
+    ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
-    zIndex: 5,
+    justifyContent: 'center',
+    zIndex: 8,
   },
   giftEmoji: { fontSize: 72 },
-  giftLabel: { color: '#fff', fontWeight: '800', marginTop: 8 },
-  heartBurst: {
-    position: 'absolute',
-    bottom: 160,
-    right: 40,
-    zIndex: 5,
+  giftLabel: {
+    marginTop: 8,
+    color: '#fff',
+    fontWeight: '800',
+    fontSize: 16,
+    textShadowColor: '#000',
+    textShadowRadius: 8,
   },
-  bottom: {
+  controls: {
     position: 'absolute',
-    left: 10,
-    right: 10,
+    left: 0,
+    right: 0,
     bottom: 0,
     flexDirection: 'row',
+    justifyContent: 'space-around',
     alignItems: 'center',
-    gap: 8,
-    zIndex: 3,
+    paddingTop: 12,
+    paddingHorizontal: 8,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    zIndex: 6,
   },
-  input: {
-    flex: 1,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    borderRadius: radii.full,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    color: '#fff',
-    minHeight: 44,
-  },
-  iconBtn: {
-    minWidth: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0,0,0,0.4)',
+  ctrl: {
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 10,
+    gap: 4,
+    minWidth: 56,
+    paddingVertical: 8,
+    borderRadius: radii.md,
   },
-  hostControls: {
-    position: 'absolute',
-    right: 12,
-    gap: 8,
-    zIndex: 3,
-  },
-  hCtrl: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  ctrlOn: { backgroundColor: 'rgba(108,124,255,0.55)' },
+  endCtrl: { backgroundColor: 'rgba(225,29,72,0.55)' },
+  ctrlLabel: { color: '#fff', fontSize: 10, fontWeight: '700' },
   giftSheet: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: '#121826',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 16,
-    paddingBottom: 32,
-    zIndex: 10,
+    backgroundColor: 'rgba(12,10,18,0.96)',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 18,
+    paddingBottom: 36,
+    zIndex: 20,
+    maxHeight: '50%',
   },
-  sheetTitle: { color: '#fff', fontWeight: '900', fontSize: 18, marginBottom: 12 },
-  giftGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  giftItem: {
-    width: '22%',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderRadius: 14,
-    paddingVertical: 10,
-  },
-  giftItemEmoji: { fontSize: 28 },
-  giftItemName: { color: '#fff', fontSize: 11, fontWeight: '700', marginTop: 4 },
-  giftItemCoins: { color: '#F5C14C', fontSize: 11, fontWeight: '800' },
+  sheetTitle: { color: '#fff', fontSize: 18, fontWeight: '900', marginBottom: 8 },
+  sheetSub: { color: 'rgba(255,255,255,0.55)', marginBottom: 12, fontSize: 13 },
+  histLine: { color: 'rgba(255,255,255,0.85)', marginBottom: 8, fontWeight: '600' },
   closeSheet: {
     color: '#9B8CFF',
     textAlign: 'center',
-    marginTop: 14,
+    marginTop: 16,
     fontWeight: '800',
   },
-  modSheet: {
-    position: 'absolute',
-    left: 16,
-    right: 16,
-    bottom: 100,
-    backgroundColor: '#121826',
-    borderRadius: 20,
-    padding: 16,
-    zIndex: 10,
-  },
-  modBtn: {
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(255,255,255,0.1)',
-  },
-  modText: { color: '#fff', fontWeight: '700' },
 });

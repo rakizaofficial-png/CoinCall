@@ -14,6 +14,7 @@ export default function MessagesPage() {
       <section className="space-y-1 px-3 pb-6">
         {threads.map((t, i) => {
           const creator = getCreator(t.creatorId);
+          if (!creator) return null;
           return (
             <motion.div
               key={t.id}

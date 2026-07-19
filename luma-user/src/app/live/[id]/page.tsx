@@ -1,27 +1,40 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
-import Image from "next/image";
+/**
+ * Live room — safe for real CoinCall host ids (not only mock creators).
+ * Never call getCreator(id)! — real host ids are Firebase UIDs.
+ */
+
+import { use, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { motion } from "framer-motion";
-import {
-  ArrowLeft,
-  Eye,
-  Gift,
-  Heart,
-  MessageCircle,
-  Video,
-} from "lucide-react";
-import { getCreator } from "@/lib/data";
+import { ArrowLeft, Eye, Gift, Heart, Video } from "lucide-react";
+import { creators } from "@/lib/data";
 import { useApp } from "@/lib/store";
 import { GiftSheet } from "@/components/GiftSheet";
+import { fetchLiveHosts, type LiveHost } from "@/lib/api";
+import { requireApiBase } from "@/config/apiConfig";
 
-const chatFeed = [
-  { user: "Alex", text: "This vibe is unreal 🔥" },
-  { user: "Kai", text: "Play that song again!" },
-  { user: "Nora", text: "Sent a Rose 🌹" },
-  { user: "You", text: "Hey! Just joined ✨" },
-];
+function avatarFor(id: string, url?: string | null) {
+  if (
+    !url ||
+    url.startsWith("data:") ||
+    url.startsWith("blob:") ||
+    url.length > 2000
+  ) {
+    return `https://i.pravatar.cc/800?u=${encodeURIComponent(id)}`;
+  }
+  return url;
+}
+
+type RoomRow = {
+  id: string;
+  hostId?: string;
+  hostName?: string;
+  hostAvatar?: string;
+  title?: string;
+  ratePerMinute?: number;
+  viewers?: number;
+};
 
 export default function LiveRoomPage({
   params,
@@ -29,104 +42,144 @@ export default function LiveRoomPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
-  const creator = getCreator(id);
-  const { coins, following, toggleFollow, spend } = useApp();
+  const mock = creators.find((c) => c.id === id) ?? null;
+  const { coins, following, toggleFollow } = useApp();
+
+  const [host, setHost] = useState<LiveHost | null>(null);
+  const [room, setRoom] = useState<RoomRow | null>(null);
   const [giftOpen, setGiftOpen] = useState(false);
   const [likes, setLikes] = useState(0);
-  const [viewers, setViewers] = useState(creator.viewers || 1200);
+  const [viewers, setViewers] = useState(0);
   const [floating, setFloating] = useState<string[]>([]);
+  const [ready, setReady] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const t = setInterval(() => {
-      setViewers((v) => v + Math.floor(Math.random() * 5) - 1);
-    }, 2800);
-    return () => clearInterval(t);
-  }, []);
+    let cancelled = false;
+    (async () => {
+      try {
+        const [hosts, roomRes] = await Promise.all([
+          fetchLiveHosts({ readyOnly: false }).catch(() => [] as LiveHost[]),
+          fetch(`${requireApiBase()}/live/rooms`, { cache: "no-store" })
+            .then((r) => r.json())
+            .catch(() => ({ rooms: [] })),
+        ]);
+        if (cancelled) return;
+
+        const foundHost =
+          hosts.find((h) => h.id === id) ||
+          hosts.find((h) => h.name.toLowerCase() === id.toLowerCase()) ||
+          null;
+        setHost(foundHost);
+
+        const rooms = Array.isArray(roomRes.rooms)
+          ? (roomRes.rooms as RoomRow[])
+          : [];
+        const foundRoom =
+          rooms.find((r) => r.hostId === id || r.id === id) ||
+          rooms.find((r) => r.hostId === foundHost?.id) ||
+          null;
+        setRoom(foundRoom);
+        setViewers(
+          Number(foundRoom?.viewers) ||
+            (mock?.viewers ?? 0),
+        );
+      } catch (e) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : "Could not open live");
+        }
+      } finally {
+        if (!cancelled) setReady(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [id, mock?.viewers]);
+
+  const display = useMemo(() => {
+    const hostId = host?.id || room?.hostId || id;
+    return {
+      id: hostId,
+      name: host?.name || room?.hostName || mock?.name || "Live host",
+      image: avatarFor(
+        hostId,
+        host?.avatarUrl || room?.hostAvatar || mock?.image,
+      ),
+      callRate:
+        host?.ratePerMinute || room?.ratePerMinute || mock?.callRate || 80,
+      roomId: room?.id || hostId,
+    };
+  }, [host, room, mock, id]);
 
   const like = () => {
     setLikes((l) => l + 1);
+    setViewers((v) => v + 1);
     setFloating((f) => [...f, "❤️"]);
     setTimeout(() => setFloating((f) => f.slice(1)), 1200);
   };
 
-  const tipSmall = () => {
-    if (spend(10, "Rose sent to the room 🌹")) {
-      setFloating((f) => [...f, "🌹"]);
-      setTimeout(() => setFloating((f) => f.slice(1)), 1200);
-    }
-  };
+  if (!ready) {
+    return (
+      <main className="flex min-h-dvh items-center justify-center bg-ink text-sm text-muted">
+        Opening live room…
+      </main>
+    );
+  }
 
   return (
     <main className="relative min-h-dvh overflow-hidden bg-ink">
-      <Image
-        src={creator.image}
-        alt={creator.name}
-        fill
-        priority
-        className="object-cover"
+      <img
+        src={display.image}
+        alt={display.name}
+        className="absolute inset-0 h-full w-full object-cover"
       />
       <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-transparent to-black/90" />
 
-      <div className="relative z-10 flex min-h-dvh flex-col px-4 pb-6 pt-[max(0.75rem,env(safe-area-inset-top))]">
-        <div className="flex items-start justify-between">
-          <div className="flex items-center gap-2">
+      <div className="relative z-10 flex min-h-dvh flex-col px-4 pb-24 pt-[max(0.75rem,env(safe-area-inset-top))]">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
             <Link
               href="/live"
               className="rounded-full bg-black/40 p-2 backdrop-blur"
             >
               <ArrowLeft className="h-5 w-5" />
             </Link>
-            <div className="flex items-center gap-2 rounded-full bg-black/45 py-1 pl-1 pr-3 backdrop-blur">
-              <Image
-                src={creator.image}
+            <div className="flex min-w-0 items-center gap-2 rounded-full bg-black/45 py-1 pl-1 pr-3 backdrop-blur">
+              <img
+                src={display.image}
                 alt=""
-                width={36}
-                height={36}
-                className="h-9 w-9 rounded-full object-cover"
+                className="h-9 w-9 shrink-0 rounded-full object-cover"
               />
-              <div>
-                <p className="text-xs font-bold">{creator.name}</p>
+              <div className="min-w-0">
+                <p className="truncate text-xs font-bold">{display.name}</p>
                 <p className="flex items-center gap-1 text-[10px] text-white/70">
-                  <Eye className="h-3 w-3" /> {Math.max(viewers, 1).toLocaleString()}
+                  <Eye className="h-3 w-3" />{" "}
+                  {viewers > 0 ? viewers.toLocaleString() : "Live"}
                 </p>
               </div>
               <button
                 type="button"
-                onClick={() => toggleFollow(creator.id)}
-                className="ml-1 rounded-full bg-coral px-2.5 py-1 text-[10px] font-bold"
+                onClick={() => toggleFollow(display.id)}
+                className="ml-1 shrink-0 rounded-full bg-coral px-2.5 py-1 text-[10px] font-bold"
               >
-                {following.includes(creator.id) ? "Following" : "Follow"}
+                {following.includes(display.id) ? "Following" : "Follow"}
               </button>
             </div>
           </div>
-          <span className="live-pulse rounded-full bg-coral px-2.5 py-1 text-[10px] font-bold uppercase">
+          <span className="live-pulse shrink-0 rounded-full bg-coral px-2.5 py-1 text-[10px] font-bold uppercase">
             Live
           </span>
         </div>
 
-        <div className="mt-auto space-y-3">
-          <div className="max-w-[75%] space-y-1.5">
-            {chatFeed.map((c) => (
-              <motion.p
-                key={c.user + c.text}
-                initial={{ opacity: 0, x: -8 }}
-                animate={{ opacity: 1, x: 0 }}
-                className="rounded-2xl bg-black/35 px-3 py-1.5 text-xs backdrop-blur-sm"
-              >
-                <span className="font-bold text-gold">{c.user}</span>{" "}
-                <span className="text-white/90">{c.text}</span>
-              </motion.p>
-            ))}
-          </div>
+        {error ? (
+          <p className="mt-4 rounded-xl bg-black/50 px-3 py-2 text-xs text-white/80">
+            {error}
+          </p>
+        ) : null}
 
+        <div className="mt-auto space-y-3">
           <div className="flex items-center gap-2">
-            <div className="flex flex-1 items-center gap-2 rounded-full border border-white/15 bg-black/40 px-3 py-2.5 backdrop-blur">
-              <MessageCircle className="h-4 w-4 text-white/60" />
-              <input
-                placeholder="Say something exciting…"
-                className="w-full bg-transparent text-sm outline-none placeholder:text-white/40"
-              />
-            </div>
             <button
               type="button"
               onClick={like}
@@ -137,33 +190,19 @@ export default function LiveRoomPage({
             <button
               type="button"
               onClick={() => setGiftOpen(true)}
-              className="rounded-full bg-coral p-3 shadow-[0_0_24px_var(--glow)]"
+              className="rounded-full bg-coral p-3"
             >
               <Gift className="h-5 w-5" />
             </button>
+            <span className="ml-auto text-xs text-white/60">{coins} coins</span>
           </div>
 
-          <div className="flex items-center justify-between gap-2">
-            <button
-              type="button"
-              onClick={tipSmall}
-              className="rounded-full border border-white/15 bg-black/35 px-3 py-2 text-xs font-semibold backdrop-blur"
-            >
-              Quick Rose · 10
-            </button>
-            <Link
-              href={`/call/${creator.id}`}
-              className="inline-flex items-center gap-1.5 rounded-full bg-sand px-4 py-2 text-xs font-bold text-ink"
-            >
-              <Video className="h-3.5 w-3.5" /> Private 1v1 · {creator.callRate}/min
-            </Link>
-            <span className="text-xs text-white/60">{coins} coins</span>
-          </div>
-          {likes > 0 && (
-            <p className="text-center text-[10px] text-white/50">
-              You liked {likes} times — keep the energy up
-            </p>
-          )}
+          <Link
+            href={`/call/${encodeURIComponent(display.id)}?live=1`}
+            className="inline-flex w-full items-center justify-center gap-1.5 rounded-full bg-sand px-4 py-3 text-sm font-bold text-ink"
+          >
+            <Video className="h-4 w-4" /> Private call · {display.callRate}/min
+          </Link>
         </div>
       </div>
 
@@ -175,7 +214,16 @@ export default function LiveRoomPage({
         ))}
       </div>
 
-      <GiftSheet open={giftOpen} onClose={() => setGiftOpen(false)} />
+      <GiftSheet
+        open={giftOpen}
+        onClose={() => setGiftOpen(false)}
+        hostId={display.id}
+        roomId={display.roomId}
+        onSent={(emoji) => {
+          setFloating((f) => [...f, emoji]);
+          setTimeout(() => setFloating((f) => f.slice(1)), 1200);
+        }}
+      />
     </main>
   );
 }

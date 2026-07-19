@@ -3,7 +3,6 @@ import {
   Radio,
   Sparkles,
   TrendingUp,
-  Users,
   Video,
   Wallet,
   Zap,
@@ -134,15 +133,9 @@ export function HomeScreen({ navigation }: { navigation: any }) {
             {[
               {
                 icon: Video,
-                label: 'Solo Live',
-                sub: 'Camera stage',
+                label: 'Go Live',
+                sub: 'Camera · gifts',
                 onPress: () => navigation.navigate('GoLive', { mode: 'solo' }),
-              },
-              {
-                icon: Users,
-                label: 'Party',
-                sub: 'Multi-seat',
-                onPress: () => navigation.navigate('GoLive', { mode: 'party' }),
               },
               {
                 icon: Sparkles,

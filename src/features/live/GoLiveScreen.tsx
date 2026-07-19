@@ -1,10 +1,8 @@
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { LinearGradient } from 'expo-linear-gradient';
-import * as ImagePicker from 'expo-image-picker';
 import {
   Camera,
   FlipHorizontal,
-  Image as ImageIcon,
   Mic,
   MicOff,
   Sparkles,
@@ -13,10 +11,8 @@ import {
 } from 'lucide-react-native';
 import { useEffect, useRef, useState } from 'react';
 import {
-  Image,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -24,8 +20,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PrimaryButton } from '../../components/ui/PrimaryButton';
+import { useApp } from '../../context/AppContext';
 import { useLiveStudio } from '../../context/LiveStudioContext';
-import { LIVE_CATEGORIES, LIVE_LANGUAGES } from '../../data/gifts';
 import {
   flipPreviewCamera,
   startCameraPreview,
@@ -43,7 +39,8 @@ type Props = {
 export function GoLiveScreen({ navigation, mode = 'solo' }: Props) {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
-  const { goLiveDraft, setGoLiveDraft, startSoloLive, startPartyLive } =
+  const { user } = useApp();
+  const { goLiveDraft, setGoLiveDraft, startSoloLive } =
     useLiveStudio();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [permission, requestPermission] = useCameraPermissions();
@@ -55,6 +52,16 @@ export function GoLiveScreen({ navigation, mode = 'solo' }: Props) {
   const [flash, setFlash] = useState(false);
   const [busy, setBusy] = useState(false);
   const [previewReady, setPreviewReady] = useState(Platform.OS !== 'web');
+
+  // Cover always uses profile photo — skip country / language / image setup
+  useEffect(() => {
+    setGoLiveDraft({
+      thumbnailUrl: user.avatarUrl || goLiveDraft.thumbnailUrl,
+      category: goLiveDraft.category || 'Beauty',
+      language: goLiveDraft.language || 'English',
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user.avatarUrl]);
 
   useEffect(() => {
     if (Platform.OS !== 'web') {
@@ -133,26 +140,18 @@ export function GoLiveScreen({ navigation, mode = 'solo' }: Props) {
     setGoLiveDraft({ facing: next === 'front' ? 'user' : 'environment' });
   };
 
-  const pickThumb = async () => {
-    const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      quality: 0.8,
-    });
-    if (!res.canceled && res.assets[0]?.uri) {
-      setGoLiveDraft({ thumbnailUrl: res.assets[0].uri });
-    }
-  };
-
   const onStart = async () => {
-    if (!goLiveDraft.title.trim()) {
-      notify('Title required', 'Add a stream title before going live.');
-      return;
-    }
     setBusy(true);
     try {
+      // Ensure defaults without forcing setup UI
+      setGoLiveDraft({
+        title: goLiveDraft.title.trim() || `${user.name}'s Live`,
+        thumbnailUrl: user.avatarUrl || goLiveDraft.thumbnailUrl,
+        category: goLiveDraft.category || 'Beauty',
+        language: goLiveDraft.language || 'English',
+      });
       if (Platform.OS === 'web') stopCameraPreview(videoRef.current);
-      const room =
-        mode === 'party' ? await startPartyLive() : await startSoloLive();
+      const room = await startSoloLive();
       navigation.replace('LiveRoom', { roomId: room.id, hostMode: true });
     } catch (e) {
       notify('Go Live failed', e instanceof Error ? e.message : 'Try again');
@@ -205,9 +204,7 @@ export function GoLiveScreen({ navigation, mode = 'solo' }: Props) {
           <Pressable onPress={() => navigation.goBack()} style={styles.chip}>
             <Text style={styles.chipText}>Close</Text>
           </Pressable>
-          <Text style={styles.modeLabel}>
-            {mode === 'party' ? 'PARTY LIVE' : 'GO LIVE'}
-          </Text>
+          <Text style={styles.modeLabel}>GO LIVE</Text>
           <View style={{ width: 64 }} />
         </View>
 
@@ -241,75 +238,28 @@ export function GoLiveScreen({ navigation, mode = 'solo' }: Props) {
       </View>
 
       <LinearGradient colors={['#0B1020', '#121A2E']} style={styles.sheet}>
-        <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
-          <Text style={[styles.label, { color: colors.textSecondary }]}>Title</Text>
+        <View style={{ paddingBottom: insets.bottom + 24 }}>
+          <Text style={[styles.label, { color: colors.textSecondary }]}>
+            Title (optional)
+          </Text>
           <TextInput
             style={[styles.input, { color: colors.text, borderColor: colors.border }]}
             value={goLiveDraft.title}
             onChangeText={(title) => setGoLiveDraft({ title })}
-            placeholder="What are you streaming?"
+            placeholder={`${user.name}'s Live`}
             placeholderTextColor={colors.textMuted}
           />
-
-          <Text style={[styles.label, { color: colors.textSecondary }]}>Category</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            {LIVE_CATEGORIES.map((c) => (
-              <Pressable
-                key={c}
-                onPress={() => setGoLiveDraft({ category: c })}
-                style={[
-                  styles.cat,
-                  {
-                    backgroundColor:
-                      goLiveDraft.category === c ? colors.primary : colors.bgCard,
-                  },
-                ]}
-              >
-                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>{c}</Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-
-          <Text style={[styles.label, { color: colors.textSecondary }]}>Language</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            {LIVE_LANGUAGES.map((l) => (
-              <Pressable
-                key={l}
-                onPress={() => setGoLiveDraft({ language: l })}
-                style={[
-                  styles.cat,
-                  {
-                    backgroundColor:
-                      goLiveDraft.language === l ? colors.primarySoft : colors.bgCard,
-                  },
-                ]}
-              >
-                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>{l}</Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-
-          <Text style={[styles.label, { color: colors.textSecondary }]}>Thumbnail</Text>
-          <Pressable style={styles.thumbRow} onPress={() => void pickThumb()}>
-            <Image source={{ uri: goLiveDraft.thumbnailUrl }} style={styles.thumb} />
-            <View style={{ flex: 1, gap: 4 }}>
-              <Text style={{ color: colors.text, fontWeight: '700' }}>Change cover</Text>
-              <Text style={{ color: colors.textMuted, fontSize: 12 }}>
-                Pick a photo fans see on Live cards
-              </Text>
-            </View>
-            <ImageIcon size={20} color={colors.primarySoft} />
-          </Pressable>
+          <Text style={[styles.hint, { color: colors.textMuted }]}>
+            Cover uses your profile photo. Language & category stay from last time.
+          </Text>
 
           <PrimaryButton
-            label={
-              busy ? 'Starting…' : mode === 'party' ? 'Start Party Live' : 'Start Live'
-            }
+            label={busy ? 'Starting…' : 'Start Live'}
             onPress={() => void onStart()}
             loading={busy}
             style={{ marginTop: 16 }}
           />
-        </ScrollView>
+        </View>
       </LinearGradient>
     </View>
   );
@@ -345,7 +295,7 @@ const webMountStyle: any = {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  preview: { flex: 1.15, overflow: 'hidden' },
+  preview: { flex: 1.4, overflow: 'hidden' },
   previewFallback: {
     flex: 1,
     alignItems: 'center',
@@ -388,13 +338,13 @@ const styles = StyleSheet.create({
   toolOn: { backgroundColor: 'rgba(108,124,255,0.65)' },
   toolLabel: { color: '#fff', fontSize: 10, fontWeight: '700' },
   sheet: {
-    flex: 1,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingHorizontal: 16,
     paddingTop: 16,
   },
-  label: { fontWeight: '700', marginTop: 10, marginBottom: 8 },
+  label: { fontWeight: '700', marginBottom: 8 },
+  hint: { fontSize: 12, marginTop: 10, lineHeight: 16 },
   input: {
     borderWidth: 1,
     borderRadius: 14,
@@ -403,12 +353,4 @@ const styles = StyleSheet.create({
     minHeight: 48,
     backgroundColor: 'rgba(255,255,255,0.04)',
   },
-  cat: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 14,
-    marginRight: 8,
-  },
-  thumbRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  thumb: { width: 64, height: 64, borderRadius: 14 },
 });

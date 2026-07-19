@@ -51,8 +51,8 @@ function BridgeIncomingLayer() {
   );
 }
 
-function GoLiveRoute({ navigation, route }: any) {
-  return <GoLiveScreen navigation={navigation} mode={route.params?.mode || 'solo'} />;
+function GoLiveRoute({ navigation }: any) {
+  return <GoLiveScreen navigation={navigation} mode="solo" />;
 }
 
 function AuthenticatedApp() {

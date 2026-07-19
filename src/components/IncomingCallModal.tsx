@@ -13,6 +13,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useLiveStudio } from '../context/LiveStudioContext';
 import type { BridgeCall } from '../services/callBridge';
 import { acceptBridgeCall, rejectBridgeCall } from '../services/callBridge';
 import type { RootStackParamList } from '../navigation/types';
@@ -36,6 +37,7 @@ function safeAvatar(call: BridgeCall) {
 
 export function IncomingCallModal({ call, onClear }: Props) {
   const { colors } = useTheme();
+  const { myLiveRoom, stopLive } = useLiveStudio();
   const navigation =
     useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [busy, setBusy] = useState(false);
@@ -72,37 +74,35 @@ export function IncomingCallModal({ call, onClear }: Props) {
 
   if (!call) return null;
 
+  const goToCall = (accepted: BridgeCall) => {
+    onClear();
+    navigation.navigate('Call', {
+      hostId: accepted.userId || call.userId,
+      bridgeCallId: accepted.id,
+      channel: accepted.channel,
+      peerName: accepted.userName,
+      peerAvatar: safeAvatar(accepted),
+      ratePerMinute: accepted.ratePerMinute,
+      role: 'host',
+    });
+  };
+
   const accept = async () => {
     if (busy) return;
     setBusy(true);
     stopIncomingRingtone();
     try {
+      // Private call takes over — end live so video isn't dual-mode
+      if (myLiveRoom?.isLive) {
+        await stopLive().catch(() => undefined);
+      }
       const { call: accepted } = await acceptBridgeCall(call.id);
-      onClear();
-      navigation.navigate('Call', {
-        hostId: accepted.userId || call.userId,
-        bridgeCallId: accepted.id,
-        channel: accepted.channel,
-        peerName: accepted.userName,
-        peerAvatar: safeAvatar(accepted),
-        ratePerMinute: accepted.ratePerMinute,
-        role: 'host',
-      });
+      goToCall(accepted);
     } catch (e: unknown) {
       const message =
         e instanceof Error ? e.message : 'Could not accept call';
-      // Still try to open call room if already accepted
       if (message.toLowerCase().includes('accepted')) {
-        onClear();
-        navigation.navigate('Call', {
-          hostId: call.userId,
-          bridgeCallId: call.id,
-          channel: call.channel,
-          peerName: call.userName,
-          peerAvatar: safeAvatar(call),
-          ratePerMinute: call.ratePerMinute,
-          role: 'host',
-        });
+        goToCall(call);
         return;
       }
       notify('Accept failed', message.slice(0, 140));

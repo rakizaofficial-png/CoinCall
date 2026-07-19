@@ -200,12 +200,12 @@ export const threads: ChatThread[] = [
 ];
 
 export const gifts: Gift[] = [
-  { id: "g1", name: "Rose", emoji: "🌹", coins: 5 },
-  { id: "g2", name: "Kiss", emoji: "💋", coins: 50 },
-  { id: "g3", name: "Star", emoji: "⭐", coins: 120 },
-  { id: "g4", name: "Royal Crown", emoji: "👑", coins: 500 },
-  { id: "g5", name: "Magic Castle", emoji: "🏰", coins: 1200 },
-  { id: "g6", name: "Diamond", emoji: "💎", coins: 3000 },
+  { id: "rose", name: "Rose", emoji: "🌹", coins: 1 },
+  { id: "heart", name: "Heart", emoji: "💖", coins: 5 },
+  { id: "kiss", name: "Kiss", emoji: "💋", coins: 10 },
+  { id: "star", name: "Star", emoji: "⭐", coins: 20 },
+  { id: "diamond", name: "Diamond", emoji: "💎", coins: 99 },
+  { id: "crown", name: "Crown", emoji: "👑", coins: 199 },
 ];
 
 export const giftTickerLines = [
@@ -243,5 +243,5 @@ export const engagingLines = [
 ];
 
 export function getCreator(id: string) {
-  return creators.find((c) => c.id === id)!;
+  return creators.find((c) => c.id === id) ?? null;
 }

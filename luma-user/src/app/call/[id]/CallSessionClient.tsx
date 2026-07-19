@@ -67,6 +67,7 @@ export default function CallSessionClient({
     ratePerMinute,
     displayName,
     displayAvatar,
+    bridgeCall,
   } = engine;
 
   const [secs, setSecs] = useState(0);
@@ -353,7 +354,12 @@ export default function CallSessionClient({
         </div>
       </div>
 
-      <GiftSheet open={giftOpen} onClose={() => setGiftOpen(false)} />
+      <GiftSheet
+        open={giftOpen}
+        onClose={() => setGiftOpen(false)}
+        hostId={id}
+        callId={bridgeCall?.id}
+      />
       <LowBalanceModal
         open={lowBalance}
         graceLeft={graceLeft}

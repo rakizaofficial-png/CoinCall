@@ -115,12 +115,6 @@ export function LiveHubScreen({ navigation }: { navigation: any }) {
               }
               style={{ flex: 1 }}
             />
-            <GradientCTA
-              label="Party Room"
-              tone="teal"
-              onPress={() => navigation.navigate('GoLive', { mode: 'party' })}
-              style={{ flex: 1 }}
-            />
           </View>
         </LinearGradient>
 
@@ -130,20 +124,14 @@ export function LiveHubScreen({ navigation }: { navigation: any }) {
             {[
               {
                 icon: Video,
-                title: 'Solo Live',
-                sub: '1 camera · gifts',
+                title: 'Go Live',
+                sub: 'Camera · filter · gifts',
                 onPress: () => navigation.navigate('GoLive', { mode: 'solo' }),
               },
               {
-                icon: Users,
-                title: 'Party Room',
-                sub: 'Seats · room chat',
-                onPress: () => navigation.navigate('GoLive', { mode: 'party' }),
-              },
-              {
                 icon: Gift,
-                title: 'Gift system',
-                sub: 'Catalog on stage',
+                title: 'Gifts',
+                sub: 'See gifts on stage',
                 onPress: () =>
                   myLiveRoom?.isLive
                     ? navigation.navigate('LiveRoom', {
@@ -151,18 +139,6 @@ export function LiveHubScreen({ navigation }: { navigation: any }) {
                         hostMode: true,
                       })
                     : navigation.navigate('GoLive', { mode: 'solo' }),
-              },
-              {
-                icon: Mic,
-                title: 'Room controls',
-                sub: 'Mute · kick · pin',
-                onPress: () =>
-                  myLiveRoom?.isLive
-                    ? navigation.navigate('LiveRoom', {
-                        roomId: myLiveRoom.id,
-                        hostMode: true,
-                      })
-                    : undefined,
               },
             ].map((item) => (
               <SoftPress key={item.title} onPress={item.onPress} style={{ width: '48%' }}>
@@ -193,7 +169,7 @@ export function LiveHubScreen({ navigation }: { navigation: any }) {
                 <Users size={22} color={premium.rose} />
                 <BodyText style={{ fontWeight: '800', marginTop: 8 }}>No rooms yet</BodyText>
                 <BodyText soft style={{ marginTop: 4 }}>
-                  Start Solo Live or Party — other hosts will appear here.
+                  Go Live — other hosts will appear here.
                 </BodyText>
               </GlassPanel>
             </View>
@@ -221,7 +197,7 @@ export function LiveHubScreen({ navigation }: { navigation: any }) {
                   />
                   <View style={styles.badge}>
                     <BodyText style={styles.badgeText}>
-                      {item.mode === 'party' ? 'PARTY' : 'LIVE'}
+                      LIVE
                     </BodyText>
                   </View>
                   {mine ? (

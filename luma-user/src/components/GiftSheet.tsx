@@ -5,27 +5,78 @@ import { motion, AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
 import { gifts } from "@/lib/data";
 import { useApp } from "@/lib/store";
+import { getDeviceUserId } from "@/lib/walletApi";
+import { requireApiBase } from "@/config/apiConfig";
+import { getRealtimeClient } from "@/lib/realtime/websocket";
 
 export function GiftSheet({
   open,
   onClose,
   onSent,
+  hostId,
+  roomId,
+  callId,
 }: {
   open: boolean;
   onClose: () => void;
   onSent?: (emoji: string) => void;
+  hostId?: string;
+  roomId?: string;
+  callId?: string;
 }) {
-  const { spend } = useApp();
+  const { spend, syncWallet, pushToast } = useApp();
   const [sending, setSending] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  const send = (id: string, coins: number, emoji: string, name: string) => {
-    if (!spend(coins, `Sent ${name} ${emoji}`)) return;
-    setSending(emoji);
-    onSent?.(emoji);
-    setTimeout(() => {
-      setSending(null);
-      onClose();
-    }, 700);
+  const send = async (id: string, coins: number, emoji: string, name: string) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      if (hostId) {
+        const res = await fetch(`${requireApiBase()}/gifts/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId: getDeviceUserId(),
+            userName: "Luma Fan",
+            hostId,
+            giftId: id,
+            roomId,
+            callId,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Gift failed");
+        await syncWallet?.();
+        try {
+          getRealtimeClient(getDeviceUserId()).sendGift({
+            roomId,
+            toHostId: hostId,
+            giftId: id,
+            coins,
+            label: name,
+          });
+        } catch {
+          // optional WS mirror
+        }
+      } else if (!spend(coins, `Sent ${name} ${emoji}`)) {
+        setBusy(false);
+        return;
+      }
+
+      setSending(emoji);
+      onSent?.(emoji);
+      setTimeout(() => {
+        setSending(null);
+        onClose();
+        setBusy(false);
+      }, 700);
+    } catch (e) {
+      pushToast?.(
+        e instanceof Error ? e.message : "Could not send gift",
+      );
+      setBusy(false);
+    }
   };
 
   return (
@@ -50,8 +101,10 @@ export function GiftSheet({
           >
             <div className="mb-4 flex items-center justify-between">
               <div>
-                <h3 className="font-display text-lg font-bold">Send a spark</h3>
-                <p className="text-xs text-muted">Make the moment unforgettable</p>
+                <h3 className="font-display text-lg font-bold">Send a gift</h3>
+                <p className="text-xs text-muted">
+                  {hostId ? "Goes to the host · coins deducted" : "Make the moment unforgettable"}
+                </p>
               </div>
               <button
                 type="button"
@@ -66,8 +119,9 @@ export function GiftSheet({
                 <button
                   key={g.id}
                   type="button"
-                  onClick={() => send(g.id, g.coins, g.emoji, g.name)}
-                  className="flex flex-col items-center gap-1 rounded-2xl border border-line bg-ink-3 px-2 py-3 transition active:scale-95"
+                  disabled={busy}
+                  onClick={() => void send(g.id, g.coins, g.emoji, g.name)}
+                  className="flex flex-col items-center gap-1 rounded-2xl border border-line bg-ink-3 px-2 py-3 transition active:scale-95 disabled:opacity-50"
                 >
                   <span className="text-2xl">{g.emoji}</span>
                   <span className="text-xs font-semibold">{g.name}</span>

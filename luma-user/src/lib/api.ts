@@ -49,7 +49,7 @@ function normalizeHost(raw: Partial<LiveHost> & { id?: string; name?: string }):
   const readyToCall =
     typeof raw.readyToCall === "boolean"
       ? raw.readyToCall
-      : isOnline && !isOnCall && !isLive;
+      : isOnline && !isOnCall;
   return {
     id: String(raw.id),
     name: String(raw.name),

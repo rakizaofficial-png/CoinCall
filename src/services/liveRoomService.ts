@@ -83,14 +83,27 @@ function api() {
   return env.apiBaseUrl.replace(/\/$/, '');
 }
 
+/** Strip huge data:/blob: avatars so Luma / API never choke on multi-MB JSON */
+function publicAvatar(hostId: string, url?: string) {
+  if (!url || url.startsWith('data:') || url.startsWith('blob:') || url.length > 2000) {
+    return `https://i.pravatar.cc/400?u=${encodeURIComponent(hostId)}`;
+  }
+  return url;
+}
+
 export async function publishLiveRoom(room: LiveRoom) {
+  const safe: LiveRoom = {
+    ...room,
+    hostAvatar: publicAvatar(room.hostId, room.hostAvatar),
+    thumbnailUrl: publicAvatar(room.hostId, room.thumbnailUrl),
+  };
   if (isFirebaseReady()) {
-    await set(ref(getFirebaseDb(), `liveRooms/${room.id}`), room);
+    await set(ref(getFirebaseDb(), `liveRooms/${safe.id}`), safe);
   }
   await fetch(`${api()}/live/rooms`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(room),
+    body: JSON.stringify(safe),
   }).catch(() => undefined);
 }
 

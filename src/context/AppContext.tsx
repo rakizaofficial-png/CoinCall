@@ -628,6 +628,8 @@ export function AppProvider({
       });
       unsub = subscribeRealtime((event) => {
         if (event.type === 'gift:received' && event.payload?.coins) {
+          const toHostId = String(event.payload.toHostId || '');
+          if (toHostId !== user.id) return;
           const coins = Number(event.payload.coins) || 0;
           if (coins > 0) {
             const label = event.payload.giftName || event.payload.label || 'Gift';

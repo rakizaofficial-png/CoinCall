@@ -126,9 +126,9 @@ export function HostProfileScreen({ navigation, route }: Props) {
             styles.secondary,
             { borderColor: colors.border, backgroundColor: colors.bgCard },
           ]}
-          onPress={() => navigation.navigate('Chat', { hostId: host.id })}
+          onPress={onCall}
         >
-          <Text style={[styles.secondaryText, { color: colors.text }]}>Message</Text>
+          <Text style={[styles.secondaryText, { color: colors.text }]}>Call</Text>
         </Pressable>
         <Pressable
           style={[
