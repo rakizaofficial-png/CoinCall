@@ -1,33 +1,57 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { Radio, RefreshCw, Shuffle, Video, Wifi } from "lucide-react";
-import { TopBar } from "@/components/TopBar";
+import { BadgeCheck, Shuffle, Video } from "lucide-react";
+import { WalletDiamond } from "@/components/WalletDiamond";
 import { creators } from "@/lib/data";
 import { fetchLiveHosts, type LiveHost } from "@/lib/api";
 import { useApp } from "@/lib/store";
 
-export default function CallLobbyPage() {
+function flagFor(country?: string) {
+  const c = (country || "").toLowerCase();
+  if (c.includes("pakistan") || c === "pk") return "🇵🇰";
+  if (c.includes("japan") || c === "jp") return "🇯🇵";
+  if (c.includes("india") || c === "in") return "🇮🇳";
+  if (c.includes("korea") || c === "kr") return "🇰🇷";
+  if (c.includes("china") || c === "cn") return "🇨🇳";
+  if (c.includes("usa") || c.includes("united states") || c === "us") return "🇺🇸";
+  if (c.includes("uk") || c.includes("united kingdom")) return "🇬🇧";
+  return "🌍";
+}
+
+function ratingFor(id: string) {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h + id.charCodeAt(i) * (i + 2)) % 40;
+  return (4.5 + (h % 5) * 0.1).toFixed(1);
+}
+
+type CardHost = {
+  id: string;
+  name: string;
+  avatarUrl: string;
+  country?: string;
+  ratePerMinute: number;
+  online: boolean;
+  live?: boolean;
+};
+
+export default function CallingLoungePage() {
   const router = useRouter();
-  const { isPremium, spend, pushToast } = useApp();
+  const { spend, pushToast, isPremium } = useApp();
   const [liveHosts, setLiveHosts] = useState<LiveHost[]>([]);
   const [loading, setLoading] = useState(true);
-  const [apiOk, setApiOk] = useState(false);
-  const onlineDemo = creators.filter((c) => c.online);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
       const hosts = await fetchLiveHosts();
-      setLiveHosts(hosts);
-      setApiOk(true);
+      setLiveHosts(hosts.filter((h) => h.isOnline));
     } catch {
       setLiveHosts([]);
-      setApiOk(false);
     } finally {
       setLoading(false);
     }
@@ -39,199 +63,135 @@ export default function CallLobbyPage() {
     return () => clearInterval(t);
   }, [refresh]);
 
-  const randomMatch = () => {
+  const cards: CardHost[] = useMemo(() => {
     if (liveHosts.length) {
-      const pick = liveHosts[Math.floor(Math.random() * liveHosts.length)];
-      const cost = isPremium ? 30 : 60;
-      if (!spend(cost, "Matching a live CoinCall host…")) return;
-      router.push(`/call/${pick.id}?live=1`);
-      return;
+      return liveHosts.map((h) => ({
+        id: h.id,
+        name: h.name,
+        avatarUrl:
+          h.avatarUrl ||
+          `https://i.pravatar.cc/600?u=${encodeURIComponent(h.id)}`,
+        country: h.country,
+        ratePerMinute: h.ratePerMinute || 80,
+        online: true,
+        live: h.isLive,
+      }));
     }
-    const cost = isPremium ? 30 : 60;
-    if (!spend(cost, isPremium ? "VIP demo match ⚡" : "Demo match ⚡")) return;
-    const pick = onlineDemo[Math.floor(Math.random() * onlineDemo.length)];
-    pushToast(`Demo only — open CoinCall host & Go Online`);
-    router.push(`/call/${pick.id}`);
-  };
+    // Fallback demo cards so the Lounge still looks complete offline
+    return creators
+      .filter((c) => c.online)
+      .slice(0, 6)
+      .map((c) => ({
+        id: c.id,
+        name: c.name,
+        avatarUrl: c.image,
+        country: c.country,
+        ratePerMinute: c.callRate,
+        online: true,
+      }));
+  }, [liveHosts]);
 
-  const blindMatch = () => {
-    if (liveHosts.length) {
-      const pick = liveHosts[Math.floor(Math.random() * liveHosts.length)];
-      const cost = isPremium ? 15 : 30;
-      if (!spend(cost, "Blind match · blur reveal…")) return;
-      router.push(`/call/${pick.id}?live=1&blur=1`);
+  const match = () => {
+    if (!cards.length) {
+      pushToast("No hosts online yet");
       return;
     }
-    const cost = isPremium ? 15 : 30;
-    if (!spend(cost, "Blind demo match…")) return;
-    const pick = onlineDemo[Math.floor(Math.random() * onlineDemo.length)];
-    pushToast("Blind match demo — Instant Clear unlocks video");
-    router.push(`/call/${pick.id}?blur=1`);
+    const pick = cards[Math.floor(Math.random() * cards.length)];
+    const cost = isPremium ? 30 : 60;
+    if (!spend(cost, "Matching a host…")) return;
+    router.push(`/call/${pick.id}?live=1`);
   };
 
   return (
-    <main>
-      <TopBar
-        title="1v1 Video"
-        subtitle="Call real CoinCall hosts — coins per minute"
-      />
-
-      <section className="px-4 pb-3">
-        <div
-          className={`flex items-center justify-between rounded-2xl border px-3 py-2.5 text-xs ${
-            apiOk
-              ? "border-teal/30 bg-teal/10 text-teal"
-              : "border-coral/30 bg-coral/10 text-coral"
-          }`}
-        >
-          <span className="flex items-center gap-1.5 font-semibold">
-            <Wifi className="h-3.5 w-3.5" />
-            {apiOk
-              ? `Live hosts · ${liveHosts.length}`
-              : "Waiting for CoinCall API…"}
-          </span>
+    <main className="min-h-dvh pb-28">
+      <header className="sticky top-0 z-30 flex items-start justify-between gap-3 bg-[#06040b]/88 px-4 pb-3 pt-[max(0.85rem,env(safe-area-inset-top))] backdrop-blur-xl">
+        <div className="min-w-0">
+          <p className="font-display text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan">
+            Luma Lounge
+          </p>
+          <h1 className="font-display text-[28px] font-extrabold leading-none text-sand">
+            1V1 Calling
+          </h1>
+          <p className="mt-1 text-sm text-cyan/75">Private video calls</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2 pt-1">
           <button
             type="button"
-            onClick={() => void refresh()}
-            className="rounded-full p-1.5 hover:bg-black/20"
+            onClick={match}
+            className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-coral to-coral-2 px-3.5 py-2 text-xs font-bold text-white shadow-[0_8px_24px_rgba(255,42,122,0.45)]"
           >
-            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+            <Shuffle className="h-3.5 w-3.5" />
+            Match
           </button>
+          <WalletDiamond />
         </div>
-      </section>
+      </header>
 
-      <section className="px-4 pb-4">
-        <motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="overflow-hidden rounded-3xl border border-line bg-ink-2"
-        >
-          <div className="relative h-36 bg-gradient-to-br from-coral/40 via-ink-2 to-gold/20" />
-          <div className="p-5 text-center">
-            <h2 className="font-display text-2xl font-extrabold">
-              Call a live host
-            </h2>
-            <p className="mt-1 text-sm text-muted">
-              Rings CoinCall host app → they accept → Agora connects
-            </p>
-            <button
-              type="button"
-              onClick={randomMatch}
-              className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-full bg-coral py-3.5 text-sm font-bold text-white shadow-[0_10px_40px_var(--glow)]"
-            >
-              <Shuffle className="h-4 w-4" />
-              {liveHosts.length
-                ? `Match live host · ${isPremium ? 30 : 60} coins`
-                : `Demo match · ${isPremium ? 30 : 60} coins`}
-            </button>
-            <button
-              type="button"
-              onClick={blindMatch}
-              className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-full border border-cyan/40 bg-cyan/10 py-3 text-sm font-bold text-cyan"
-            >
-              Blind Match · 50% off + blur reveal
-            </button>
+      <section className="space-y-4 px-4 pt-1">
+        {loading && !cards.length ? (
+          <div className="rounded-3xl border border-line bg-ink-2/70 px-4 py-16 text-center text-sm text-muted">
+            Syncing hosts…
           </div>
-        </motion.div>
-      </section>
+        ) : null}
 
-      <h3 className="px-4 pb-2 font-display text-sm font-bold uppercase tracking-wider text-muted">
-        Live on CoinCall
-      </h3>
-      <section className="space-y-2.5 px-4 pb-4">
-        {!loading && liveHosts.length === 0 && (
-          <div className="rounded-2xl border border-dashed border-line bg-ink-2/60 px-4 py-6 text-center text-sm text-muted">
-            No hosts online. Open <span className="text-sand">CoinCall</span>{" "}
-            host app → tap <span className="text-teal">Online</span>.
+        {!loading && liveHosts.length === 0 ? (
+          <div className="rounded-3xl border border-dashed border-line bg-ink-2/50 px-4 py-4 text-center text-xs text-muted">
+            Showing lounge preview — open CoinCall host → Go Online for live calls
           </div>
-        )}
-        {liveHosts.map((h, i) => (
-          <motion.div
+        ) : null}
+
+        {cards.map((h, i) => (
+          <motion.article
             key={h.id}
-            initial={{ opacity: 0, x: -10 }}
-            animate={{ opacity: 1, x: 0 }}
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.05 }}
-            className="flex items-center gap-3 rounded-2xl border border-teal/25 bg-ink-2 p-3"
+            className="relative overflow-hidden rounded-[28px] border border-white/10 bg-ink-2 shadow-[0_20px_50px_rgba(0,0,0,0.45)]"
           >
-            <div className="relative">
+            <div className="relative aspect-[4/5] w-full">
               <Image
-                src={
-                  h.avatarUrl ||
-                  `https://i.pravatar.cc/120?u=${encodeURIComponent(h.id)}`
-                }
+                src={h.avatarUrl}
                 alt={h.name}
-                width={56}
-                height={56}
-                className="h-14 w-14 rounded-2xl object-cover"
+                fill
+                unoptimized
+                className="object-cover"
+                sizes="(max-width: 430px) 100vw, 430px"
+                priority={i < 2}
               />
-              <span className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-ink-2 bg-teal" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="font-display font-bold">{h.name}</p>
-              <p className="truncate text-xs text-muted">
-                {h.country || "CoinCall host"}
-                {h.isLive ? " · LIVE" : ""}
-                {h.isOnCall
-                  ? " · Busy"
-                  : h.readyToCall !== false
-                    ? " · Ready"
-                    : " · Waiting"}
-              </p>
-              <p className="mt-0.5 text-[11px] text-gold">
-                {h.ratePerMinute} coins/min
-              </p>
-            </div>
-            <Link
-              href={`/call/${h.id}?live=1`}
-              className={`flex items-center gap-1 rounded-full px-3 py-2 text-xs font-bold ${
-                h.isOnCall
-                  ? "border border-line text-muted"
-                  : "bg-sand text-ink"
-              }`}
-            >
-              {h.isLive ? (
-                <Radio className="h-3.5 w-3.5" />
-              ) : (
-                <Video className="h-3.5 w-3.5" />
-              )}
-              {h.isOnCall ? "Busy" : "Call"}
-            </Link>
-          </motion.div>
-        ))}
-      </section>
+              <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/25 to-transparent" />
 
-      <h3 className="px-4 pb-2 font-display text-sm font-bold uppercase tracking-wider text-muted">
-        Demo creators
-      </h3>
-      <section className="space-y-2.5 px-4 pb-8">
-        {onlineDemo.map((c, i) => (
-          <motion.div
-            key={c.id}
-            initial={{ opacity: 0, x: -10 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: i * 0.04 }}
-            className="flex items-center gap-3 rounded-2xl border border-line bg-ink-2/70 p-3 opacity-80"
-          >
-            <Image
-              src={c.image}
-              alt={c.name}
-              width={48}
-              height={48}
-              className="h-12 w-12 rounded-2xl object-cover"
-            />
-            <div className="min-w-0 flex-1">
-              <p className="font-display text-sm font-bold">
-                {c.name} {c.flag}
-              </p>
-              <p className="text-[11px] text-muted">Preview only · not bridged</p>
+              <div className="absolute left-3 top-3">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-cyan/95 px-2.5 py-1 text-[11px] font-extrabold uppercase tracking-wide text-ink shadow-[0_0_18px_rgba(0,240,255,0.45)]">
+                  <span className="h-1.5 w-1.5 rounded-full bg-ink" />
+                  Online
+                </span>
+              </div>
+
+              <div className="absolute inset-x-0 bottom-0 p-4">
+                <div className="mb-1 flex items-center gap-1.5">
+                  <h2 className="font-display text-2xl font-extrabold text-white">
+                    {h.name}
+                  </h2>
+                  <BadgeCheck className="h-5 w-5 fill-cyan text-ink" />
+                </div>
+                <p className="text-sm text-sand/85">
+                  {flagFor(h.country)} {h.country || "CoinCall"} · ★{" "}
+                  {ratingFor(h.id)}
+                </p>
+                <p className="mt-1 text-sm font-semibold text-gold">
+                  {h.ratePerMinute} coins/min
+                </p>
+
+                <Link
+                  href={`/call/${h.id}?live=1`}
+                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-full bg-sand py-3.5 text-sm font-extrabold text-ink"
+                >
+                  <Video className="h-4 w-4" />
+                  Call
+                </Link>
+              </div>
             </div>
-            <Link
-              href={`/call/${c.id}`}
-              className="rounded-full border border-line px-3 py-1.5 text-[10px] font-bold text-muted"
-            >
-              Demo
-            </Link>
-          </motion.div>
+          </motion.article>
         ))}
       </section>
     </main>

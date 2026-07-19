@@ -9,10 +9,7 @@ import { getCreator, threads } from "@/lib/data";
 export default function MessagesPage() {
   return (
     <main>
-      <TopBar
-        title="Messages"
-        subtitle="Keep the spark going offline."
-      />
+      <TopBar title="Chat" subtitle="Keep the spark going" />
 
       <section className="space-y-1 px-3 pb-6">
         {threads.map((t, i) => {

@@ -10,10 +10,7 @@ import { getCreator, liveRooms } from "@/lib/data";
 export default function LivePage() {
   return (
     <main>
-      <TopBar
-        title="Live now"
-        subtitle="Jump in. Chat. Gift. Feel the room."
-      />
+      <TopBar title="Live" subtitle="Rooms · parties · gifts" />
 
       <div className="mb-3 overflow-hidden border-y border-line bg-ink-2/80 py-2">
         <div className="marquee flex w-max gap-8 whitespace-nowrap text-xs text-muted">

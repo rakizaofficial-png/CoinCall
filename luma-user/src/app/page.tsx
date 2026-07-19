@@ -2,7 +2,8 @@
 
 import { SwipeFeed } from "@/components/SwipeFeed";
 
-export default function DiscoverPage() {
+/** Home — swipe discover feed (Luma Lounge) */
+export default function HomePage() {
   return (
     <main className="!pb-0">
       <SwipeFeed />
