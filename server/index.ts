@@ -2112,18 +2112,42 @@ app.get('/api/live/rooms/:id', (req, res) => {
 app.get('/api/live/rooms/:id/comments', (req, res) => {
   const found = findLiveRoom(String(req.params.id || ''));
   if (!found) {
-    res.status(404).json({ error: 'Live room not found' });
+    // Soft-empty so clients can poll before room mirrors to API
+    res.json({ comments: [] });
     return;
   }
   const list = liveComments.get(found.id) || [];
-  res.json({ comments: list.slice(-80) });
+  res.json({ comments: list.slice(-80), roomId: found.id });
 });
 
 app.post('/api/live/rooms/:id/comments', (req, res) => {
-  const found = findLiveRoom(String(req.params.id || ''));
+  const rawId = String(req.params.id || '');
+  let found = findLiveRoom(rawId);
   if (!found || !found.room.isLive) {
-    res.status(404).json({ error: 'Live room not found' });
-    return;
+    // Soft-create so chat works even if room only exists on host Firebase
+    const hostId = String(
+      req.body?.hostId || (rawId.startsWith('live_') ? rawId.slice(5) : rawId),
+    ).trim();
+    if (!hostId) {
+      res.status(404).json({ error: 'Live room not found' });
+      return;
+    }
+    const presence = getPresence(hostId);
+    const roomId = rawId.startsWith('live_') ? rawId : `live_${hostId}`;
+    const room = {
+      id: roomId,
+      hostId,
+      hostName: String(req.body?.hostName || presence?.name || 'Host'),
+      channel: roomId,
+      isLive: true,
+      mode: 'solo',
+      viewers: Number(presence ? 1 : 0),
+      giftCoins: 0,
+      updatedAt: Date.now(),
+    };
+    liveRooms.set(roomId, room);
+    if (presence) patchPresence(hostId, { isLive: true, isOnline: true });
+    found = { id: roomId, room };
   }
   const userId = String(req.body?.userId || '').trim().slice(0, 64);
   const userName = String(req.body?.userName || 'Viewer').trim().slice(0, 40) || 'Viewer';
@@ -2142,7 +2166,7 @@ app.post('/api/live/rooms/:id/comments', (req, res) => {
     roomId: found.id,
     comment,
   });
-  res.status(201).json({ ok: true, comment });
+  res.status(201).json({ ok: true, comment, roomId: found.id });
 });
 
 /** Viewer join / leave — bumps room viewer count for the active live list */

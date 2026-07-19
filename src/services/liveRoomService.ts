@@ -175,29 +175,82 @@ export function listenRoomComments(
   roomId: string,
   onComments: (items: LiveComment[]) => void,
 ): Unsubscribe {
-  if (!isFirebaseReady()) {
-    onComments([]);
-    return () => undefined;
-  }
-  return onValue(ref(getFirebaseDb(), `liveRooms/${roomId}/comments`), (snap) => {
-    if (!snap.exists()) {
-      onComments([]);
-      return;
-    }
-    const val = snap.val() as Record<string, Omit<LiveComment, 'id'>>;
+  let dead = false;
+  const merge = new Map<string, LiveComment>();
+
+  const emit = () => {
+    if (dead) return;
     onComments(
-      Object.entries(val)
-        .map(([id, row]) => ({ id, ...row }))
-        .sort((a, b) => a.createdAt - b.createdAt)
-        .slice(-80),
+      [...merge.values()].sort((a, b) => a.createdAt - b.createdAt).slice(-80),
     );
+  };
+
+  const ingest = (rows: LiveComment[]) => {
+    for (const row of rows) {
+      if (row?.id) merge.set(row.id, row);
+    }
+    emit();
+  };
+
+  const pollApi = async () => {
+    try {
+      const res = await fetch(`${api()}/live/rooms/${encodeURIComponent(roomId)}/comments`);
+      const data = (await res.json()) as { comments?: LiveComment[] };
+      ingest(data.comments || []);
+    } catch {
+      /* keep last */
+    }
+  };
+
+  void pollApi();
+  const pollTimer = setInterval(() => void pollApi(), 2500);
+
+  let unsubFb: Unsubscribe | undefined;
+  if (isFirebaseReady()) {
+    unsubFb = onValue(ref(getFirebaseDb(), `liveRooms/${roomId}/comments`), (snap) => {
+      if (!snap.exists()) return;
+      const val = snap.val() as Record<string, Omit<LiveComment, 'id'>>;
+      ingest(
+        Object.entries(val).map(([id, row]) => ({ id, ...row })),
+      );
+    });
+  }
+
+  let unsubWs: (() => void) | undefined;
+  void import('./realtimeWs').then(({ subscribeRealtime }) => {
+    if (dead) return;
+    unsubWs = subscribeRealtime((event) => {
+      if (event.type !== 'live:comment') return;
+      const payload = event.payload as { roomId?: string; comment?: LiveComment };
+      if (!payload?.comment) return;
+      if (payload.roomId && payload.roomId !== roomId) return;
+      ingest([payload.comment]);
+    });
   });
+
+  return () => {
+    dead = true;
+    clearInterval(pollTimer);
+    unsubFb?.();
+    unsubWs?.();
+  };
 }
 
 export async function postRoomComment(roomId: string, comment: Omit<LiveComment, 'id'>) {
-  if (!isFirebaseReady()) return;
-  const r = push(ref(getFirebaseDb(), `liveRooms/${roomId}/comments`));
-  await set(r, comment);
+  if (isFirebaseReady()) {
+    const r = push(ref(getFirebaseDb(), `liveRooms/${roomId}/comments`));
+    await set(r, comment);
+  }
+  await fetch(`${api()}/live/rooms/${encodeURIComponent(roomId)}/comments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      userId: comment.userId,
+      userName: comment.userName,
+      text: comment.text,
+      hostId: roomId.replace(/^live_/, ''),
+    }),
+  }).catch(() => undefined);
 }
 
 export function listenRoomGifts(
