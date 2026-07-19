@@ -41,7 +41,9 @@ export function UsersWalletsPanel() {
   }, [wallets, query]);
 
   const totals = useMemo(() => {
-    const users = wallets.filter((w) => w.role === 'user' || w.userId.startsWith('luma_'));
+    const users = wallets.filter(
+      (w) => w.role === 'user' || w.userId.startsWith('luma_'),
+    );
     const vip = wallets.filter((w) => w.isPremium).length;
     const coins = wallets.reduce((s, w) => s + (w.coinBalance || 0), 0);
     return { count: wallets.length, users: users.length, vip, coins };
@@ -69,48 +71,52 @@ export function UsersWalletsPanel() {
 
   return (
     <>
-      <h2>Luma users</h2>
-      <p className="sub">
-        Auto-created profiles · wallet balances · purchase IDs
-      </p>
-
-      <div className="stats" style={{ marginBottom: 16 }}>
-        <div className="stat">
-          <span>Wallets</span>
-          <b>{totals.count}</b>
+      <div className="page-head">
+        <div>
+          <h2>Luma users</h2>
+          <p className="sub">
+            Auto-created profiles · wallet balances · purchase IDs
+          </p>
         </div>
-        <div className="stat">
-          <span>User profiles</span>
-          <b>{totals.users}</b>
-        </div>
-        <div className="stat">
-          <span>VIP</span>
-          <b>{totals.vip}</b>
-        </div>
-        <div className="stat">
-          <span>Total coins</span>
-          <b>{totals.coins.toLocaleString()}</b>
-        </div>
-      </div>
-
-      <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search user id / name…"
-          style={{ flex: 1, minWidth: 200, padding: 10, borderRadius: 10 }}
-        />
         <button type="button" className="btn-ghost" onClick={() => void load()}>
           Refresh
         </button>
       </div>
 
-      {msg ? <div className="warn">{msg}</div> : null}
+      <div className="stats">
+        <div className="stat">
+          <span>Wallets</span>
+          <b>{totals.count}</b>
+        </div>
+        <div className="stat teal">
+          <span>User profiles</span>
+          <b>{totals.users}</b>
+        </div>
+        <div className="stat gold">
+          <span>VIP</span>
+          <b>{totals.vip}</b>
+        </div>
+        <div className="stat blue">
+          <span>Total coins</span>
+          <b>{totals.coins.toLocaleString()}</b>
+        </div>
+      </div>
+
+      <div className="hm-toolbar">
+        <input
+          className="hm-search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search user id / name…"
+        />
+      </div>
+
+      {msg ? <div className="hm-toast">{msg}</div> : null}
       {error ? <div className="error">{error}</div> : null}
       {loading && !wallets.length ? (
-        <div className="meta">Loading wallets…</div>
+        <div className="empty-state">Loading wallets…</div>
       ) : filtered.length === 0 ? (
-        <div className="meta">
+        <div className="empty-state">
           No user wallets yet. They appear when someone opens the Luma app.
         </div>
       ) : (
@@ -122,30 +128,25 @@ export function UsersWalletsPanel() {
               style={{ gridTemplateColumns: 'auto 1fr auto' }}
             >
               {w.avatarUrl ? (
-                <img
-                  src={w.avatarUrl}
-                  alt=""
-                  width={48}
-                  height={48}
-                  style={{ borderRadius: 12, objectFit: 'cover' }}
-                />
+                <img src={w.avatarUrl} alt="" width={48} height={48} />
               ) : (
                 <div
                   style={{
                     width: 48,
                     height: 48,
                     borderRadius: 12,
-                    background: '#2a2038',
+                    background: 'linear-gradient(145deg,#ff4d7a33,#2ee6c533)',
                     display: 'grid',
                     placeItems: 'center',
-                    fontWeight: 700,
+                    fontWeight: 800,
+                    fontFamily: 'var(--display)',
                   }}
                 >
                   {(w.displayName || '?')[0]}
                 </div>
               )}
               <div>
-                <h3 style={{ margin: 0 }}>{w.displayName || 'User'}</h3>
+                <h3>{w.displayName || 'User'}</h3>
                 <div className="meta">
                   <code>{w.userId}</code>
                   <br />
@@ -154,9 +155,21 @@ export function UsersWalletsPanel() {
                 </div>
               </div>
               <div className="actions" style={{ textAlign: 'right' }}>
-                <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 8 }}>
+                <div
+                  style={{
+                    fontFamily: 'var(--display)',
+                    fontWeight: 800,
+                    fontSize: 20,
+                    marginBottom: 8,
+                  }}
+                >
                   {w.coinBalance.toLocaleString()}
-                  <span style={{ fontSize: 11, opacity: 0.7 }}> coins</span>
+                  <span
+                    style={{ fontSize: 11, opacity: 0.7, fontWeight: 600 }}
+                  >
+                    {' '}
+                    coins
+                  </span>
                 </div>
                 <button
                   type="button"

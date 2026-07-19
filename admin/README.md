@@ -1,34 +1,28 @@
-# CoinCall Admin Panel
+# CoinCall Admin Panel (Web)
 
-Web control center for the host app.
+Modern **browser-based** control center for CoinCall + Luma.
 
-## Features
-- Approve / reject / ban hosts (photo + video review)
-- Set coins, force online/offline
-- Remote commands into host app
-- **Silent 1:1 monitor** — join live calls behind the host (host cannot see admin)
+**Live:** https://coincall-admin.onrender.com
 
-## Setup
-1. Copy env:
-   ```bash
-   cp admin/.env.example admin/.env
-   ```
-2. Fill `admin/.env` from the host app `.env`:
-   - `EXPO_PUBLIC_FIREBASE_*` → `VITE_FIREBASE_*`
-   - `EXPO_PUBLIC_AGORA_APP_ID` → `VITE_AGORA_APP_ID`
-   - `EXPO_PUBLIC_API_BASE_URL` → `VITE_API_BASE_URL`
-3. In `server/.env` set:
-   ```
-   ADMIN_API_KEY=coincall-admin
-   ```
-4. Run:
-   ```bash
-   npm run server
-   npm run admin
-   ```
-5. Open http://localhost:5173  
-   Login key: `coincall-admin` (or your `VITE_ADMIN_KEY`)
+## Sections
+- **Overview** — live stats + shortcuts
+- **Hosts** — KYC, approvals, bulk actions, audit
+- **Luma users** — auto profiles, wallets, coin adjust
+- **Live calls** — silent Agora monitor
+- **Remote control** — tip / online / end call
+- **Payouts** — EasyPaisa / JazzCash / bank
+- **Reports** — abuse queue
 
-## Silent video
-When a host starts a 1:1 call, it appears under **Live 1:1**.  
-Click **Enter silent** — admin joins Agora as subscriber only (no camera/mic published).
+## Local run (web)
+```bash
+cd admin
+cp .env.example .env   # fill VITE_* from host app
+npm install
+npm run dev
+```
+Open http://localhost:5173  
+Login key: `coincall-admin` (or `VITE_ADMIN_KEY`)
+
+## Production
+Deployed on Render from `CoinCall` repo `admin/` rootDir.
+API must expose `/api/admin/*` with matching `ADMIN_API_KEY`.

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import AgoraRTC, { type IAgoraRTCClient } from 'agora-rtc-sdk-ng';
 import {
   adminLogin,
@@ -24,15 +24,63 @@ import { UsersWalletsPanel } from './components/UsersWallets';
 import { adminKey, agoraAppId, firebaseReady } from './firebase';
 import './styles.css';
 
-type Tab = 'dashboard' | 'hosts' | 'users' | 'calls' | 'control' | 'payouts' | 'reports';
+type Tab =
+  | 'dashboard'
+  | 'hosts'
+  | 'users'
+  | 'calls'
+  | 'control'
+  | 'payouts'
+  | 'reports';
 type AdminRole = 'super_admin' | 'moderator' | 'finance' | 'support';
 
 function formatClock(sec = 0) {
-  const m = Math.floor(sec / 60).toString().padStart(2, '0');
+  const m = Math.floor(sec / 60)
+    .toString()
+    .padStart(2, '0');
   const s = (sec % 60).toString().padStart(2, '0');
   return `${m}:${s}`;
 }
 
+function Icon({ d }: { d: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d={d} strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+const ICONS: Record<Tab, string> = {
+  dashboard: 'M3 12l9-9 9 9M5 10v10h14V10',
+  hosts: 'M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75',
+  users: 'M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 11a4 4 0 100-8 4 4 0 000 8z',
+  calls: 'M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z',
+  payouts: 'M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6',
+  reports: 'M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z',
+  control: 'M12 15a3 3 0 100-6 3 3 0 000 6zM19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z',
+};
+
+function PageHead({
+  title,
+  subtitle,
+  action,
+}: {
+  title: string;
+  subtitle: string;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="page-head">
+      <div>
+        <h2>{title}</h2>
+        <p className="sub">{subtitle}</p>
+      </div>
+      {action}
+    </div>
+  );
+}
+
+/** Modern web-based CoinCall control center */
 export default function App() {
   const [authed, setAuthed] = useState(() => localStorage.getItem('cc_admin') === '1');
   const [key, setKey] = useState(adminKey);
@@ -64,7 +112,7 @@ export default function App() {
   }, [authed]);
 
   useEffect(() => {
-    if (!authed || tab !== 'payouts') return;
+    if (!authed || (tab !== 'payouts' && tab !== 'dashboard')) return;
     let cancelled = false;
     const load = async () => {
       try {
@@ -120,11 +168,16 @@ export default function App() {
           }
           if (mediaType === 'audio' && user.audioTrack) user.audioTrack.play();
         });
-        await client.join(token.appId || agoraAppId, monitor.channel, token.token, uid);
-        // No publish → host cannot see admin
+        await client.join(
+          token.appId || agoraAppId,
+          monitor.channel,
+          token.token,
+          uid,
+        );
         if (!dead) setMonitorStatus('Silent monitor ON · host cannot see you');
       } catch (e) {
-        if (!dead) setMonitorStatus(e instanceof Error ? e.message : 'Monitor failed');
+        if (!dead)
+          setMonitorStatus(e instanceof Error ? e.message : 'Monitor failed');
       }
     })();
     return () => {
@@ -150,9 +203,22 @@ export default function App() {
     ).length;
     const approved = hosts.filter((h) => h.hostStatus === 'approved').length;
     const online = hosts.filter((h) => h.isOnline).length;
-    const banned = hosts.filter((h) => h.banned || h.hostStatus === 'banned').length;
-    return { total: hosts.length, pending, approved, online, banned, liveCalls: calls.length };
-  }, [hosts, calls]);
+    const banned = hosts.filter(
+      (h) => h.banned || h.hostStatus === 'banned',
+    ).length;
+    const openPayouts = withdrawals.filter((w) => w.status !== 'paid').length;
+    const openReports = reports.filter((r) => r.status !== 'resolved').length;
+    return {
+      total: hosts.length,
+      pending,
+      approved,
+      online,
+      banned,
+      liveCalls: calls.length,
+      openPayouts,
+      openReports,
+    };
+  }, [hosts, calls, withdrawals, reports]);
 
   async function onLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -169,68 +235,105 @@ export default function App() {
     }
   }
 
+  const navItems: {
+    id: Tab;
+    label: string;
+    count?: number;
+    group: string;
+  }[] = [
+    { id: 'dashboard', label: 'Overview', group: 'Main' },
+    { id: 'hosts', label: 'Hosts', count: stats.total, group: 'Main' },
+    { id: 'users', label: 'Luma users', group: 'Main' },
+    { id: 'calls', label: 'Live calls', count: stats.liveCalls, group: 'Live' },
+    { id: 'control', label: 'Remote control', group: 'Live' },
+    {
+      id: 'payouts',
+      label: 'Payouts',
+      count: stats.openPayouts,
+      group: 'Finance',
+    },
+    {
+      id: 'reports',
+      label: 'Reports',
+      count: stats.openReports,
+      group: 'Finance',
+    },
+  ];
+
   if (!authed) {
     return (
       <div className="login-wrap">
         <form className="login-card" onSubmit={onLogin}>
+          <p className="login-eyebrow">Web control center</p>
           <h1>CoinCall Admin</h1>
-          <p>Host management · approvals · finance · silent monitor</p>
+          <p>Manage hosts, Luma wallets, live calls, payouts, and silent monitor from the browser.</p>
+          <label htmlFor="admin-key">Admin key</label>
           <input
+            id="admin-key"
             type="password"
             value={key}
             onChange={(e) => setKey(e.target.value)}
-            placeholder="Admin key"
+            placeholder="Enter admin key"
             autoFocus
           />
+          <label htmlFor="admin-role">Role</label>
           <select
+            id="admin-role"
             value={adminRole}
             onChange={(e) => setAdminRole(e.target.value as AdminRole)}
-            style={{ width: '100%', marginTop: 10, padding: 10, borderRadius: 10 }}
           >
             <option value="super_admin">Super Admin</option>
             <option value="moderator">Moderator</option>
             <option value="finance">Finance</option>
             <option value="support">Support</option>
           </select>
-          <button type="submit">Enter Admin Panel</button>
+          <button type="submit">Enter admin panel</button>
           {loginError ? <div className="error">{loginError}</div> : null}
-          <p style={{ marginTop: 14, fontSize: 12 }}>
-            Default key: <code>coincall-admin</code>
+          <p className="login-hint">
+            Default key: <code>coincall-admin</code> · runs on web
           </p>
         </form>
       </div>
     );
   }
 
+  let lastGroup = '';
+
   return (
     <div className="shell">
       <aside className="side">
         <div className="brand">
-          CoinCall <span>Admin</span>
+          <div className="brand-mark">CC</div>
+          <div className="brand-text">
+            <strong>CoinCall</strong>
+            <span>Admin · Web</span>
+          </div>
         </div>
-        <small>
-          Role: {adminRole.replace('_', ' ')} · hosts &amp; live control
-        </small>
-        {(
-          [
-            ['dashboard', 'Dashboard'],
-            ['hosts', `Hosts (${stats.total})`],
-            ['users', 'Luma users'],
-            ['calls', `Live 1:1 (${stats.liveCalls})`],
-            ['payouts', `Payouts (${withdrawals.filter((w) => w.status !== 'paid').length})`],
-            ['reports', `Reports (${reports.filter((r) => r.status !== 'resolved').length})`],
-            ['control', 'Remote Control'],
-          ] as [Tab, string][]
-        ).map(([id, label]) => (
-          <button
-            key={id}
-            className={`nav-btn ${tab === id ? 'active' : ''}`}
-            onClick={() => setTab(id)}
-            type="button"
-          >
-            {label}
-          </button>
-        ))}
+        <div className="side-role">{adminRole.replace('_', ' ')}</div>
+
+        <nav className="nav-group">
+          {navItems.map((item) => {
+            const showGroup = item.group !== lastGroup;
+            lastGroup = item.group;
+            return (
+              <div key={item.id}>
+                {showGroup ? <div className="nav-label">{item.group}</div> : null}
+                <button
+                  type="button"
+                  className={`nav-btn ${tab === item.id ? 'active' : ''}`}
+                  onClick={() => setTab(item.id)}
+                >
+                  <Icon d={ICONS[item.id]} />
+                  {item.label}
+                  {typeof item.count === 'number' ? (
+                    <span className="nav-count">{item.count}</span>
+                  ) : null}
+                </button>
+              </div>
+            );
+          })}
+        </nav>
+
         <button
           className="logout"
           type="button"
@@ -247,45 +350,61 @@ export default function App() {
       <main className="main">
         {!firebaseReady ? (
           <div className="warn">
-            Firebase keys missing in <code>admin/.env</code>. Copy from host app
-            <code> EXPO_PUBLIC_FIREBASE_*</code> into <code>VITE_FIREBASE_*</code> then restart
-            admin.
+            Firebase keys missing in <code>admin/.env</code>. Copy host{' '}
+            <code>EXPO_PUBLIC_FIREBASE_*</code> into <code>VITE_FIREBASE_*</code>{' '}
+            then restart.
           </div>
         ) : null}
 
         {tab === 'dashboard' ? (
           <>
-            <h2>Dashboard</h2>
-            <p className="sub">Live overview of the host network</p>
+            <PageHead
+              title="Overview"
+              subtitle="Live pulse of hosts, calls, and Luma users"
+            />
             <div className="stats">
               <div className="stat">
                 <span>Total hosts</span>
                 <b>{stats.total}</b>
               </div>
-              <div className="stat">
-                <span>Pending / review</span>
+              <div className="stat gold">
+                <span>Pending review</span>
                 <b>{stats.pending}</b>
               </div>
-              <div className="stat">
+              <div className="stat green">
                 <span>Approved</span>
                 <b>{stats.approved}</b>
               </div>
-              <div className="stat">
+              <div className="stat teal">
                 <span>Online now</span>
                 <b>{stats.online}</b>
               </div>
-              <div className="stat">
-                <span>Banned</span>
-                <b>{stats.banned}</b>
-              </div>
-              <div className="stat">
-                <span>Live 1:1 calls</span>
+              <div className="stat blue">
+                <span>Live 1:1</span>
                 <b>{stats.liveCalls}</b>
               </div>
+              <div className="stat">
+                <span>Open payouts</span>
+                <b>{stats.openPayouts}</b>
+              </div>
             </div>
-            <div className="warn">
-              Use <strong>Hosts</strong> for KYC / live control. Use <strong>Luma users</strong> for
-              auto-created profiles, coin balances, and purchase IDs.
+            <div className="quick-grid">
+              <button type="button" className="quick-card" onClick={() => setTab('hosts')}>
+                <strong>Host KYC</strong>
+                <span>Approve, suspend, and audit host applications</span>
+              </button>
+              <button type="button" className="quick-card" onClick={() => setTab('users')}>
+                <strong>Luma wallets</strong>
+                <span>Auto profiles, coin balances, purchase IDs</span>
+              </button>
+              <button type="button" className="quick-card" onClick={() => setTab('calls')}>
+                <strong>Silent monitor</strong>
+                <span>Join live 1:1 calls without being seen</span>
+              </button>
+              <button type="button" className="quick-card" onClick={() => setTab('payouts')}>
+                <strong>Payout desk</strong>
+                <span>Process EasyPaisa / JazzCash / bank cash-outs</span>
+              </button>
             </div>
           </>
         ) : null}
@@ -296,14 +415,22 @@ export default function App() {
 
         {tab === 'calls' ? (
           <>
-            <h2>Live 1:1 Calls</h2>
-            <p className="sub">Enter behind the host — silent video monitor</p>
+            <PageHead
+              title="Live 1:1 calls"
+              subtitle="Silent video monitor — host cannot see admin"
+            />
             <div className="list">
               {calls.length === 0 ? (
-                <div className="meta">No active calls. When a host starts a call, it appears here.</div>
+                <div className="empty-state">
+                  No active calls. They appear here when a host starts a call.
+                </div>
               ) : (
                 calls.map((c) => (
-                  <div className="card" key={c.id} style={{ gridTemplateColumns: '1fr auto' }}>
+                  <div
+                    className="card"
+                    key={c.id}
+                    style={{ gridTemplateColumns: '1fr auto' }}
+                  >
                     <div>
                       <h3>
                         {c.hostName} ↔ {c.peerName}
@@ -337,24 +464,23 @@ export default function App() {
             </div>
 
             {monitor ? (
-              <div style={{ marginTop: 20 }}>
-                <h3>
-                  Silent monitor · {monitor.hostName}{' '}
-                  <button
-                    type="button"
-                    className="btn-ghost"
-                    style={{ marginLeft: 8 }}
-                    onClick={() => {
-                      setMonitor(null);
-                      void leaveMonitor();
-                    }}
-                  >
-                    Leave
-                  </button>
-                </h3>
-                <div className="meta" style={{ marginBottom: 8 }}>
-                  {monitorStatus}
-                </div>
+              <div className="section-panel" style={{ marginTop: 20 }}>
+                <PageHead
+                  title={`Monitor · ${monitor.hostName}`}
+                  subtitle={monitorStatus}
+                  action={
+                    <button
+                      type="button"
+                      className="btn-ghost"
+                      onClick={() => {
+                        setMonitor(null);
+                        void leaveMonitor();
+                      }}
+                    >
+                      Leave
+                    </button>
+                  }
+                />
                 <div className="monitor">
                   <div className="video-box">
                     <label>Host / stream A</label>
@@ -372,14 +498,20 @@ export default function App() {
 
         {tab === 'payouts' ? (
           <>
-            <h2>Host payouts</h2>
-            <p className="sub">Review cash-outs · mark paid / failed</p>
+            <PageHead
+              title="Host payouts"
+              subtitle="Review cash-outs · mark paid or failed"
+            />
             <div className="list">
               {withdrawals.length === 0 ? (
-                <div className="card">No withdrawal requests yet.</div>
+                <div className="empty-state">No withdrawal requests yet.</div>
               ) : (
                 withdrawals.map((w) => (
-                  <div className="card" key={w.id} style={{ gridTemplateColumns: '1fr auto' }}>
+                  <div
+                    className="card"
+                    key={w.id}
+                    style={{ gridTemplateColumns: '1fr auto' }}
+                  >
                     <div>
                       <h3>
                         {w.amountCoins} coins · {w.gateway}
@@ -444,14 +576,20 @@ export default function App() {
 
         {tab === 'reports' ? (
           <>
-            <h2>Reports</h2>
-            <p className="sub">Host-submitted abuse / spam reports</p>
+            <PageHead
+              title="Reports"
+              subtitle="Abuse and spam reports from hosts"
+            />
             <div className="list">
               {reports.length === 0 ? (
-                <div className="card">No reports.</div>
+                <div className="empty-state">No reports.</div>
               ) : (
                 reports.map((r) => (
-                  <div className="card" key={r.id} style={{ gridTemplateColumns: '1fr auto' }}>
+                  <div
+                    className="card"
+                    key={r.id}
+                    style={{ gridTemplateColumns: '1fr auto' }}
+                  >
                     <div>
                       <h3>
                         {r.reason} · {r.status}
@@ -478,7 +616,9 @@ export default function App() {
                               }
                               setReports((list) =>
                                 list.map((x) =>
-                                  x.id === r.id ? { ...x, status: 'resolved' } : x,
+                                  x.id === r.id
+                                    ? { ...x, status: 'resolved' }
+                                    : x,
                                 ),
                               );
                             })()
@@ -497,61 +637,75 @@ export default function App() {
 
         {tab === 'control' ? (
           <>
-            <h2>Remote Control</h2>
-            <p className="sub">Push commands into any host app instantly</p>
+            <PageHead
+              title="Remote control"
+              subtitle="Push commands into any approved host app"
+            />
             <div className="list">
-              {hosts
-                .filter((h) => h.hostStatus === 'approved')
-                .map((h) => (
-                  <div className="card" key={h.id} style={{ gridTemplateColumns: '64px 1fr' }}>
-                    <img src={h.photoUrl || h.avatarUrl || ''} alt="" />
-                    <div>
-                      <h3>
-                        {h.name} · {h.hostId}
-                      </h3>
-                      <div className="actions" style={{ flexDirection: 'row', marginTop: 8 }}>
-                        <button
-                          type="button"
-                          className="btn-ghost"
-                          onClick={() =>
-                            void sendControl(h.id, {
-                              type: 'message',
-                              message: 'Please keep beauty filter on and stay longer on calls.',
-                            })
-                          }
+              {hosts.filter((h) => h.hostStatus === 'approved').length === 0 ? (
+                <div className="empty-state">No approved hosts yet.</div>
+              ) : (
+                hosts
+                  .filter((h) => h.hostStatus === 'approved')
+                  .map((h) => (
+                    <div
+                      className="card"
+                      key={h.id}
+                      style={{ gridTemplateColumns: '64px 1fr' }}
+                    >
+                      <img src={h.photoUrl || h.avatarUrl || ''} alt="" />
+                      <div>
+                        <h3>
+                          {h.name} · {h.hostId}
+                        </h3>
+                        <div
+                          className="actions"
+                          style={{ flexDirection: 'row', marginTop: 8 }}
                         >
-                          Send tip
-                        </button>
-                        <button
-                          type="button"
-                          className="btn-gold"
-                          onClick={() => void setHostOnline(h.id, true)}
-                        >
-                          Force online
-                        </button>
-                        <button
-                          type="button"
-                          className="btn-ghost"
-                          onClick={() => void setHostOnline(h.id, false)}
-                        >
-                          Force offline
-                        </button>
-                        <button
-                          type="button"
-                          className="btn-red"
-                          onClick={() =>
-                            void sendControl(h.id, {
-                              type: 'end_call',
-                              message: 'Admin ended your call.',
-                            })
-                          }
-                        >
-                          End their call
-                        </button>
+                          <button
+                            type="button"
+                            className="btn-ghost"
+                            onClick={() =>
+                              void sendControl(h.id, {
+                                type: 'message',
+                                message:
+                                  'Please keep beauty filter on and stay longer on calls.',
+                              })
+                            }
+                          >
+                            Send tip
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-gold"
+                            onClick={() => void setHostOnline(h.id, true)}
+                          >
+                            Force online
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-ghost"
+                            onClick={() => void setHostOnline(h.id, false)}
+                          >
+                            Force offline
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-red"
+                            onClick={() =>
+                              void sendControl(h.id, {
+                                type: 'end_call',
+                                message: 'Admin ended your call.',
+                              })
+                            }
+                          >
+                            End their call
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  ))
+              )}
             </div>
           </>
         ) : null}
