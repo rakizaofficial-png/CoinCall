@@ -17,7 +17,16 @@ export type ActiveCallRecord = {
 };
 
 export type HostControlCommand = {
-  type: 'end_call' | 'force_offline' | 'force_online' | 'ban' | 'message' | 'kick_live';
+  type:
+    | 'end_call'
+    | 'force_offline'
+    | 'force_online'
+    | 'ban'
+    | 'suspend'
+    | 'message'
+    | 'kick_live'
+    | 'approval'
+    | 'approved';
   message?: string;
   at: number;
   by: 'admin';

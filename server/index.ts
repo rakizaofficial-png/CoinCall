@@ -386,6 +386,10 @@ app.post('/api/hosts/presence', (req, res) => {
   // Going offline always clears the bridge entry
   if (!isOnline) {
     removePresence(hostId);
+    broadcastWs({
+      type: 'host:presence',
+      payload: { id: hostId, isOnline: false, readyToCall: false, isLive: false, isOnCall: false },
+    });
     res.json({ ok: true, host: { id: hostId, isOnline: false } });
     return;
   }
@@ -431,6 +435,20 @@ app.post('/api/hosts/presence', (req, res) => {
   };
   record.readyToCall = computeReadyToCall(record);
   upsertPresence(record);
+
+  broadcastWs({
+    type: 'host:presence',
+    payload: {
+      id: record.id,
+      name: record.name,
+      isOnline: record.isOnline,
+      isLive: record.isLive,
+      isOnCall: record.isOnCall,
+      readyToCall: record.readyToCall,
+      workspaceMode: record.workspaceMode,
+      lastSeen: record.lastSeen,
+    },
+  });
 
   res.json({ ok: true, host: record });
 });
@@ -590,6 +608,7 @@ app.post('/api/calls/:id/accept', (req, res) => {
   call.updatedAt = Date.now();
   calls.set(call.id, call);
   pushToHost(call.hostId, 'call_accepted', call);
+  broadcastWs({ type: 'call:updated', payload: call });
   res.json({ call });
 });
 
@@ -2072,6 +2091,77 @@ app.post('/api/admin/wallets/:userId/status', (req, res) => {
   wallets.set(userId, row);
   persist();
   res.json({ ok: true, wallet: walletPublic(row) });
+});
+
+/** Admin: live 1:1 + live rooms for Monitor / Remote Control */
+app.get('/api/admin/active-sessions', (req, res) => {
+  const key = String(req.query.key || req.headers['x-admin-key'] || '');
+  if (key !== ADMIN_KEY) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+  pruneHosts();
+  const nowTs = Date.now();
+  const activeCalls = [...calls.values()]
+    .filter((c) => c.status === 'ringing' || c.status === 'accepted')
+    .map((c) => {
+      const startedAt = c.acceptedAt || c.createdAt;
+      return {
+        id: c.id,
+        kind: 'call' as const,
+        channel: c.channel,
+        hostId: c.hostId,
+        hostName: c.hostName,
+        peerId: c.userId,
+        peerName: c.userName,
+        peerAvatar: c.userAvatar,
+        status: c.status,
+        ratePerMinute: c.ratePerMinute,
+        billedMinutes: c.billedMinutes || 0,
+        startedAt,
+        seconds: Math.max(0, Math.floor((nowTs - startedAt) / 1000)),
+        coinsEarned: (c.billedMinutes || 0) * (c.ratePerMinute || 0),
+      };
+    });
+  const rooms = [...liveRooms.values()]
+    .filter((r) => r.isLive && String(r.mode || '') !== 'party')
+    .map((r) => ({
+      id: String(r.id),
+      kind: 'live' as const,
+      channel: String(r.channel || `live_${r.hostId}`),
+      hostId: String(r.hostId || ''),
+      hostName: String(r.hostName || 'Host'),
+      title: String(r.title || 'Live'),
+      viewers: Number(r.viewers || 0),
+      giftCoins: Number(r.giftCoins || 0),
+      thumbnailUrl: r.thumbnailUrl ? String(r.thumbnailUrl) : undefined,
+      status: 'live',
+    }));
+  res.json({
+    calls: activeCalls,
+    liveRooms: rooms,
+    counts: {
+      calls: activeCalls.length,
+      liveRooms: rooms.length,
+      total: activeCalls.length + rooms.length,
+    },
+  });
+});
+
+/** Admin force-end a bridge call (syncs both sides) */
+app.post('/api/admin/calls/:id/end', (req, res) => {
+  const key = String(req.body?.key || req.headers['x-admin-key'] || '');
+  if (key !== ADMIN_KEY) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+  const call = calls.get(String(req.params.id));
+  if (!call) {
+    res.status(404).json({ error: 'Call not found' });
+    return;
+  }
+  const ended = forceEndCall(call, 'host');
+  res.json({ ok: true, call: ended });
 });
 
 /** Super-admin scannable analytics snapshot */

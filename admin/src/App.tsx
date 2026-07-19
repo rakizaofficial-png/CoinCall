@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
+import { fetchBridgeHosts } from './hostApi';
 import {
   adminLogin,
+  connectAdminRealtime,
+  endBridgeCallAdmin,
   endCallRemote,
+  fetchAdminActiveSessions,
   fetchAdminReports,
   fetchAdminWithdrawals,
-  fetchLiveRoomsAdmin,
   listenActiveCalls,
   listenHosts,
   listenReports,
@@ -14,6 +17,8 @@ import {
   sendControl,
   setHostOnline,
   type ActiveCall,
+  type AdminActiveCall,
+  type AdminLiveRoomSession,
   type HostRow,
   type LiveRoomAdmin,
   type ReportAdminRow,
@@ -146,13 +151,18 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('dashboard');
   const [hosts, setHosts] = useState<HostRow[]>([]);
   const [calls, setCalls] = useState<ActiveCall[]>([]);
+  const [bridgeCalls, setBridgeCalls] = useState<AdminActiveCall[]>([]);
   const [liveRooms, setLiveRooms] = useState<LiveRoomAdmin[]>([]);
+  const [bridgeLiveRooms, setBridgeLiveRooms] = useState<AdminLiveRoomSession[]>([]);
   const [monitor, setMonitor] = useState<MonitorTarget | null>(null);
   const [reports, setReports] = useState<ReportAdminRow[]>([]);
   const [theme, setTheme] = useState<'dark' | 'light'>(() =>
     (localStorage.getItem('cc_admin_theme') as 'dark' | 'light') || 'dark',
   );
   const [openPayouts, setOpenPayouts] = useState(0);
+  const [bridgeHosts, setBridgeHosts] = useState<
+    { id: string; name: string; readyToCall?: boolean; isOnline?: boolean; isLive?: boolean; isOnCall?: boolean; avatarUrl?: string }[]
+  >([]);
 
   const allowed = useMemo(
     () => sectionsForRole(adminRole, agencyPerms),
@@ -180,22 +190,61 @@ export default function App() {
     };
   }, [authed]);
 
+  const refreshSessions = async () => {
+    try {
+      const data = await fetchAdminActiveSessions();
+      setBridgeCalls(data.calls || []);
+      setBridgeLiveRooms(data.liveRooms || []);
+      // Keep legacy liveRooms shape for any other consumers
+      setLiveRooms(
+        (data.liveRooms || []).map((r) => ({
+          id: r.id,
+          hostId: r.hostId,
+          hostName: r.hostName,
+          title: r.title,
+          viewers: r.viewers,
+          channel: r.channel,
+          giftCoins: r.giftCoins,
+          thumbnailUrl: r.thumbnailUrl,
+          isLive: true,
+        })),
+      );
+    } catch {
+      /* keep last */
+    }
+    try {
+      const bridge = await fetchBridgeHosts();
+      setBridgeHosts(bridge.hosts || []);
+    } catch {
+      setBridgeHosts([]);
+    }
+  };
+
   useEffect(() => {
     if (!authed) return;
     let cancelled = false;
-    const loadLives = async () => {
-      try {
-        const data = await fetchLiveRoomsAdmin();
-        if (!cancelled) setLiveRooms(data.rooms || []);
-      } catch {
-        if (!cancelled) setLiveRooms([]);
-      }
+    const tick = async () => {
+      if (cancelled) return;
+      await refreshSessions();
     };
-    void loadLives();
-    const t = setInterval(() => void loadLives(), 8000);
+    void tick();
+    const t = setInterval(() => void tick(), 4000);
+    const off = connectAdminRealtime((type) => {
+      if (
+        type === 'host:presence' ||
+        type === 'host:updated' ||
+        type === 'live:room' ||
+        type === 'live:ended' ||
+        type === 'call:updated' ||
+        type === 'call:ended'
+      ) {
+        void refreshSessions();
+      }
+    });
     return () => {
       cancelled = true;
       clearInterval(t);
+      off();
     };
   }, [authed]);
 
@@ -246,19 +295,66 @@ export default function App() {
       (h) => h.hostStatus === 'pending' || h.hostStatus === 'under_review',
     ).length;
     const approved = hosts.filter((h) => h.hostStatus === 'approved').length;
-    const online = hosts.filter((h) => h.isOnline).length;
+    const online = Math.max(
+      hosts.filter((h) => h.isOnline).length,
+      bridgeHosts.filter((h) => h.isOnline).length,
+    );
     const openReports = reports.filter((r) => r.status !== 'resolved').length;
+    const liveCalls = Math.max(calls.length, bridgeCalls.length);
+    const liveStreams = Math.max(liveRooms.length, bridgeLiveRooms.length);
     return {
       total: hosts.length,
       pending,
       approved,
       online,
-      liveCalls: calls.length,
-      liveStreams: liveRooms.length,
+      liveCalls,
+      liveStreams,
       openPayouts,
       openReports,
     };
-  }, [hosts, calls, liveRooms, openPayouts, reports]);
+  }, [hosts, calls, bridgeCalls, liveRooms, bridgeLiveRooms, bridgeHosts, openPayouts, reports]);
+
+  const monitorLiveRooms = bridgeLiveRooms.length
+    ? bridgeLiveRooms
+    : liveRooms.map((r) => ({
+        id: r.id,
+        kind: 'live' as const,
+        channel: r.channel || `live_${r.hostId || r.id}`,
+        hostId: r.hostId || '',
+        hostName: r.hostName || 'Host',
+        title: r.title || 'Live',
+        viewers: r.viewers || 0,
+        giftCoins: r.giftCoins || 0,
+        thumbnailUrl: r.thumbnailUrl,
+        status: 'live',
+      }));
+
+  const monitorCalls: Array<AdminActiveCall | (ActiveCall & { kind?: 'call' })> =
+    bridgeCalls.length > 0
+      ? bridgeCalls
+      : calls.map((c) => ({ ...c, kind: 'call' as const }));
+
+  const remoteHosts = useMemo(() => {
+    const byId = new Map<string, HostRow & { readyToCall?: boolean; isLive?: boolean; isOnCall?: boolean }>();
+    for (const h of hosts) {
+      if (h.hostStatus === 'approved') byId.set(h.id, h);
+    }
+    for (const b of bridgeHosts) {
+      const prev = byId.get(b.id);
+      byId.set(b.id, {
+        ...(prev || { id: b.id, name: b.name, hostStatus: 'approved' }),
+        name: b.name || prev?.name,
+        avatarUrl: b.avatarUrl || prev?.avatarUrl,
+        photoUrl: prev?.photoUrl,
+        isOnline: b.isOnline,
+        readyToCall: b.readyToCall,
+        isLive: b.isLive,
+        isOnCall: b.isOnCall,
+        hostStatus: 'approved',
+      });
+    }
+    return [...byId.values()];
+  }, [hosts, bridgeHosts]);
 
   async function onLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -605,14 +701,14 @@ export default function App() {
               <>
                 <PageHead
                   title="Live Monitor"
-                  subtitle="Secret surveillance · streams & private 1:1 · hosts never see you"
+                  subtitle={`${stats.liveStreams} streams · ${stats.liveCalls} private calls · silent Agora watch`}
                 />
-                <h3 className="section-title">Live streams</h3>
+                <h3 className="section-title">Live streams ({monitorLiveRooms.length})</h3>
                 <div className="list">
-                  {liveRooms.length === 0 ? (
+                  {monitorLiveRooms.length === 0 ? (
                     <div className="empty-state">No live streams right now.</div>
                   ) : (
-                    liveRooms.map((r) => (
+                    monitorLiveRooms.map((r) => (
                       <div
                         className="card"
                         key={r.id}
@@ -652,58 +748,88 @@ export default function App() {
                 </div>
 
                 <h3 className="section-title" style={{ marginTop: 28 }}>
-                  Private 1:1 calls
+                  Private 1:1 calls ({monitorCalls.length})
                 </h3>
                 <div className="list">
-                  {calls.length === 0 ? (
+                  {monitorCalls.length === 0 ? (
                     <div className="empty-state">No active calls.</div>
                   ) : (
-                    calls.map((c) => (
-                      <div
-                        className="card"
-                        key={c.id}
-                        style={{ gridTemplateColumns: '1fr auto' }}
-                      >
-                        <div>
-                          <h3>
-                            {c.hostName} ↔ {c.peerName}
-                          </h3>
-                          <div className="meta">
-                            <span className="badge live">1:1</span>
-                            {formatClock(c.seconds)} · {c.coinsEarned || 0}{' '}
-                            coins
+                    monitorCalls.map((c) => {
+                      const hostName =
+                        'hostName' in c ? c.hostName : (c as ActiveCall).hostName;
+                      const peerName =
+                        'peerName' in c
+                          ? (c as AdminActiveCall | ActiveCall).peerName
+                          : 'Caller';
+                      const channel = c.channel;
+                      const seconds =
+                        'seconds' in c ? Number(c.seconds || 0) : 0;
+                      const coins =
+                        'coinsEarned' in c ? Number(c.coinsEarned || 0) : 0;
+                      const status =
+                        'status' in c ? String(c.status || 'active') : 'active';
+                      return (
+                        <div
+                          className="card"
+                          key={c.id}
+                          style={{ gridTemplateColumns: '1fr auto' }}
+                        >
+                          <div>
+                            <h3>
+                              {hostName} ↔ {peerName}
+                            </h3>
+                            <div className="meta">
+                              <span className="badge live">
+                                {status === 'ringing' ? 'RINGING' : '1:1'}
+                              </span>
+                              {formatClock(seconds)} · {coins} coins
+                            </div>
+                          </div>
+                          <div className="actions">
+                            {(agencyPerms?.canMonitor || !isAgency) &&
+                            status !== 'ringing' ? (
+                              <button
+                                type="button"
+                                className="btn-pink"
+                                onClick={() =>
+                                  setMonitor({
+                                    id: c.id,
+                                    kind: 'call',
+                                    title: `${hostName} ↔ ${peerName}`,
+                                    subtitle: 'Private video call',
+                                    channel,
+                                  })
+                                }
+                              >
+                                Watch silently
+                              </button>
+                            ) : null}
+                            {!isAgency ? (
+                              <button
+                                type="button"
+                                className="btn-red"
+                                onClick={() =>
+                                  void (async () => {
+                                    try {
+                                      if (bridgeCalls.some((b) => b.id === c.id)) {
+                                        await endBridgeCallAdmin(c.id);
+                                      } else {
+                                        await endCallRemote(c as ActiveCall);
+                                      }
+                                      await refreshSessions();
+                                    } catch {
+                                      /* ignore */
+                                    }
+                                  })()
+                                }
+                              >
+                                Force end
+                              </button>
+                            ) : null}
                           </div>
                         </div>
-                        <div className="actions">
-                          {(agencyPerms?.canMonitor || !isAgency) && (
-                            <button
-                              type="button"
-                              className="btn-pink"
-                              onClick={() =>
-                                setMonitor({
-                                  id: c.id,
-                                  kind: 'call',
-                                  title: `${c.hostName} ↔ ${c.peerName}`,
-                                  subtitle: 'Private video call',
-                                  channel: c.channel,
-                                })
-                              }
-                            >
-                              Watch silently
-                            </button>
-                          )}
-                          {!isAgency ? (
-                            <button
-                              type="button"
-                              className="btn-red"
-                              onClick={() => void endCallRemote(c)}
-                            >
-                              Force end
-                            </button>
-                          ) : null}
-                        </div>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               </>
@@ -765,12 +891,15 @@ export default function App() {
               <>
                 <PageHead
                   title="Remote control"
-                  subtitle="Commands into approved host apps"
+                  subtitle={`${remoteHosts.length} hosts · live presence from bridge`}
                 />
                 <div className="list">
-                  {hosts
-                    .filter((h) => h.hostStatus === 'approved')
-                    .map((h) => (
+                  {remoteHosts.length === 0 ? (
+                    <div className="empty-state">
+                      No approved hosts yet. Approve hosts in Host List.
+                    </div>
+                  ) : (
+                    remoteHosts.map((h) => (
                       <div
                         className="card"
                         key={h.id}
@@ -779,8 +908,21 @@ export default function App() {
                         <img src={h.photoUrl || h.avatarUrl || ''} alt="" />
                         <div>
                           <h3>
-                            {h.name} · {h.hostId}
+                            {h.name} · {h.hostId || h.id.slice(0, 8)}
                           </h3>
+                          <div className="meta" style={{ marginBottom: 8 }}>
+                            {h.readyToCall ? (
+                              <span className="badge online">READY TO CALL</span>
+                            ) : h.isLive ? (
+                              <span className="badge pending">LIVE</span>
+                            ) : h.isOnCall ? (
+                              <span className="badge under_review">ON CALL</span>
+                            ) : h.isOnline ? (
+                              <span className="badge online">ONLINE</span>
+                            ) : (
+                              <span className="badge">OFFLINE / NOT ON USER APP</span>
+                            )}
+                          </div>
                           <div
                             className="actions"
                             style={{ flexDirection: 'row', marginTop: 8 }}
@@ -806,6 +948,18 @@ export default function App() {
                             </button>
                             <button
                               type="button"
+                              className="btn-ghost"
+                              onClick={() =>
+                                void sendControl(h.id, {
+                                  type: 'force_offline',
+                                  message: 'Admin set you Offline.',
+                                })
+                              }
+                            >
+                              Force offline
+                            </button>
+                            <button
+                              type="button"
                               className="btn-red"
                               onClick={() =>
                                 void sendControl(h.id, {
@@ -819,7 +973,8 @@ export default function App() {
                           </div>
                         </div>
                       </div>
-                    ))}
+                    ))
+                  )}
                 </div>
               </>
             ) : null}

@@ -35,7 +35,8 @@ function HostGate() {
     user.hostStatus === 'pending' ||
     user.hostStatus === 'under_review' ||
     user.hostStatus === 'suspended' ||
-    user.hostStatus === 'banned'
+    user.hostStatus === 'banned' ||
+    user.hostStatus === 'rejected'
   ) {
     return <HostPendingScreen />;
   }

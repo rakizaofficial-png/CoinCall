@@ -682,9 +682,13 @@ export function AppProvider({
       } else if (cmd.type === 'force_online') {
         setHostOnline(true, { silent: true });
         notify('Admin', cmd.message || 'You were set Online by admin.');
-      } else if (cmd.type === 'ban') {
+      } else if (cmd.type === 'ban' || cmd.type === 'suspend') {
         setHostOnline(false, { silent: true });
-        notify('Suspended', cmd.message || 'Your host account was suspended.');
+        // AuthContext Firebase listener also applies hostStatus → HostGate
+        notify(
+          cmd.type === 'ban' ? 'Banned' : 'Suspended',
+          cmd.message || 'Your host account was restricted by admin.',
+        );
       } else if (cmd.type === 'message') {
         notify('Message from Admin', cmd.message || 'Hello from admin.');
       } else if (cmd.type === 'approval' || cmd.type === 'approved') {

@@ -749,6 +749,89 @@ code {
   grid-template-columns: 28px 72px 1fr !important;
   align-items: start;
 }
+.hm-table-wrap {
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+}
+.hm-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.hm-table th {
+  text-align: left;
+  padding: 10px 12px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+  z-index: 1;
+}
+.hm-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+.hm-table tr:hover td {
+  background: rgba(255, 255, 255, 0.03);
+}
+.hm-row-active td {
+  background: rgba(255, 45, 85, 0.08);
+}
+.hm-th-check {
+  width: 36px;
+}
+.hm-host-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+}
+.hm-host-cell img {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  object-fit: cover;
+  background: #222;
+}
+.hm-host-cell strong {
+  display: block;
+  font-size: 13px;
+}
+.hm-host-cell small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.hm-presence .badge {
+  font-size: 9px;
+}
+.hm-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.hm-row-actions button {
+  padding: 4px 8px;
+  font-size: 11px;
+  min-height: 28px;
+}
+.chip-count {
+  margin-left: 6px;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
 .hm-check {
   display: flex;
   align-items: center;

@@ -958,7 +958,7 @@ function controlForAction(action: HostAction, reason?: string) {
     ban: { type: 'ban', message: reason || 'Your account was banned by admin.' },
     unban: { type: 'message', message: 'Your ban was lifted.' },
     suspend: {
-      type: 'ban',
+      type: 'suspend',
       message: reason || 'Your account was suspended by admin.',
     },
     unsuspend: { type: 'message', message: 'Your suspension was lifted.' },

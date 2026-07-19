@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { HostRow } from '../api';
 import {
+  connectAdminRealtime,
+} from '../api';
+import {
   exportHostsCsv,
   fetchAuditLogs,
   fetchBridgeHosts,
@@ -99,6 +102,15 @@ export function HostManagementPanel({
     return rows;
   }, [hosts, query, status, sort]);
 
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: hosts.length };
+    for (const f of STATUS_FILTERS) {
+      if (f === 'all') continue;
+      counts[f] = hosts.filter((h) => h.hostStatus === f).length;
+    }
+    return counts;
+  }, [hosts]);
+
   const refreshServer = async () => {
     try {
       await syncHostsToServer(firebaseHosts as ManagedHost[]);
@@ -123,9 +135,28 @@ export function HostManagementPanel({
 
   useEffect(() => {
     void refreshServer();
-    const t = setInterval(() => void refreshServer(), 12000);
+    const t = setInterval(() => void refreshServer(), 4000);
     return () => clearInterval(t);
-  }, [firebaseHosts.length]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firebaseHosts.length, query, status, sort]);
+
+  // Instant presence from admin websocket
+  useEffect(() => {
+    const off = connectAdminRealtime((type) => {
+      if (
+        type === 'host:presence' ||
+        type === 'host:updated' ||
+        type === 'live:room' ||
+        type === 'live:ended' ||
+        type === 'call:updated' ||
+        type === 'call:ended'
+      ) {
+        void refreshServer();
+      }
+    });
+    return () => off();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const toggle = (id: string) => {
     setSelected((prev) => {
@@ -150,17 +181,28 @@ export function HostManagementPanel({
     setMsg('');
     try {
       const host = hosts.find((h) => h.id === id);
-      await runHostAction(id, action, {
+      const result = await runHostAction(id, action, {
         ...extra,
         name: host?.name,
         hostId: host?.hostId,
       });
       setMsg(`${action} · ${host?.name || id}`);
-      await refreshServer();
-      if (detail?.id === id) {
-        const updated = mergeFirebaseHosts(firebaseHosts, managed).find((h) => h.id === id);
-        if (updated) setDetail(updated);
+      if (result.host) {
+        setManaged((prev) => {
+          const others = prev.filter((h) => h.id !== id);
+          return [...others, result.host];
+        });
+        if (detail?.id === id) setDetail(result.host);
+        // Auto-switch tab when status leaves current filter
+        if (
+          status !== 'all' &&
+          result.host.hostStatus &&
+          result.host.hostStatus !== status
+        ) {
+          setStatus(result.host.hostStatus);
+        }
       }
+      await refreshServer();
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Action failed');
     } finally {
@@ -239,6 +281,7 @@ export function HostManagementPanel({
               onClick={() => setStatus(f)}
             >
               {f.replace('_', ' ')}
+              <span className="chip-count">{statusCounts[f] ?? 0}</span>
             </button>
           ))}
         </div>
@@ -297,104 +340,194 @@ export function HostManagementPanel({
       </div>
 
       <div className="hm-layout">
-        <div className="list hm-list">
+        <div className="hm-table-wrap">
           {filtered.length === 0 ? (
             <div className="meta">No hosts match filters</div>
           ) : (
-            filtered.map((h) => {
-              const photos = h.photoUrls?.length
-                ? h.photoUrls
-                : h.photoUrl
-                  ? [h.photoUrl]
-                  : [];
-              const bridge = bridgeById.get(h.id);
-              return (
-                <div className="card hm-card" key={h.id}>
-                  <label className="hm-check">
+            <table className="hm-table">
+              <thead>
+                <tr>
+                  <th className="hm-th-check">
                     <input
                       type="checkbox"
-                      checked={selected.has(h.id)}
-                      onChange={() => toggle(h.id)}
+                      checked={
+                        selected.size > 0 && selected.size === filtered.length
+                      }
+                      onChange={selectAll}
+                      aria-label="Select all"
                     />
-                  </label>
-                  <img src={photos[0] || h.avatarUrl || ''} alt="" />
-                  <div>
-                    <h3>
-                      {h.name || 'Host'} {h.hostId ? `· ${h.hostId}` : ''}
-                    </h3>
-                    <div className="meta">
-                      <span className={`badge ${h.hostStatus || 'none'}`}>
-                        {(h.hostStatus || 'none').replace('_', ' ').toUpperCase()}
-                      </span>
-                      {h.isOnline ? <span className="badge online">ONLINE</span> : null}
-                      {bridge?.readyToCall ? (
-                        <span className="badge online">READY TO CALL</span>
-                      ) : null}
-                      {bridge?.isLive ? <span className="badge pending">LIVE</span> : null}
-                      {bridge?.isOnCall ? (
-                        <span className="badge under_review">ON CALL</span>
-                      ) : null}
-                      {bridge && !bridge.readyToCall && bridge.isOnline ? (
-                        <span className="badge">ON BRIDGE</span>
-                      ) : null}
-                      {!bridge ? <span className="badge">NOT ON USER APP</span> : null}
-                      {h.banned ? <span className="badge rejected">BANNED</span> : null}
-                      {h.walletFrozen ? (
-                        <span className="badge rejected">WALLET FROZEN</span>
-                      ) : null}
-                      <br />
-                      {h.country || '—'} · ⭐ {(h.rating ?? 5).toFixed(1)} ·{' '}
-                      {h.totalCalls ?? 0} calls · {h.coinBalance ?? 0} coins
-                      <br />
-                      {(h.languages || []).join(', ') || 'No languages'} ·{' '}
-                      {(h.categories || []).join(', ') || 'No categories'}
-                    </div>
-                    <div className="actions" style={{ flexDirection: 'row', marginTop: 8 }}>
-                      <button
-                        type="button"
-                        className="btn-pink"
-                        onClick={() => setDetail(h)}
-                      >
-                        Open
-                      </button>
-                      <button
-                        type="button"
-                        className="btn-green"
-                        disabled={busy}
-                        onClick={() => void act(h.id, 'approve')}
-                      >
-                        Approve
-                      </button>
-                      <button
-                        type="button"
-                        className="btn-gold"
-                        disabled={busy}
-                        onClick={() => {
-                          const reason =
-                            window.prompt('Reject reason?') || 'Not approved';
-                          void act(h.id, 'reject', { reason });
-                        }}
-                      >
-                        Reject
-                      </button>
-                      <button
-                        type="button"
-                        className="btn-ghost"
-                        disabled={busy}
-                        onClick={() => {
-                          const docsMessage =
-                            window.prompt('Documents requested?') ||
-                            'Please upload clearer CNIC/Passport and selfie.';
-                          void act(h.id, 'request_docs', { docsMessage });
-                        }}
-                      >
-                        Request docs
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })
+                  </th>
+                  <th>Host</th>
+                  <th>Status</th>
+                  <th>Presence</th>
+                  <th>Location</th>
+                  <th>Calls</th>
+                  <th>Balance</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((h) => {
+                  const photos = h.photoUrls?.length
+                    ? h.photoUrls
+                    : h.photoUrl
+                      ? [h.photoUrl]
+                      : [];
+                  const bridge = bridgeById.get(h.id);
+                  const st = h.hostStatus || 'none';
+                  const needsReview =
+                    st === 'pending' || st === 'under_review';
+                  return (
+                    <tr
+                      key={h.id}
+                      className={detail?.id === h.id ? 'hm-row-active' : ''}
+                    >
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={selected.has(h.id)}
+                          onChange={() => toggle(h.id)}
+                        />
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="hm-host-cell"
+                          onClick={() => setDetail(h)}
+                        >
+                          <img src={photos[0] || h.avatarUrl || ''} alt="" />
+                          <span>
+                            <strong>{h.name || 'Host'}</strong>
+                            <small>
+                              {h.hostId || h.id.slice(0, 8)}
+                            </small>
+                          </span>
+                        </button>
+                      </td>
+                      <td>
+                        <span className={`badge ${st}`}>
+                          {st.replace('_', ' ').toUpperCase()}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="hm-presence">
+                          {bridge?.readyToCall ? (
+                            <span className="badge online">READY TO CALL</span>
+                          ) : bridge?.isLive ? (
+                            <span className="badge pending">LIVE</span>
+                          ) : bridge?.isOnCall ? (
+                            <span className="badge under_review">ON CALL</span>
+                          ) : bridge?.isOnline ? (
+                            <span className="badge online">ONLINE</span>
+                          ) : h.isOnline ? (
+                            <span className="badge online">ONLINE</span>
+                          ) : (
+                            <span className="badge">NOT ON USER APP</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="meta">{h.country || '—'}</td>
+                      <td className="meta">{h.totalCalls ?? 0}</td>
+                      <td className="meta">{h.coinBalance ?? 0}</td>
+                      <td>
+                        <div className="hm-row-actions">
+                          <button
+                            type="button"
+                            className="btn-ghost"
+                            onClick={() => setDetail(h)}
+                          >
+                            Open
+                          </button>
+                          {needsReview ? (
+                            <>
+                              <button
+                                type="button"
+                                className="btn-green"
+                                disabled={busy}
+                                onClick={() => void act(h.id, 'approve')}
+                              >
+                                Approve
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-gold"
+                                disabled={busy}
+                                onClick={() => {
+                                  const reason =
+                                    window.prompt('Reject reason?') ||
+                                    'Not approved';
+                                  void act(h.id, 'reject', { reason });
+                                }}
+                              >
+                                Reject
+                              </button>
+                            </>
+                          ) : null}
+                          {st === 'approved' ? (
+                            <>
+                              <button
+                                type="button"
+                                className="btn-gold"
+                                disabled={busy}
+                                onClick={() =>
+                                  void act(h.id, 'suspend', {
+                                    reason: 'Suspended by admin',
+                                  })
+                                }
+                              >
+                                Suspend
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-red"
+                                disabled={busy}
+                                onClick={() =>
+                                  void act(h.id, 'ban', {
+                                    reason: 'Banned by admin',
+                                  })
+                                }
+                              >
+                                Ban
+                              </button>
+                            </>
+                          ) : null}
+                          {st === 'suspended' ? (
+                            <button
+                              type="button"
+                              className="btn-green"
+                              disabled={busy}
+                              onClick={() => void act(h.id, 'unsuspend')}
+                            >
+                              Unsuspend
+                            </button>
+                          ) : null}
+                          {st === 'banned' ? (
+                            <button
+                              type="button"
+                              className="btn-green"
+                              disabled={busy}
+                              onClick={() => void act(h.id, 'unban')}
+                            >
+                              Unban
+                            </button>
+                          ) : null}
+                          {st === 'rejected' ? (
+                            <button
+                              type="button"
+                              className="btn-green"
+                              disabled={busy}
+                              onClick={() => void act(h.id, 'approve')}
+                            >
+                              Re-approve
+                            </button>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           )}
         </div>
 
@@ -607,20 +740,35 @@ function HostDetail({
 
       <h4>Controls</h4>
       <div className="actions hm-perm">
-        <button type="button" disabled={busy} className="btn-green" onClick={() => onAction('approve')}>Approve</button>
-        <button type="button" disabled={busy} className="btn-ghost" onClick={() => onAction('under_review')}>Under review</button>
-        <button type="button" disabled={busy} className="btn-gold" onClick={() => {
-          const docsMessage = window.prompt('Request documents') || '';
-          if (docsMessage) onAction('request_docs', { docsMessage });
-        }}>Request docs</button>
-        <button type="button" disabled={busy} className="btn-gold" onClick={() => {
-          const reason = window.prompt('Reject reason') || '';
-          onAction('reject', { reason });
-        }}>Reject</button>
-        <button type="button" disabled={busy} className="btn-gold" onClick={() => onAction('suspend', { reason: 'Suspended by admin' })}>Suspend</button>
-        <button type="button" disabled={busy} className="btn-ghost" onClick={() => onAction('unsuspend')}>Unsuspend</button>
-        <button type="button" disabled={busy} className="btn-red" onClick={() => onAction('ban', { reason: 'Banned by admin' })}>Ban</button>
-        <button type="button" disabled={busy} className="btn-ghost" onClick={() => onAction('unban')}>Unban</button>
+        {host.hostStatus === 'pending' || host.hostStatus === 'under_review' ? (
+          <>
+            <button type="button" disabled={busy} className="btn-green" onClick={() => onAction('approve')}>Approve</button>
+            <button type="button" disabled={busy} className="btn-ghost" onClick={() => onAction('under_review')}>Under review</button>
+            <button type="button" disabled={busy} className="btn-gold" onClick={() => {
+              const docsMessage = window.prompt('Request documents') || '';
+              if (docsMessage) onAction('request_docs', { docsMessage });
+            }}>Request docs</button>
+            <button type="button" disabled={busy} className="btn-gold" onClick={() => {
+              const reason = window.prompt('Reject reason') || '';
+              onAction('reject', { reason });
+            }}>Reject</button>
+          </>
+        ) : null}
+        {host.hostStatus === 'rejected' ? (
+          <button type="button" disabled={busy} className="btn-green" onClick={() => onAction('approve')}>Re-approve</button>
+        ) : null}
+        {host.hostStatus === 'approved' ? (
+          <>
+            <button type="button" disabled={busy} className="btn-gold" onClick={() => onAction('suspend', { reason: 'Suspended by admin' })}>Suspend</button>
+            <button type="button" disabled={busy} className="btn-red" onClick={() => onAction('ban', { reason: 'Banned by admin' })}>Ban</button>
+          </>
+        ) : null}
+        {host.hostStatus === 'suspended' ? (
+          <button type="button" disabled={busy} className="btn-green" onClick={() => onAction('unsuspend')}>Unsuspend</button>
+        ) : null}
+        {host.hostStatus === 'banned' ? (
+          <button type="button" disabled={busy} className="btn-green" onClick={() => onAction('unban')}>Unban</button>
+        ) : null}
         <button type="button" disabled={busy} className="btn-ghost" onClick={() => onAction('force_offline')}>Force offline</button>
         <button type="button" disabled={busy} className="btn-ghost" onClick={() => onAction('force_online')}>Force online</button>
         <button type="button" disabled={busy} className="btn-ghost" onClick={() => onAction('reset_profile')}>Reset profile</button>

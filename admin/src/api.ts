@@ -293,6 +293,8 @@ export type LiveRoomAdmin = {
   title?: string;
   channel?: string;
   viewers?: number;
+  giftCoins?: number;
+  thumbnailUrl?: string;
   isLive?: boolean;
 };
 
@@ -350,4 +352,113 @@ export async function fetchLiveRoomsAdmin() {
   const res = await fetch(`${apiBaseUrl}/live/rooms`, { cache: 'no-store' });
   if (!res.ok) throw new Error('Could not load live rooms');
   return (await res.json()) as { rooms: LiveRoomAdmin[] };
+}
+
+export type AdminActiveCall = {
+  id: string;
+  kind: 'call';
+  channel: string;
+  hostId: string;
+  hostName: string;
+  peerId: string;
+  peerName: string;
+  peerAvatar?: string;
+  status: string;
+  ratePerMinute: number;
+  billedMinutes: number;
+  startedAt: number;
+  seconds: number;
+  coinsEarned: number;
+};
+
+export type AdminLiveRoomSession = {
+  id: string;
+  kind: 'live';
+  channel: string;
+  hostId: string;
+  hostName: string;
+  title: string;
+  viewers: number;
+  giftCoins: number;
+  thumbnailUrl?: string;
+  status: string;
+};
+
+export async function fetchAdminActiveSessions() {
+  const res = await fetch(
+    `${apiBaseUrl}/admin/active-sessions?key=${encodeURIComponent(adminKeyHeader())}`,
+    { cache: 'no-store' },
+  );
+  if (!res.ok) throw new Error('Could not load active sessions');
+  return (await res.json()) as {
+    calls: AdminActiveCall[];
+    liveRooms: AdminLiveRoomSession[];
+    counts: { calls: number; liveRooms: number; total: number };
+  };
+}
+
+export async function endBridgeCallAdmin(callId: string) {
+  const res = await fetch(
+    `${apiBaseUrl}/admin/calls/${encodeURIComponent(callId)}/end`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: adminKeyHeader() }),
+    },
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+/** Admin realtime bus — presence, calls, live rooms */
+export function connectAdminRealtime(
+  onEvent: (type: string, payload: unknown) => void,
+): () => void {
+  const base = apiBaseUrl.replace(/\/api\/?$/, '');
+  const wsUrl = `${base.replace(/^http/, 'ws')}/ws?userId=admin_${Date.now()}&role=admin`;
+  let socket: WebSocket | null = null;
+  let closed = false;
+  let retry: ReturnType<typeof setTimeout> | null = null;
+
+  const open = () => {
+    if (closed) return;
+    try {
+      socket = new WebSocket(wsUrl);
+    } catch {
+      retry = setTimeout(open, 4000);
+      return;
+    }
+    socket.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(String(ev.data)) as {
+          type?: string;
+          payload?: unknown;
+        };
+        if (msg?.type) onEvent(msg.type, msg.payload);
+      } catch {
+        /* ignore */
+      }
+    };
+    socket.onclose = () => {
+      if (!closed) retry = setTimeout(open, 3500);
+    };
+    socket.onerror = () => {
+      try {
+        socket?.close();
+      } catch {
+        /* ignore */
+      }
+    };
+  };
+  open();
+
+  return () => {
+    closed = true;
+    if (retry) clearTimeout(retry);
+    try {
+      socket?.close();
+    } catch {
+      /* ignore */
+    }
+  };
 }
