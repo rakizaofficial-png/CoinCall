@@ -72,6 +72,7 @@ function AuthenticatedApp() {
           <Stack.Screen name="GoLive" component={GoLiveRoute} />
           <Stack.Screen name="LiveRoom" component={LiveRoomScreen} />
           <Stack.Screen name="Withdraw" component={WithdrawScreen} />
+          <Stack.Screen name="Calling" component={CallingScreen} />
         </Stack.Navigator>
         <BridgeIncomingLayer />
       </LiveStudioProvider>
