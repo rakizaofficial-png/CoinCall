@@ -1,8 +1,8 @@
 "use client";
 
 /**
- * Live room — safe for real CoinCall host ids (not only mock creators).
- * Never call getCreator(id)! — real host ids are Firebase UIDs.
+ * Live room v2 — safe for real CoinCall host Firebase UIDs.
+ * Must NEVER call getCreator(id) for live hosts (that caused creator.viewers crash).
  */
 
 import { use, useEffect, useMemo, useState } from "react";
@@ -80,10 +80,7 @@ export default function LiveRoomPage({
           rooms.find((r) => r.hostId === foundHost?.id) ||
           null;
         setRoom(foundRoom);
-        setViewers(
-          Number(foundRoom?.viewers) ||
-            (mock?.viewers ?? 0),
-        );
+        setViewers(Number(foundRoom?.viewers) || mock?.viewers || 0);
       } catch (e) {
         if (!cancelled) {
           setError(e instanceof Error ? e.message : "Could not open live");
@@ -122,7 +119,7 @@ export default function LiveRoomPage({
   if (!ready) {
     return (
       <main className="flex min-h-dvh items-center justify-center bg-ink text-sm text-muted">
-        Opening live room…
+        Opening live room… (v2)
       </main>
     );
   }
