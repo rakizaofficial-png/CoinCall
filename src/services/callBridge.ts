@@ -188,6 +188,68 @@ export function listenIncomingCalls(
   };
 }
 
+/**
+ * Watch host SSE for call_minute / live_gift billing from the user app.
+ */
+export function listenHostBillingEvents(
+  hostId: string,
+  onMinute: (payload: {
+    callId: string;
+    amount: number;
+    billedMinutes: number;
+    hostWallet?: { coinBalance?: number };
+  }) => void,
+  onGift?: (payload: { coins: number; giftName?: string }) => void,
+) {
+  if (!hostId) return () => undefined;
+  let stopped = false;
+  let es: EventSource | null = null;
+
+  const start = () => {
+    if (stopped) return;
+    try {
+      es = new EventSource(
+        `${base()}/hosts/${encodeURIComponent(hostId)}/stream`,
+      );
+      es.addEventListener('call_minute', (ev) => {
+        try {
+          onMinute(JSON.parse((ev as MessageEvent).data));
+        } catch {
+          /* ignore */
+        }
+      });
+      if (onGift) {
+        es.addEventListener('live_gift', (ev) => {
+          try {
+            const data = JSON.parse((ev as MessageEvent).data) as {
+              coins?: number;
+              giftName?: string;
+            };
+            onGift({
+              coins: Number(data.coins) || 0,
+              giftName: data.giftName,
+            });
+          } catch {
+            /* ignore */
+          }
+        });
+      }
+      es.onerror = () => {
+        es?.close();
+        es = null;
+        if (!stopped) setTimeout(start, 3500);
+      };
+    } catch {
+      if (!stopped) setTimeout(start, 4000);
+    }
+  };
+  start();
+  return () => {
+    stopped = true;
+    es?.close();
+  };
+}
+
 export async function fetchBridgeCall(callId: string): Promise<BridgeCall> {
   const res = await fetch(`${base()}/calls/${encodeURIComponent(callId)}`, {
     cache: 'no-store',

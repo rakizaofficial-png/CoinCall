@@ -424,7 +424,7 @@ app.post('/api/hosts/presence', (req, res) => {
     incoming ||
     (isPublicHttpAvatar(prev?.avatarUrl) ? String(prev!.avatarUrl) : '') ||
     (isPublicHttpAvatar(managed?.photoUrl) ? String(managed!.photoUrl) : '') ||
-    undefined;
+    pickHostAvatarUrl({}, { hostId, name: String(name) });
 
   const mode: HostWorkspaceMode | undefined =
     workspaceMode === 'solo_calling' || workspaceMode === 'waiting_1v1'

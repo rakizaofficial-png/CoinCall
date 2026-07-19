@@ -149,6 +149,9 @@ type AppContextValue = {
   joinPartySeat: (seatIndex: number) => void;
   leavePartySeat: () => void;
   enterPartyRoom: () => void;
+  /** Bridge (Luma) call ledger — keeps Today's earnings live */
+  registerBridgeCallStart: () => void;
+  creditBridgeMinute: (amount: number) => void;
 };
 
 const AppContext = createContext<AppContextValue | undefined>(undefined);
@@ -275,8 +278,8 @@ export function AppProvider({
     managed: 0,
   });
   const [callsToday, setCallsToday] = useState(0);
-  const [myTodayMinutes, setMyTodayMinutes] = useState(12);
-  const [myLongestCallSeconds, setMyLongestCallSeconds] = useState(3 * 60);
+  const [myTodayMinutes, setMyTodayMinutes] = useState(0);
+  const [myLongestCallSeconds, setMyLongestCallSeconds] = useState(0);
   const [incomingBridgeCall, setIncomingBridgeCall] = useState<BridgeCall | null>(
     null,
   );
@@ -650,7 +653,100 @@ export function AppProvider({
     return () => clearTimeout(t);
   }, [user.coinBalance, user.id, user.name]);
 
-  // Realtime WS for party gifts / wallet events
+  // Hydrate today's call/gift ledger from API so dashboard survives refresh
+  useEffect(() => {
+    if (!user.id) return;
+    let cancelled = false;
+    const dayStart = new Date();
+    dayStart.setHours(0, 0, 0, 0);
+    const startMs = dayStart.getTime();
+
+    void import('../services/hostEarningsApi').then(({ fetchHostEarnings }) => {
+      void fetchHostEarnings(user.id)
+        .then((data) => {
+          if (cancelled) return;
+          const todayCalls = (data.calls || []).filter(
+            (c) => (c.endedAt || c.startedAt || 0) >= startMs,
+          );
+          const todayGifts = (data.gifts || []).filter(
+            (g) => (g.createdAt || 0) >= startMs,
+          );
+          const callCoins = todayCalls.reduce(
+            (s, c) => s + (c.coinsSpent || 0),
+            0,
+          );
+          const giftCoins = todayGifts.reduce((s, g) => s + (g.coins || 0), 0);
+          const minutes = Math.round(
+            todayCalls.reduce((s, c) => s + (c.durationSec || 0), 0) / 60,
+          );
+          setHostEarnings((e) => ({
+            ...e,
+            call: Math.max(e.call, callCoins),
+            gift: Math.max(e.gift, giftCoins),
+          }));
+          setCallsToday((n) => Math.max(n, todayCalls.length));
+          setMyTodayMinutes((m) => Math.max(m, minutes));
+          if (typeof data.summary?.walletBalance === 'number') {
+            setUser((u) => ({
+              ...u,
+              coinBalance: Math.max(u.coinBalance, data.summary.walletBalance),
+            }));
+          }
+        })
+        .catch(() => undefined);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user.id]);
+
+  // Ensure local data:/blob: photos become public https for Luma
+  useEffect(() => {
+    if (!user.id) return;
+    const raw = user.avatarUrl || user.photoUrl || '';
+    if (!raw || raw.startsWith('http://') || raw.startsWith('https://')) return;
+    let cancelled = false;
+    void import('../services/mediaUploadService').then(
+      ({ ensurePublicAvatarUrl }) => {
+        void ensurePublicAvatarUrl(user.id, raw).then((url) => {
+          if (cancelled || !url) return;
+          setUser((u) => ({
+            ...u,
+            avatarUrl: url,
+            photoUrl: url,
+          }));
+        });
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [user.id, user.avatarUrl, user.photoUrl]);
+
+  const registerBridgeCallStart = useCallback(() => {
+    setCallsToday((n) => n + 1);
+  }, []);
+
+  const creditBridgeMinute = useCallback((amount: number) => {
+    const n = Math.max(0, Math.floor(amount));
+    if (n <= 0) return;
+    setUser((u) => ({ ...u, coinBalance: u.coinBalance + n }));
+    setHostEarnings((e) => ({ ...e, call: e.call + n }));
+    setMyTodayMinutes((m) => m + 1);
+    setTransactions((txs) => [
+      {
+        id: `tx_${Date.now()}`,
+        type: 'earn',
+        amount: n,
+        label: '1v1 call minute',
+        timestamp: Date.now(),
+      },
+      ...txs,
+    ]);
+  }, []);
+
+  // Realtime WS for party gifts / wallet events + call_minute from Luma billing
   useEffect(() => {
     let unsub: (() => void) | undefined;
     void import('../services/realtimeWs').then(({ connectHostRealtime, subscribeRealtime }) => {
@@ -694,12 +790,38 @@ export function AppProvider({
             notify('Gift received', `${emoji} ${label} · +${coins} coins`);
           }
         }
+        if (event.type === 'wallet:updated') {
+          const uid = String(event.payload?.userId || '');
+          if (uid !== user.id) return;
+          const bal = Number(event.payload?.coinBalance);
+          if (Number.isFinite(bal)) {
+            setUser((u) => ({ ...u, coinBalance: Math.max(u.coinBalance, bal) }));
+          }
+        }
       });
     });
     return () => {
       unsub?.();
     };
   }, [user.avatarUrl, user.id, user.name]);
+
+  // Live billing events from Luma — keep wallet in sync (CallScreen owns today ledger)
+  useEffect(() => {
+    if (!user.id || !hostOnline) return;
+    let stop: (() => void) | undefined;
+    void import('../services/callBridge').then(({ listenHostBillingEvents }) => {
+      stop = listenHostBillingEvents(user.id, (payload) => {
+        const bal = payload.hostWallet?.coinBalance;
+        if (typeof bal === 'number' && Number.isFinite(bal)) {
+          setUser((u) => ({
+            ...u,
+            coinBalance: Math.max(u.coinBalance, bal),
+          }));
+        }
+      });
+    });
+    return () => stop?.();
+  }, [user.id, hostOnline]);
 
   // Admin remote control (end call, force offline, ban message)
   useEffect(() => {
@@ -1310,6 +1432,8 @@ export function AppProvider({
       joinPartySeat,
       leavePartySeat,
       enterPartyRoom,
+      registerBridgeCallStart,
+      creditBridgeMinute,
     }),
     [
       user,
@@ -1373,6 +1497,8 @@ export function AppProvider({
       joinPartySeat,
       leavePartySeat,
       enterPartyRoom,
+      registerBridgeCallStart,
+      creditBridgeMinute,
     ],
   );
 

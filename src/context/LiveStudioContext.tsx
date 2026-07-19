@@ -104,7 +104,7 @@ function emptySeats(): PartySeatPublic[] {
 }
 
 export function LiveStudioProvider({ children }: { children: React.ReactNode }) {
-  const { user, setHostOnline } = useApp();
+  const { user, setHostOnline, hostEarnings } = useApp();
   const [liveRooms, setLiveRooms] = useState<LiveRoom[]>([]);
   const [myLiveRoom, setMyLiveRoom] = useState<LiveRoom | null>(null);
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
@@ -740,8 +740,16 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
   }, []);
 
   const monthlyEarn = useMemo(
-    () => user.coinBalance + todayLiveGiftCoins,
-    [todayLiveGiftCoins, user.coinBalance],
+    () =>
+      Math.max(
+        user.coinBalance,
+        (hostEarnings?.call || 0) +
+          (hostEarnings?.gift || 0) +
+          (hostEarnings?.task || 0) +
+          (hostEarnings?.invite || 0) +
+          todayLiveGiftCoins,
+      ),
+    [hostEarnings, todayLiveGiftCoins, user.coinBalance],
   );
 
   const value = useMemo(

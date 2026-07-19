@@ -144,7 +144,10 @@ export function DashboardScreen({ navigation }: { navigation: any }) {
       >
         <Text style={styles.heroLabel}>Today's earnings</Text>
         <Text style={styles.heroValue}>{todayEarn}</Text>
-        <Text style={styles.heroSub}>coins · monthly {monthlyEarn}</Text>
+        <Text style={styles.heroSub}>
+          calls {hostEarnings.call} · gifts{' '}
+          {hostEarnings.gift + todayLiveGiftCoins} · wallet {user.coinBalance}
+        </Text>
         <View style={styles.heroActions}>
           <PrimaryButton
             label={myLiveRoom?.isLive ? 'Return Live' : 'Go Live'}

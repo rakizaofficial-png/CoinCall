@@ -81,7 +81,8 @@ function waitForEl(
 export function CallScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
-  const { getHost, call, endCall, user, beautyOn } = useApp();
+  const { getHost, call, endCall, user, beautyOn, registerBridgeCallStart, creditBridgeMinute } =
+    useApp();
   const bridgeCallId = route.params.bridgeCallId;
   const isBridge = Boolean(bridgeCallId);
   const peerHost = !isBridge ? getHost(route.params.hostId) : undefined;
@@ -108,6 +109,7 @@ export function CallScreen({ navigation, route }: Props) {
   const activeCallIdRef = useRef<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const leavingRef = useRef(false);
+  const bridgeLedgerStarted = useRef(false);
   const markSurfacesReady = useCallback(() => setSurfacesReady(true), []);
 
   const leaveAfterDisconnect = useCallback(async () => {
@@ -137,17 +139,23 @@ export function CallScreen({ navigation, route }: Props) {
 
   useEffect(() => {
     if (!isBridge) return;
+    if (!bridgeLedgerStarted.current) {
+      bridgeLedgerStarted.current = true;
+      registerBridgeCallStart();
+      creditBridgeMinute(rate);
+    }
     const t = setInterval(() => {
       setBridgeSeconds((s) => {
         const next = s + 1;
         if (next > 0 && next % 60 === 0) {
           setBridgeCoins((c) => c + rate);
+          creditBridgeMinute(rate);
         }
         return next;
       });
     }, 1000);
     return () => clearInterval(t);
-  }, [isBridge, rate]);
+  }, [isBridge, rate, registerBridgeCallStart, creditBridgeMinute]);
 
   // Publish shared Firebase session for BOTH demo + bridge calls
   useEffect(() => {
