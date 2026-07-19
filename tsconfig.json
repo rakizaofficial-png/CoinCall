@@ -3,5 +3,5 @@
   "compilerOptions": {
     "strict": true
   },
-  "exclude": ["admin", "server", "node_modules"]
+  "exclude": ["admin", "server", "node_modules", "luma-user", "patches"]
 }
