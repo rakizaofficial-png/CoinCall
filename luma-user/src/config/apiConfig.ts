@@ -95,7 +95,7 @@ export const apiConfig = {
 export function getMissingClientKeys(): string[] {
   const missing: string[] = [];
   if (!apiConfig.apiBaseUrl) missing.push("NEXT_PUBLIC_API_BASE_URL");
-  if (!apiConfig.agora.appId) missing.push("NEXT_PUBLIC_AGORA_APP_ID");
+  // Agora App ID is optional on the client — call/live tokens include appId from the API
   return missing;
 }
 

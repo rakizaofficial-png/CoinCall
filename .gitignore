@@ -40,6 +40,8 @@ server/.env
 server/node_modules/
 admin/node_modules/
 admin/dist/
+server/.data/
+.data/
 
 
 # typescript
@@ -48,3 +50,5 @@ admin/dist/
 # generated native folders
 /ios
 /android
+server/.data/
+.data/
