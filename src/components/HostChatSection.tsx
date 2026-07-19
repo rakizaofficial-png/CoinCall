@@ -115,6 +115,9 @@ export function HostChatSection({ compact, onOpenImage }: Props) {
         toId: peerId,
         text: text.trim(),
         fromName: user.name,
+        fromAvatar: user.avatarUrl,
+        peerName,
+        fromRole: 'host',
       });
       setText('');
     } catch (e) {

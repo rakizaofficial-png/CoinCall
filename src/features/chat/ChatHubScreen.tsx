@@ -26,6 +26,10 @@ import {
   type RechargeEvent,
 } from '../../services/hostOutreachService';
 import {
+  fetchDmThreadsForHost,
+  type DmThreadRow,
+} from '../../services/chatService';
+import {
   listenHostNotifications,
   pushHostNotification,
   type InboxNotification,
@@ -60,6 +64,7 @@ export function ChatHubScreen({ navigation }: { navigation: any }) {
 
   const [inbox, setInbox] = useState<InboxNotification[]>([]);
   const [rechargeEvents, setRechargeEvents] = useState<RechargeEvent[]>([]);
+  const [dmThreads, setDmThreads] = useState<DmThreadRow[]>([]);
   const [activeCount, setActiveCount] = useState(0);
   const [massOpen, setMassOpen] = useState(false);
   const [massText, setMassText] = useState('');
@@ -75,16 +80,34 @@ export function ChatHubScreen({ navigation }: { navigation: any }) {
     const load = () => {
       void fetchRechargeBoard().then((b) => setRechargeEvents(b.events || []));
       void fetchActiveUsers().then((u) => setActiveCount(u.length));
+      void fetchDmThreadsForHost(user.id).then(setDmThreads);
     };
     load();
-    const t = setInterval(load, 10_000);
+    const t = setInterval(load, 5_000);
     return () => clearInterval(t);
-  }, []);
+  }, [user.id]);
 
   useEffect(() => {
     let unsub: (() => void) | undefined;
     void import('../../services/realtimeWs').then(({ subscribeRealtime }) => {
       unsub = subscribeRealtime((event) => {
+        if (event.type === 'dm:message') {
+          void fetchDmThreadsForHost(user.id).then(setDmThreads);
+          const p = event.payload as {
+            message?: { fromName?: string; text?: string; fromId?: string };
+            thread?: { hostId?: string };
+          };
+          if (p?.thread?.hostId && p.thread.hostId !== user.id) return;
+          if (p?.message?.text) {
+            void pushHostNotification(user.id, {
+              type: 'chat',
+              title: 'New message',
+              body: `${p.message.fromName || 'Fan'}: ${String(p.message.text).slice(0, 80)}`,
+              fromId: p.message.fromId,
+            });
+          }
+          return;
+        }
         if (event.type === 'recharge:updated') {
           const p = event.payload as { event?: RechargeEvent };
           if (p?.event) {
@@ -212,6 +235,46 @@ export function ChatHubScreen({ navigation }: { navigation: any }) {
       />
 
       <Text style={[styles.pageTitle, { color: colors.text }]}>Messages</Text>
+
+      {dmThreads.length > 0 ? (
+        <View style={{ marginBottom: 8 }}>
+          <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>Fan chats</Text>
+          {dmThreads.slice(0, 20).map((t) => (
+            <Pressable
+              key={t.id}
+              onPress={() =>
+                navigation.navigate('Chat', {
+                  peerId: t.userId,
+                  peerName: t.userName,
+                  peerAvatar: t.userAvatar,
+                })
+              }
+              style={[styles.row, { borderBottomColor: 'rgba(255,255,255,0.06)' }]}
+            >
+              <View style={[styles.iconOrb, { backgroundColor: '#F59E0B' }]}>
+                <Text style={{ color: '#fff', fontWeight: '900' }}>
+                  {(t.userName || 'F').slice(0, 1).toUpperCase()}
+                </Text>
+              </View>
+              <View style={styles.rowBody}>
+                <View style={styles.rowTop}>
+                  <Text style={[styles.rowTitle, { color: colors.text }]}>
+                    {t.userName || 'Fan'}
+                  </Text>
+                  <Text style={styles.rowTime}>{formatTime(t.updatedAt)}</Text>
+                </View>
+                <Text style={styles.rowPreview} numberOfLines={1}>
+                  {t.lastMessage}
+                </Text>
+              </View>
+            </Pressable>
+          ))}
+        </View>
+      ) : (
+        <Text style={[styles.emptyFans, { color: colors.textMuted }]}>
+          Fan messages from Luma appear here.
+        </Text>
+      )}
 
       <View style={styles.list}>
         {rows.map((row) => (
@@ -342,6 +405,15 @@ export function ChatHubScreen({ navigation }: { navigation: any }) {
 const styles = StyleSheet.create({
   root: { flex: 1, paddingHorizontal: 16 },
   pageTitle: { fontSize: 28, fontWeight: '900', marginBottom: 12 },
+  sectionLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginBottom: 4,
+    marginTop: 4,
+  },
+  emptyFans: { fontSize: 12, marginBottom: 12, opacity: 0.8 },
   list: { gap: 0 },
   row: {
     flexDirection: 'row',

@@ -31,7 +31,10 @@ export function ChatScreen({ navigation, route }: Props) {
   const { colors } = useTheme();
   const { user: authUser } = useAuth();
   const { getHost, startCall, user } = useApp();
-  const host = getHost(route.params.hostId);
+  const peerId = route.params.peerId;
+  const peerName = route.params.peerName || getHost(peerId)?.name || 'Fan';
+  const peerAvatar =
+    route.params.peerAvatar || getHost(peerId)?.avatarUrl || '';
   const meId = authUser?.id || user.id;
   const [text, setText] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -39,17 +42,9 @@ export function ChatScreen({ navigation, route }: Props) {
   const [preview, setPreview] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!host) return;
-    return listenChatMessages(meId, host.id, setMessages);
-  }, [host, meId]);
-
-  if (!host) {
-    return (
-      <View style={[styles.container, { backgroundColor: colors.bg }]}>
-        <Text style={{ color: colors.text }}>Host not found</Text>
-      </View>
-    );
-  }
+    if (!peerId || !meId) return;
+    return listenChatMessages(meId, peerId, setMessages);
+  }, [peerId, meId]);
 
   const send = async (imageUrl?: string) => {
     if ((!text.trim() && !imageUrl) || sending) return;
@@ -57,12 +52,17 @@ export function ChatScreen({ navigation, route }: Props) {
     try {
       await sendChatMessage({
         fromId: meId,
-        toId: host.id,
+        toId: peerId,
         text: text.trim() || (imageUrl ? '📷 Photo' : ''),
         fromName: user.name,
+        fromAvatar: user.avatarUrl,
+        peerName,
+        peerAvatar,
+        fromRole: 'host',
         imageUrl,
       });
       setText('');
+      setPreview(null);
     } catch (e) {
       notify('Chat', e instanceof Error ? e.message : 'Could not send');
     } finally {
@@ -79,41 +79,44 @@ export function ChatScreen({ navigation, route }: Props) {
     const res = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       quality: 0.7,
+      base64: false,
     });
     if (res.canceled || !res.assets?.[0]?.uri) return;
+    setPreview(res.assets[0].uri);
     await send(res.assets[0].uri);
-  };
-
-  const onCall = () => {
-    const result = startCall(host.id);
-    if (!result.ok) {
-      notify('Cannot start call', result.message);
-      return;
-    }
-    navigation.navigate('Call', { hostId: host.id });
   };
 
   return (
     <KeyboardAvoidingView
-      style={[styles.container, { backgroundColor: colors.bg, paddingTop: insets.top }]}
+      style={[styles.container, { backgroundColor: colors.bg }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={8}
     >
-      <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <Pressable onPress={() => navigation.goBack()} hitSlop={12} style={styles.back}>
-          <ChevronLeft size={28} color={colors.text} />
+      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+        <Pressable onPress={() => navigation.goBack()} style={styles.back}>
+          <ChevronLeft size={22} color={colors.text} />
         </Pressable>
-        <Avatar uri={host.avatarUrl} size={40} />
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.name, { color: colors.text }]}>{host.name}</Text>
-          <Text style={{ color: colors.textMuted, fontSize: 12 }}>
-            {host.isOnline ? 'Online' : 'Offline'}
+        <Avatar uri={peerAvatar} size={36} />
+        <View style={{ flex: 1, marginLeft: 10 }}>
+          <Text style={[styles.name, { color: colors.text }]} numberOfLines={1}>
+            {peerName}
           </Text>
+          <Text style={[styles.sub, { color: colors.textMuted }]}>Direct message</Text>
         </View>
         <Pressable
-          onPress={onCall}
-          style={[styles.callBtn, { backgroundColor: colors.primary }]}
-          accessibilityLabel="Start video call"
+          onPress={() => {
+            const r = startCall(peerId);
+            if (r.ok) {
+              navigation.navigate('Call', {
+                hostId: peerId,
+                peerName,
+                peerAvatar,
+                role: 'host',
+              });
+            } else {
+              notify('Call', r.message || 'Unavailable');
+            }
+          }}
+          style={styles.callBtn}
         >
           <Video size={18} color="#fff" />
         </Pressable>
@@ -122,53 +125,42 @@ export function ChatScreen({ navigation, route }: Props) {
       <FlatList
         data={messages}
         keyExtractor={(item) => item.id}
-        contentContainerStyle={{ padding: 16, paddingBottom: 20 }}
-        ListEmptyComponent={
-          <Text style={{ color: colors.textSecondary, textAlign: 'center', marginTop: 40 }}>
-            Say hi — text & photos sync in realtime.
-          </Text>
-        }
+        contentContainerStyle={{ padding: 16, paddingBottom: 24 }}
         renderItem={({ item }) => {
           const mine = item.fromId === meId;
           return (
             <View
               style={[
                 styles.bubble,
-                {
-                  alignSelf: mine ? 'flex-end' : 'flex-start',
-                  backgroundColor: mine ? colors.primary : colors.bgCard,
-                  borderColor: colors.border,
-                },
+                mine ? styles.mine : styles.theirs,
+                mine
+                  ? { backgroundColor: colors.primary }
+                  : { backgroundColor: colors.bgCard },
               ]}
             >
               {item.imageUrl ? (
-                <Pressable onPress={() => setPreview(item.imageUrl!)}>
-                  <Image source={{ uri: item.imageUrl }} style={styles.msgImage} />
-                </Pressable>
+                <Image source={{ uri: item.imageUrl }} style={styles.img} />
               ) : null}
-              {item.text && item.text !== '📷 Photo' ? (
-                <Text style={{ color: mine ? '#fff' : colors.text }}>{item.text}</Text>
-              ) : null}
+              <Text style={{ color: mine ? '#fff' : colors.text }}>{item.text}</Text>
             </View>
           );
         }}
+        ListEmptyComponent={
+          <Text
+            style={{
+              color: colors.textSecondary,
+              textAlign: 'center',
+              marginTop: 40,
+            }}
+          >
+            No messages yet — fans who message you appear here.
+          </Text>
+        }
       />
 
-      <View
-        style={[
-          styles.composer,
-          {
-            borderTopColor: colors.border,
-            paddingBottom: insets.bottom + 8,
-            backgroundColor: colors.bgElevated,
-          },
-        ]}
-      >
-        <Pressable
-          onPress={() => void sendImage()}
-          style={[styles.imgBtn, { borderColor: colors.border }]}
-        >
-          <ImageIcon size={20} color={colors.primarySoft} />
+      <View style={[styles.composer, { paddingBottom: insets.bottom + 10 }]}>
+        <Pressable onPress={() => void sendImage()} style={styles.iconBtn}>
+          <ImageIcon size={20} color={colors.textMuted} />
         </Pressable>
         <AppTextInput
           value={text}
@@ -180,14 +172,19 @@ export function ChatScreen({ navigation, route }: Props) {
           label={sending ? '…' : 'Send'}
           onPress={() => void send()}
           disabled={sending || !text.trim()}
-          style={{ minWidth: 88 }}
+          style={{ paddingHorizontal: 16, minWidth: 72 }}
         />
       </View>
-
       {preview ? (
-        <Pressable style={styles.preview} onPress={() => setPreview(null)}>
-          <Image source={{ uri: preview }} style={styles.previewImg} />
-        </Pressable>
+        <Text
+          style={{
+            color: colors.textMuted,
+            fontSize: 11,
+            paddingHorizontal: 16,
+          }}
+        >
+          Sending image…
+        </Text>
       ) : null}
     </KeyboardAvoidingView>
   );
@@ -198,52 +195,39 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
     paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingBottom: 10,
+    gap: 4,
   },
-  back: { width: 40, height: 40, justifyContent: 'center' },
+  back: { padding: 6 },
   name: { fontWeight: '800', fontSize: 16 },
+  sub: { color: 'rgba(255,255,255,0.45)', fontSize: 11, marginTop: 1 },
   callBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#F59E0B',
     alignItems: 'center',
     justifyContent: 'center',
   },
   bubble: {
     maxWidth: '78%',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: radii.md,
+    borderRadius: radii.lg,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     marginBottom: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    gap: 6,
   },
-  msgImage: { width: 180, height: 140, borderRadius: 10 },
+  mine: { alignSelf: 'flex-end' },
+  theirs: { alignSelf: 'flex-start' },
+  img: { width: 160, height: 160, borderRadius: 12, marginBottom: 6 },
   composer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
     paddingHorizontal: 12,
-    paddingTop: 10,
+    paddingTop: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.08)',
   },
-  imgBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  preview: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.9)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 20,
-  },
-  previewImg: { width: '90%', height: '70%', resizeMode: 'contain', borderRadius: 12 },
+  iconBtn: { padding: 8 },
 });

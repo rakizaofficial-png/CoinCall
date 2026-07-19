@@ -143,7 +143,7 @@ export function MessagesScreen({ navigation }: { navigation: any }) {
 
           <SectionLabel title="Host support" />
           <SoftPress
-            onPress={() => navigation.navigate('Chat', { hostId: ADMIN_SUPPORT_ID })}
+            onPress={() => navigation.navigate('Chat', { peerId: ADMIN_SUPPORT_ID, peerName: 'Admin' })}
           >
             <GlassPanel pad={14} style={{ marginBottom: 10 }}>
               <View style={styles.inboxRow}>
@@ -184,7 +184,12 @@ export function MessagesScreen({ navigation }: { navigation: any }) {
             privateRows.map((row) => (
               <SoftPress
                 key={row.id}
-                onPress={() => navigation.navigate('Chat', { hostId: row.id })}
+                onPress={() =>
+                  navigation.navigate('Chat', {
+                    peerId: row.id,
+                    peerName: row.title,
+                  })
+                }
               >
                 <GlassPanel pad={14} style={{ marginBottom: 10 }}>
                   <View style={styles.inboxRow}>

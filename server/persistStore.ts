@@ -23,6 +23,8 @@ export type PersistedSnapshot = {
   iapReceipts: string[];
   supportTickets: Array<Record<string, unknown>>;
   liveRooms: Array<Record<string, unknown>>;
+  /** Optional 1:1 DM chats (user ↔ host) */
+  dmChats?: Array<Record<string, unknown>>;
 };
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
