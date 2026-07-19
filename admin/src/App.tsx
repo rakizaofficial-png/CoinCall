@@ -556,39 +556,39 @@ export default function App() {
   const isAgency = adminRole === 'agency';
 
   return (
-    <div
-      className={`shell shell-h ${monitor ? 'shell-monitor-open' : ''}`}
-      data-theme={theme}
-    >
-      <header className="topbar">
-        <div className="topbar-brand">
+    <div className={`shell ${monitor ? 'shell-monitor-open' : ''}`} data-theme={theme}>
+      <aside className="side">
+        <div className="brand">
           <div className="brand-mark">CC</div>
           <div className="brand-text">
-            <strong>CoinCall Admin</strong>
-            <span>{isAgency ? agencyName || 'Agency portal' : 'Control Center'}</span>
+            <strong>CoinCall</strong>
+            <span>{isAgency ? 'Agency portal' : 'Super Admin'}</span>
           </div>
-          <span className="topbar-role">
-            {isAgency ? 'Agency' : adminRole.replace('_', ' ')}
-          </span>
+        </div>
+        <div className="side-role">
+          {isAgency
+            ? agencyName || 'Agency'
+            : adminRole.replace('_', ' ')}
         </div>
 
-        <nav className="topbar-nav" aria-label="Main">
+        <nav className="nav-group">
           {navItems.map((item) => {
-            const showDivider = item.group !== lastGroup && lastGroup !== '';
+            const showGroup = item.group !== lastGroup;
             lastGroup = item.group;
             return (
-              <div key={item.id} className="topbar-nav-item">
-                {showDivider ? <span className="topbar-divider" aria-hidden /> : null}
+              <div key={item.id}>
+                {showGroup ? (
+                  <div className="nav-label">{item.group}</div>
+                ) : null}
                 <button
                   type="button"
-                  className={`topbar-link ${tab === item.id ? 'active' : ''}`}
+                  className={`nav-btn ${tab === item.id ? 'active' : ''}`}
                   onClick={() => setTab(item.id)}
-                  title={item.group}
                 >
                   {ICONS[item.id] ? <Icon d={ICONS[item.id]!} /> : null}
-                  <span>{item.label}</span>
+                  {item.label}
                   {typeof item.count === 'number' ? (
-                    <em className="topbar-count">{item.count}</em>
+                    <span className="nav-count">{item.count}</span>
                   ) : null}
                 </button>
               </div>
@@ -596,19 +596,19 @@ export default function App() {
           })}
         </nav>
 
-        <div className="topbar-tools">
+        <div className="side-footer">
           <button
             type="button"
             className="theme-toggle"
             onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
           >
-            {theme === 'dark' ? 'Light' : 'Dark'}
+            {theme === 'dark' ? 'Light mode' : 'Dark mode'}
           </button>
           <button className="logout" type="button" onClick={signOut}>
             Sign out
           </button>
         </div>
-      </header>
+      </aside>
 
       <main className="main">
         {isAgency ? (
@@ -629,11 +629,11 @@ export default function App() {
             {tab === 'dashboard' ? (
               <>
                 <PageHead
-                  title={isAgency ? 'Agency dashboard' : 'Operations overview'}
+                  title={isAgency ? 'Agency dashboard' : 'Super Admin dashboard'}
                   subtitle={
                     isAgency
                       ? 'Your hosts · earnings · withdrawals'
-                      : 'One path per job — pick a workspace below'
+                      : 'Active hosts · users · live · revenue'
                   }
                 />
                 <DashboardAnalytics
@@ -642,82 +642,85 @@ export default function App() {
                   liveCalls={stats.liveCalls}
                   openPayouts={stats.openPayouts}
                 />
-                <div className="path-grid">
+                <div className="quick-grid">
                   {canAccess(adminRole, 'agencies', agencyPerms) ? (
                     <button
                       type="button"
-                      className="path-card"
+                      className="quick-card"
                       onClick={() => setTab('agencies')}
                     >
-                      <span className="path-kicker">Network</span>
                       <strong>Agencies</strong>
-                      <span>Create partners · cut · portal access</span>
+                      <span>Create · commission · portal permissions</span>
+                    </button>
+                  ) : null}
+                  {canAccess(adminRole, 'agency_hosts', agencyPerms) ? (
+                    <button
+                      type="button"
+                      className="quick-card"
+                      onClick={() => setTab('agency_hosts')}
+                    >
+                      <strong>Agency hosts</strong>
+                      <span>Hosts managed by agencies</span>
+                    </button>
+                  ) : null}
+                  {canAccess(adminRole, 'individual_hosts', agencyPerms) ? (
+                    <button
+                      type="button"
+                      className="quick-card"
+                      onClick={() => setTab('individual_hosts')}
+                    >
+                      <strong>Individual hosts</strong>
+                      <span>Independent creators</span>
                     </button>
                   ) : null}
                   {canAccess(adminRole, 'hosts', agencyPerms) ? (
                     <button
                       type="button"
-                      className="path-card"
+                      className="quick-card"
                       onClick={() => setTab('hosts')}
                     >
-                      <span className="path-kicker">Network</span>
                       <strong>Host List</strong>
-                      <span>Approve · suspend · ban · KYC</span>
+                      <span>Approve · KYC · ban · wallet</span>
                     </button>
                   ) : null}
                   {canAccess(adminRole, 'users', agencyPerms) ? (
                     <button
                       type="button"
-                      className="path-card"
+                      className="quick-card"
                       onClick={() => setTab('users')}
                     >
-                      <span className="path-kicker">Network</span>
                       <strong>User List</strong>
                       <span>Wallets · suspend · ban</span>
-                    </button>
-                  ) : null}
-                  {canAccess(adminRole, 'revenue', agencyPerms) ? (
-                    <button
-                      type="button"
-                      className="path-card"
-                      onClick={() => setTab('revenue')}
-                    >
-                      <span className="path-kicker">Finance</span>
-                      <strong>Revenue</strong>
-                      <span>Agency vs individual earnings</span>
-                    </button>
-                  ) : null}
-                  {canAccess(adminRole, 'payouts', agencyPerms) ? (
-                    <button
-                      type="button"
-                      className="path-card"
-                      onClick={() => setTab('payouts')}
-                    >
-                      <span className="path-kicker">Finance</span>
-                      <strong>Financials</strong>
-                      <span>Money Desk · payouts</span>
                     </button>
                   ) : null}
                   {canAccess(adminRole, 'calls', agencyPerms) ? (
                     <button
                       type="button"
-                      className="path-card"
+                      className="quick-card"
                       onClick={() => setTab('calls')}
                     >
-                      <span className="path-kicker">Live</span>
                       <strong>Live Monitor</strong>
-                      <span>Watch streams &amp; 1:1 only</span>
+                      <span>Silent watch · streams &amp; 1:1</span>
                     </button>
                   ) : null}
-                  {canAccess(adminRole, 'control', agencyPerms) ? (
+                  {canAccess(adminRole, 'payouts', agencyPerms) ? (
                     <button
                       type="button"
-                      className="path-card"
-                      onClick={() => setTab('control')}
+                      className="quick-card"
+                      onClick={() => setTab('payouts')}
                     >
-                      <span className="path-kicker">Live</span>
-                      <strong>Remote control</strong>
-                      <span>Force online / offline / end call</span>
+                      <strong>Financials</strong>
+                      <span>Money Desk · pending / approved</span>
+                    </button>
+                  ) : null}
+                  {canAccess(adminRole, 'revenue', agencyPerms) ? (
+                    <button
+                      type="button"
+                      className="quick-card"
+                      onClick={() => setTab('revenue')}
+                    >
+                      <strong>Revenue</strong>
+                      <span>Agency vs individual earnings</span>
                     </button>
                   ) : null}
                 </div>
@@ -737,7 +740,7 @@ export default function App() {
                   agencyId={agencyId}
                   canAct={!!agencyPerms?.canManageHosts}
                   title="Agency hosts"
-                  subtitle="Lifecycle for your linked hosts only — not revenue or remote control"
+                  subtitle="Live presence · earnings · lifecycle for your linked hosts only"
                 />
               ) : (
                 <HostTypePanel mode="agency" canManage />
