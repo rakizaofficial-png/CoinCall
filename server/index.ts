@@ -735,11 +735,21 @@ app.post('/api/gifts/send', (req, res) => {
     createdAt: Date.now(),
   };
 
-  if (roomId && liveRooms.has(roomId)) {
-    const room = liveRooms.get(roomId)!;
+  const resolvedRoom = roomId ? findLiveRoom(roomId) : findLiveRoom(hostId);
+  if (resolvedRoom) {
+    const room = resolvedRoom.room;
     room.giftCoins = Number(room.giftCoins || 0) + catalog.coins;
     room.updatedAt = Date.now();
-    liveRooms.set(roomId, room);
+    liveRooms.set(resolvedRoom.id, room);
+    pushLiveComment(resolvedRoom.id, {
+      userId,
+      userName,
+      text: `sent ${catalog.name}`,
+      kind: 'gift',
+      giftEmoji: catalog.emoji,
+      giftCoins: catalog.coins,
+    });
+    giftEvent.roomId = resolvedRoom.id;
   }
 
   broadcastWs({ type: 'gift:received', payload: giftEvent });
@@ -1828,6 +1838,51 @@ registerAgencyRoutes(app, {
 
 /** In-memory live rooms (Firebase is source of truth on clients; API mirrors for Luma) */
 const liveRooms = new Map<string, Record<string, unknown>>();
+/** Live room chat (API mirror when Firebase RTDB unavailable on user app) */
+type LiveCommentRow = {
+  id: string;
+  userId: string;
+  userName: string;
+  text: string;
+  createdAt: number;
+  kind: 'comment' | 'join' | 'leave' | 'follow' | 'system' | 'gift';
+  giftEmoji?: string;
+  giftCoins?: number;
+};
+const liveComments = new Map<string, LiveCommentRow[]>();
+
+function pushLiveComment(roomId: string, row: Omit<LiveCommentRow, 'id' | 'createdAt'> & { createdAt?: number }) {
+  const list = liveComments.get(roomId) || [];
+  const comment: LiveCommentRow = {
+    id: randomUUID().slice(0, 10),
+    createdAt: row.createdAt || Date.now(),
+    userId: row.userId,
+    userName: row.userName,
+    text: row.text,
+    kind: row.kind,
+    giftEmoji: row.giftEmoji,
+    giftCoins: row.giftCoins,
+  };
+  list.push(comment);
+  while (list.length > 120) list.shift();
+  liveComments.set(roomId, list);
+  broadcastWs({ type: 'live:comment', payload: { roomId, comment } });
+  return comment;
+}
+
+function findLiveRoom(idOrHost: string) {
+  const key = String(idOrHost || '');
+  if (!key) return undefined;
+  if (liveRooms.has(key)) return { id: key, room: liveRooms.get(key)! };
+  const asLive = key.startsWith('live_') ? key : `live_${key}`;
+  if (liveRooms.has(asLive)) return { id: asLive, room: liveRooms.get(asLive)! };
+  for (const [id, room] of liveRooms.entries()) {
+    if (String(room.hostId || '') === key && room.isLive) {
+      return { id, room };
+    }
+  }
+  return undefined;
+}
 
 function buildSnapshot(): PersistedSnapshot {
   return {
@@ -2006,7 +2061,7 @@ app.post('/api/live/rooms', (req, res) => {
 
 app.get('/api/live/rooms', (_req, res) => {
   const rooms = [...liveRooms.values()]
-    .filter((r) => r.isLive)
+    .filter((r) => r.isLive && String(r.mode || 'solo') !== 'party')
     .map((r) => {
       const hostId = String(r.hostId || r.id || 'host');
       const out = { ...r };
@@ -2022,6 +2077,102 @@ app.get('/api/live/rooms', (_req, res) => {
       return out;
     });
   res.json({ rooms });
+});
+
+/** Resolve a host-only live room by room id or host id */
+app.get('/api/live/rooms/:id', (req, res) => {
+  const found = findLiveRoom(String(req.params.id || ''));
+  if (!found || !found.room.isLive) {
+    res.status(404).json({ error: 'Live room not found' });
+    return;
+  }
+  if (String(found.room.mode || 'solo') === 'party') {
+    res.status(404).json({ error: 'Party rooms are not available in Host-Only Live' });
+    return;
+  }
+  const hostId = String(found.room.hostId || found.id);
+  const out = { ...found.room, id: found.id };
+  for (const key of ['hostAvatar', 'thumbnailUrl'] as const) {
+    const v = out[key];
+    if (
+      typeof v === 'string' &&
+      (v.startsWith('data:') || v.startsWith('blob:') || v.length > 2000)
+    ) {
+      out[key] = `https://i.pravatar.cc/400?u=${encodeURIComponent(hostId)}`;
+    }
+  }
+  res.json({
+    room: out,
+    channel: String(found.room.channel || found.id),
+    giftCoins: Number(found.room.giftCoins || 0),
+    viewers: Number(found.room.viewers || 0),
+  });
+});
+
+app.get('/api/live/rooms/:id/comments', (req, res) => {
+  const found = findLiveRoom(String(req.params.id || ''));
+  if (!found) {
+    res.status(404).json({ error: 'Live room not found' });
+    return;
+  }
+  const list = liveComments.get(found.id) || [];
+  res.json({ comments: list.slice(-80) });
+});
+
+app.post('/api/live/rooms/:id/comments', (req, res) => {
+  const found = findLiveRoom(String(req.params.id || ''));
+  if (!found || !found.room.isLive) {
+    res.status(404).json({ error: 'Live room not found' });
+    return;
+  }
+  const userId = String(req.body?.userId || '').trim().slice(0, 64);
+  const userName = String(req.body?.userName || 'Viewer').trim().slice(0, 40) || 'Viewer';
+  const text = String(req.body?.text || '').trim().slice(0, 200);
+  if (!userId || !text) {
+    res.status(400).json({ error: 'userId and text required' });
+    return;
+  }
+  const comment = pushLiveComment(found.id, {
+    userId,
+    userName,
+    text,
+    kind: 'comment',
+  });
+  pushToHost(String(found.room.hostId || ''), 'live_comment', {
+    roomId: found.id,
+    comment,
+  });
+  res.status(201).json({ ok: true, comment });
+});
+
+/** Viewer join / leave — bumps room viewer count for the active live list */
+app.post('/api/live/rooms/:id/viewers', (req, res) => {
+  const found = findLiveRoom(String(req.params.id || ''));
+  if (!found || !found.room.isLive) {
+    res.status(404).json({ error: 'Live room not found' });
+    return;
+  }
+  const delta = Math.max(-5, Math.min(5, Math.floor(Number(req.body?.delta) || 0)));
+  const userId = String(req.body?.userId || 'viewer').slice(0, 64);
+  const userName = String(req.body?.userName || 'Viewer').slice(0, 40);
+  const next = Math.max(0, Number(found.room.viewers || 0) + delta);
+  found.room.viewers = next;
+  found.room.updatedAt = Date.now();
+  liveRooms.set(found.id, found.room);
+  if (delta > 0) {
+    pushLiveComment(found.id, {
+      userId,
+      userName,
+      text: 'joined',
+      kind: 'join',
+    });
+  }
+  broadcastWs({
+    type: 'live:viewers',
+    payload: { roomId: found.id, viewers: next },
+  });
+  persist();
+  res.json({ ok: true, viewers: next });
 });
 
 app.post('/api/live/rooms/:id/end', (req, res) => {

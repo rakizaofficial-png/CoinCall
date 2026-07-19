@@ -173,6 +173,9 @@ export function LiveRoomScreen({ navigation, route }: Props) {
         </View>
         <View style={styles.topRight}>
           <View style={styles.statPill}>
+            <Text style={styles.statText}>💎 {Math.max(room.giftCoins || 0, 0)}</Text>
+          </View>
+          <View style={styles.statPill}>
             <Users size={14} color="#fff" />
             <Text style={styles.statText}>{Math.max(room.viewers, 0)}</Text>
           </View>
