@@ -6,7 +6,7 @@ export type AuthStackParamList = {
 export type MainTabParamList = {
   Home: undefined;
   Live: undefined;
-  Calling: undefined;
+  Party: undefined;
   Chat: undefined;
   Profile: undefined;
 };
@@ -30,4 +30,5 @@ export type RootStackParamList = {
   GoLive: { mode?: 'solo' | 'party' };
   LiveRoom: { roomId: string; hostMode?: boolean };
   Withdraw: undefined;
+  Calling: undefined;
 };

@@ -1,0 +1,302 @@
+From 5b9e23025916e62e689d52bc2210e9c09805b3bd Mon Sep 17 00:00:00 2001
+From: Cursor Agent <cursoragent@cursor.com>
+Date: Sun, 19 Jul 2026 00:00:47 +0000
+Subject: [PATCH] Fix Discover feed to show CoinCall online hosts.
+
+Proxy /api/hosts through Next, normalize readyToCall, and prefer ready hosts so the user app lists hosts waiting for 1v1.
+---
+ src/app/api/bridge/hosts/route.ts | 54 +++++++++++++++++++
+ src/app/call/page.tsx             |  6 ++-
+ src/components/SwipeFeed.tsx      | 17 ++++--
+ src/lib/api.ts                    | 88 +++++++++++++++++++++++++++++--
+ src/lib/hostActivity.ts           | 34 ++++++------
+ 5 files changed, 171 insertions(+), 28 deletions(-)
+ create mode 100644 src/app/api/bridge/hosts/route.ts
+
+diff --git a/src/app/api/bridge/hosts/route.ts b/src/app/api/bridge/hosts/route.ts
+new file mode 100644
+index 0000000..497ecf3
+--- /dev/null
++++ b/src/app/api/bridge/hosts/route.ts
+@@ -0,0 +1,54 @@
++import { NextResponse } from "next/server";
++
++const API =
++  process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
++  "https://coincall-api.onrender.com/api";
++
++/**
++ * Server-side proxy so the Discover feed always reaches CoinCall hosts
++ * even if the browser blocks or flakes on a cross-origin call.
++ */
++export async function GET(req: Request) {
++  const { searchParams } = new URL(req.url);
++  const ready = searchParams.get("ready");
++  const qs = ready === "1" || ready === "true" ? "?ready=1" : "";
++
++  try {
++    const res = await fetch(`${API}/hosts${qs}`, {
++      cache: "no-store",
++      headers: { Accept: "application/json" },
++    });
++    const text = await res.text();
++    let data: { hosts?: unknown[] } = {};
++    try {
++      data = JSON.parse(text) as { hosts?: unknown[] };
++    } catch {
++      return NextResponse.json(
++        { hosts: [], error: "Invalid API response", raw: text.slice(0, 120) },
++        { status: 502 },
++      );
++    }
++    if (!res.ok) {
++      return NextResponse.json(
++        { hosts: [], error: (data as { error?: string }).error || res.statusText },
++        { status: res.status },
++      );
++    }
++    return NextResponse.json(
++      { hosts: Array.isArray(data.hosts) ? data.hosts : [] },
++      {
++        headers: {
++          "Cache-Control": "no-store",
++        },
++      },
++    );
++  } catch (e) {
++    return NextResponse.json(
++      {
++        hosts: [],
++        error: e instanceof Error ? e.message : "Bridge unreachable",
++      },
++      { status: 502 },
++    );
++  }
++}
+diff --git a/src/app/call/page.tsx b/src/app/call/page.tsx
+index 3238b58..7b22eea 100644
+--- a/src/app/call/page.tsx
++++ b/src/app/call/page.tsx
+@@ -171,7 +171,11 @@ export default function CallLobbyPage() {
+               <p className="truncate text-xs text-muted">
+                 {h.country || "CoinCall host"}
+                 {h.isLive ? " · LIVE" : ""}
+-                {h.isOnCall ? " · Busy" : " · Waiting"}
++                {h.isOnCall
++                  ? " · Busy"
++                  : h.readyToCall !== false
++                    ? " · Ready"
++                    : " · Waiting"}
+               </p>
+               <p className="mt-0.5 text-[11px] text-gold">
+                 {h.ratePerMinute} coins/min
+diff --git a/src/components/SwipeFeed.tsx b/src/components/SwipeFeed.tsx
+index 085066f..1764c3b 100644
+--- a/src/components/SwipeFeed.tsx
++++ b/src/components/SwipeFeed.tsx
+@@ -82,8 +82,14 @@ export function SwipeFeed() {
+ 
+   const load = useCallback(async () => {
+     try {
+-      const hosts = await fetchLiveHosts();
+-      setItems(hosts.map((h) => ({ host: h })));
++      // Prefer ready-to-call hosts; fall back to every online host on the bridge
++      const hosts = await fetchLiveHosts({ readyOnly: true });
++      const list = hosts.length ? hosts : await fetchLiveHosts();
++      setItems(
++        list
++          .filter((h) => h.isOnline)
++          .map((h) => ({ host: h })),
++      );
+     } catch {
+       setItems([]);
+     }
+@@ -131,6 +137,7 @@ export function SwipeFeed() {
+     ? resolveHostActivity(hostId, {
+         isLive: current.host.isLive,
+         isOnCall: current.host.isOnCall,
++        readyToCall: current.host.readyToCall,
+       })
+     : null;
+ 
+@@ -171,11 +178,11 @@ export function SwipeFeed() {
+       <LoungeShell minuteRate={80} enableAutoTopUp={false}>
+         <div className="flex min-h-[70dvh] flex-col items-center justify-center gap-3 px-6 text-center">
+           <p className="font-display text-lg font-bold text-sand">
+-            No live hosts online
++            No hosts ready yet
+           </p>
+           <p className="text-sm text-cyan/70">
+-            Waiting for CoinCall hosts via `/api/hosts`. AI fallback starts when
+-            you place a 1v1 call.
++            Open CoinCall host → Calling → Go Online. Hosts sync here from
++            `/api/hosts` every few seconds.
+           </p>
+           <button
+             type="button"
+diff --git a/src/lib/api.ts b/src/lib/api.ts
+index 5da726d..179d65c 100644
+--- a/src/lib/api.ts
++++ b/src/lib/api.ts
+@@ -16,6 +16,9 @@ export type LiveHost = {
+   isOnline: boolean;
+   isLive: boolean;
+   isOnCall: boolean;
++  /** Present when CoinCall API sync is deployed */
++  readyToCall?: boolean;
++  workspaceMode?: "waiting_1v1" | "solo_calling";
+ };
+ 
+ export type BridgeCall = {
+@@ -38,10 +41,87 @@ async function parse<T>(res: Response): Promise<T> {
+   return data as T;
+ }
+ 
+-export async function fetchLiveHosts(): Promise<LiveHost[]> {
+-  const res = await fetch(`${requireApiBase()}/hosts`, { cache: "no-store" });
+-  const data = await parse<{ hosts: LiveHost[] }>(res);
+-  return data.hosts ?? [];
++function normalizeHost(raw: Partial<LiveHost> & { id?: string; name?: string }): LiveHost | null {
++  if (!raw?.id || !raw?.name) return null;
++  const isOnline = Boolean(raw.isOnline);
++  const isLive = Boolean(raw.isLive);
++  const isOnCall = Boolean(raw.isOnCall);
++  const readyToCall =
++    typeof raw.readyToCall === "boolean"
++      ? raw.readyToCall
++      : isOnline && !isOnCall && !isLive;
++  return {
++    id: String(raw.id),
++    name: String(raw.name),
++    avatarUrl: raw.avatarUrl,
++    country: raw.country,
++    ratePerMinute: Number(raw.ratePerMinute) || 80,
++    isOnline,
++    isLive,
++    isOnCall,
++    readyToCall,
++    workspaceMode: raw.workspaceMode,
++  };
++}
++
++function sortHosts(list: LiveHost[]) {
++  return [...list].sort((a, b) => {
++    const ar = Number(a.readyToCall);
++    const br = Number(b.readyToCall);
++    if (ar !== br) return br - ar;
++    return Number(b.isLive) - Number(a.isLive);
++  });
++}
++
++/**
++ * Online CoinCall hosts for Discover / 1v1.
++ * Uses same-origin proxy first, then direct API fallback.
++ */
++export async function fetchLiveHosts(opts?: {
++  readyOnly?: boolean;
++}): Promise<LiveHost[]> {
++  const readyQs = opts?.readyOnly ? "?ready=1" : "";
++
++  const fromProxy = async () => {
++    const res = await fetch(`/api/bridge/hosts${readyQs}`, { cache: "no-store" });
++    const data = await parse<{ hosts: Partial<LiveHost>[] }>(res);
++    return (data.hosts || [])
++      .map((h) => normalizeHost(h))
++      .filter((h): h is LiveHost => Boolean(h && h.isOnline));
++  };
++
++  const fromApi = async () => {
++    const res = await fetch(`${requireApiBase()}/hosts${readyQs}`, {
++      cache: "no-store",
++    });
++    const data = await parse<{ hosts: Partial<LiveHost>[] }>(res);
++    return (data.hosts || [])
++      .map((h) => normalizeHost(h))
++      .filter((h): h is LiveHost => Boolean(h && h.isOnline));
++  };
++
++  try {
++    const list = await fromProxy();
++    if (list.length) return sortHosts(list);
++    // Proxy returned empty — try direct (and ready=0 if ready filter empty)
++    const direct = await fromApi();
++    if (direct.length || !opts?.readyOnly) return sortHosts(direct);
++    return sortHosts(await fetchLiveHosts({ readyOnly: false }));
++  } catch {
++    try {
++      return sortHosts(await fromApi());
++    } catch {
++      return [];
++    }
++  }
++}
++
++/** Hosts ready for a new 1v1 ring */
++export async function fetchReadyHosts(): Promise<LiveHost[]> {
++  const ready = await fetchLiveHosts({ readyOnly: true });
++  if (ready.length) return ready;
++  const all = await fetchLiveHosts();
++  return all.filter((h) => h.readyToCall !== false && !h.isOnCall);
+ }
+ 
+ export async function createCall(input: {
+diff --git a/src/lib/hostActivity.ts b/src/lib/hostActivity.ts
+index b44f8b5..1120d5d 100644
+--- a/src/lib/hostActivity.ts
++++ b/src/lib/hostActivity.ts
+@@ -12,36 +12,34 @@ export type FeedActivity = {
+ /** Deterministic mock activity from host id so UI stays stable across swipes */
+ export function resolveHostActivity(
+   hostId: string,
+-  flags?: { isLive?: boolean; isOnCall?: boolean },
++  flags?: { isLive?: boolean; isOnCall?: boolean; readyToCall?: boolean },
+ ): FeedActivity {
+   if (flags?.isOnCall) {
+     return { mode: "solo", label: "On private call", viewers: 0 };
+   }
+-  let hash = 0;
+-  for (let i = 0; i < hostId.length; i++) {
+-    hash = (hash + hostId.charCodeAt(i) * (i + 3)) % 97;
+-  }
+-  const bucket = hash % 5;
+-  if (bucket === 0 || bucket === 1) {
++  // Real bridge flags win over mock party/PK labels so ready hosts show as callable
++  if (flags?.isLive) {
+     return {
+-      mode: "party_room",
+-      label: "Party Room live",
+-      seats: 4 + (hash % 3),
+-      viewers: 120 + (hash % 40) * 7,
++      mode: "solo",
++      label: "Solo live · on stage",
++      viewers: 40 + (hostId.length % 20),
+     };
+   }
+-  if (bucket === 2) {
++  if (flags?.readyToCall !== false) {
+     return {
+-      mode: "pk_battle",
+-      label: "PK Battle Arena",
+-      viewers: 80 + (hash % 30) * 5,
+-      pkScore: `${420 + hash} vs ${380 + (hash % 50)}`,
++      mode: "solo",
++      label: "Online · ready to call",
++      viewers: undefined,
+     };
+   }
++  let hash = 0;
++  for (let i = 0; i < hostId.length; i++) {
++    hash = (hash + hostId.charCodeAt(i) * (i + 3)) % 97;
++  }
+   return {
+     mode: "solo",
+-    label: flags?.isLive ? "Solo live · waiting" : "Online · waiting 1v1",
+-    viewers: flags?.isLive ? 40 + (hash % 20) : undefined,
++    label: "Online · waiting 1v1",
++    viewers: undefined,
+   };
+ }
+ 
+-- 
+2.43.0
+

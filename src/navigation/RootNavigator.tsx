@@ -9,6 +9,7 @@ import { SplashScreen } from '../components/ui/SplashScreen';
 import { AppProvider, useApp } from '../context/AppContext';
 import { LiveStudioProvider } from '../context/LiveStudioContext';
 import { useAuth } from '../context/AuthContext';
+import { CallingScreen } from '../features/calling/CallingScreen';
 import { GoLiveScreen } from '../features/live/GoLiveScreen';
 import { LiveRoomScreen } from '../features/live/LiveRoomScreen';
 import { WithdrawScreen } from '../features/wallet/WithdrawScreen';
