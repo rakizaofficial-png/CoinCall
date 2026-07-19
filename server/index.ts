@@ -1948,7 +1948,8 @@ app.get('/api/live/token', (req, res) => {
       return;
     }
     const uid = Number(req.query.uid || Math.floor(100000 + Math.random() * 800000));
-    res.json(mintToken(channel, uid, 'subscriber'));
+    // Publisher privilege so RTC subscribe works even if project role checks are strict
+    res.json(mintToken(channel, uid, 'publisher'));
   } catch (e: any) {
     res.status(500).json({ error: e?.message || 'Token error' });
   }

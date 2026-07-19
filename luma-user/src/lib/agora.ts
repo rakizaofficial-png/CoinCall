@@ -84,21 +84,29 @@ export async function startUserAgoraCall(options: {
   return session;
 }
 
-/** Watch a host live broadcast (audience — no cam/mic publish) */
+/** Watch a host live broadcast (subscribe only — same RTC mode as host) */
 export async function startUserAgoraLiveAudience(options: {
   appId: string;
   channel: string;
   token: string;
   uid: number;
   remoteVideoEl: HTMLElement;
+  onRemoteVideo?: () => void;
 }) {
   await stopUserAgoraCall();
-  prep(options.remoteVideoEl);
+
+  const el = options.remoteVideoEl;
+  el.style.width = '100%';
+  el.style.height = '100%';
+  el.style.minHeight = '120px';
+  el.style.background = 'transparent';
+  el.style.overflow = 'hidden';
+  el.replaceChildren();
 
   const AgoraRTC = (await import('agora-rtc-sdk-ng')).default;
-  AgoraRTC.setLogLevel(4);
-  const client = AgoraRTC.createClient({ mode: 'live', codec: 'vp8' });
-  await client.setClientRole('audience');
+  AgoraRTC.setLogLevel(3);
+  // Match host live broadcast (RTC) — live/audience mode was not receiving video
+  const client = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
 
   const playRemote = async (
     user: import('agora-rtc-sdk-ng').IAgoraRTCRemoteUser,
@@ -106,7 +114,8 @@ export async function startUserAgoraLiveAudience(options: {
   ) => {
     await client.subscribe(user, mediaType);
     if (mediaType === 'video' && user.videoTrack) {
-      user.videoTrack.play(options.remoteVideoEl, { fit: 'cover' });
+      user.videoTrack.play(el, { fit: 'cover' });
+      options.onRemoteVideo?.();
     }
     if (mediaType === 'audio' && user.audioTrack) {
       user.audioTrack.play();

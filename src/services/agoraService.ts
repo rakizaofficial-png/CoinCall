@@ -360,17 +360,23 @@ export async function startAgoraLiveBroadcast(options: {
   await stopAgoraCall();
   prepVideoEl(options.localVideoEl);
 
-  const tokenPayload = await fetchRtcToken(options.channel, options.uid ?? 0, 'publisher');
+  // Use a non-zero uid — Agora + certificate is more reliable than uid 0
+  const hostUid =
+    options.uid && options.uid > 0
+      ? options.uid
+      : Math.floor(100000 + Math.random() * 800000);
+
+  // RTC mode (same as 1v1) so Luma viewers can subscribe reliably
+  const tokenPayload = await fetchRtcToken(options.channel, hostUid, 'publisher');
   const AgoraRTC = (await import('agora-rtc-sdk-ng')).default;
   AgoraRTC.setLogLevel(4);
-  const client = AgoraRTC.createClient({ mode: 'live', codec: 'vp8' });
-  await client.setClientRole('host');
+  const client = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
 
   await client.join(
     tokenPayload.appId || env.agora.appId,
     tokenPayload.channel || options.channel,
     tokenPayload.token,
-    tokenPayload.uid ?? options.uid ?? 0,
+    tokenPayload.uid ?? hostUid,
   );
 
   const [mic, cam] = await createMicAndCam(AgoraRTC, '720p_2', 'user');

@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Live room — joins Agora as audience so fans see host video (not only avatar).
+ * Live room — joins Agora (RTC subscribe) so fans see host camera, not only avatar.
  */
 
 import { use, useEffect, useMemo, useRef, useState } from "react";
@@ -63,7 +63,7 @@ export default function LiveRoomPage({
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    const load = async () => {
       try {
         const [hosts, roomRes] = await Promise.all([
           fetchLiveHosts({ readyOnly: false }).catch(() => [] as LiveHost[]),
@@ -85,6 +85,12 @@ export default function LiveRoomPage({
         const foundRoom =
           rooms.find((r) => r.hostId === id || r.id === id) ||
           rooms.find((r) => r.hostId === foundHost?.id) ||
+          rooms.find(
+            (r) =>
+              (r.hostName || "").toLowerCase() === id.toLowerCase() ||
+              (r.hostName || "").toLowerCase() ===
+                (foundHost?.name || "").toLowerCase(),
+          ) ||
           null;
         setRoom(foundRoom);
         setViewers(Number(foundRoom?.viewers) || mock?.viewers || 0);
@@ -95,14 +101,23 @@ export default function LiveRoomPage({
       } finally {
         if (!cancelled) setReady(true);
       }
-    })();
+    };
+    void load();
+    const poll = setInterval(() => void load(), 8000);
     return () => {
       cancelled = true;
+      clearInterval(poll);
     };
   }, [id, mock?.viewers]);
 
   const display = useMemo(() => {
     const hostId = host?.id || room?.hostId || id;
+    const channel =
+      room?.channel ||
+      (room?.id?.startsWith("live_") || room?.id?.startsWith("party_")
+        ? room.id
+        : null) ||
+      `live_${hostId}`;
     return {
       id: hostId,
       name: host?.name || room?.hostName || mock?.name || "Live host",
@@ -113,18 +128,24 @@ export default function LiveRoomPage({
       callRate:
         host?.ratePerMinute || room?.ratePerMinute || mock?.callRate || 80,
       roomId: room?.id || `live_${hostId}`,
-      channel: room?.channel || `live_${hostId}`,
+      channel,
     };
   }, [host, room, mock, id]);
 
   useEffect(() => {
-    if (!ready || !display.id) return;
+    if (!ready || !display.channel) return;
     let active = true;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
-    (async () => {
+    const join = async (attempt: number) => {
       try {
-        setVideoStatus("Joining live stream…");
-        for (let i = 0; i < 40; i++) {
+        setVideoStatus(
+          attempt > 1 ? `Reconnecting… (${attempt})` : "Joining live stream…",
+        );
+        setHasVideo(false);
+        setError(null);
+
+        for (let i = 0; i < 50; i++) {
           if (remoteRef.current) break;
           await new Promise((r) => requestAnimationFrame(() => r(null)));
         }
@@ -133,46 +154,93 @@ export default function LiveRoomPage({
           return;
         }
 
-        const res = await fetch(
-          `${requireApiBase()}/live/token?hostId=${encodeURIComponent(display.id)}&channel=${encodeURIComponent(display.channel)}`,
-          { cache: "no-store" },
+        const channels = Array.from(
+          new Set(
+            [
+              display.channel,
+              `live_${display.id}`,
+              room?.id,
+              room?.channel,
+            ].filter(Boolean) as string[],
+          ),
         );
-        const data = (await res.json()) as {
-          token?: string;
-          appId?: string;
-          channel?: string;
-          uid?: number;
-          error?: string;
-        };
-        if (!res.ok || !data.token || !data.appId) {
-          throw new Error(data.error || "Live token unavailable");
-        }
-        if (!active) return;
 
-        await startUserAgoraLiveAudience({
-          appId: data.appId,
-          channel: data.channel || display.channel,
-          token: data.token,
-          uid: data.uid || Math.floor(100000 + Math.random() * 800000),
-          remoteVideoEl: remoteRef.current,
-        });
-        if (!active) return;
-        setHasVideo(true);
-        setVideoStatus("Live");
+        let lastErr: Error | null = null;
+        for (const channel of channels) {
+          if (!active) return;
+          try {
+            const res = await fetch(
+              `${requireApiBase()}/live/token?hostId=${encodeURIComponent(display.id)}&channel=${encodeURIComponent(channel)}`,
+              { cache: "no-store" },
+            );
+            const data = (await res.json()) as {
+              token?: string;
+              appId?: string;
+              channel?: string;
+              uid?: number;
+              error?: string;
+            };
+            if (!res.ok || !data.token || !data.appId) {
+              throw new Error(data.error || "Live token unavailable");
+            }
+
+            await startUserAgoraLiveAudience({
+              appId: data.appId,
+              channel: data.channel || channel,
+              token: data.token,
+              uid: data.uid || Math.floor(100000 + Math.random() * 800000),
+              remoteVideoEl: remoteRef.current,
+              onRemoteVideo: () => {
+                if (!active) return;
+                setHasVideo(true);
+                setVideoStatus("Live");
+                setError(null);
+              },
+            });
+
+            if (!active) return;
+            setVideoStatus("Connected · waiting for host camera…");
+            // Host may publish a moment later
+            retryTimer = setTimeout(() => {
+              if (active && !remoteRef.current?.querySelector("video")) {
+                setVideoStatus("Waiting for host video…");
+              }
+            }, 4000);
+            return;
+          } catch (e) {
+            lastErr = e instanceof Error ? e : new Error("Join failed");
+            await stopUserAgoraCall();
+          }
+        }
+        throw lastErr || new Error("Could not join live channel");
       } catch (e) {
         if (!active) return;
         const msg = e instanceof Error ? e.message : "Could not join live";
         setVideoStatus(msg);
         setError(msg);
-        pushToast?.(msg);
+        if (attempt < 4) {
+          retryTimer = setTimeout(() => void join(attempt + 1), 2500);
+        } else {
+          pushToast?.(msg);
+        }
       }
-    })();
+    };
+
+    void join(1);
 
     return () => {
       active = false;
+      if (retryTimer) clearTimeout(retryTimer);
       void stopUserAgoraCall();
     };
-  }, [ready, display.id, display.channel, pushToast]);
+  }, [
+    ready,
+    display.channel,
+    display.id,
+    room?.id,
+    room?.channel,
+    pushToast,
+  ]);
 
   const like = () => {
     setLikes((l) => l + 1);
@@ -191,19 +259,20 @@ export default function LiveRoomPage({
 
   return (
     <main className="relative min-h-dvh overflow-hidden bg-ink">
-      {!hasVideo ? (
-        <img
-          src={display.image}
-          alt={display.name}
-          className="absolute inset-0 h-full w-full object-cover"
-        />
-      ) : null}
+      {/* Poster until first Agora video frame */}
+      <img
+        src={display.image}
+        alt={display.name}
+        className={`absolute inset-0 z-0 h-full w-full object-cover transition-opacity duration-500 ${
+          hasVideo ? "opacity-0" : "opacity-100"
+        }`}
+      />
       <div
         ref={remoteRef}
         id="agora-live-remote"
-        className="absolute inset-0 z-[1] bg-black"
+        className="absolute inset-0 z-[1]"
       />
-      <div className="absolute inset-0 z-[2] bg-gradient-to-b from-black/50 via-transparent to-black/90" />
+      <div className="pointer-events-none absolute inset-0 z-[2] bg-gradient-to-b from-black/50 via-transparent to-black/90" />
 
       <div className="relative z-10 flex min-h-dvh flex-col px-4 pb-24 pt-[max(0.75rem,env(safe-area-inset-top))]">
         <div className="flex items-start justify-between gap-2">
@@ -242,12 +311,12 @@ export default function LiveRoomPage({
           </span>
         </div>
 
-        <p className="mt-3 text-center text-[11px] font-semibold text-white/55">
+        <p className="mt-3 text-center text-[11px] font-semibold text-white/70">
           {videoStatus}
         </p>
 
         {error && !hasVideo ? (
-          <p className="mt-2 rounded-xl bg-black/50 px-3 py-2 text-xs text-white/80">
+          <p className="mt-2 rounded-xl bg-black/50 px-3 py-2 text-center text-xs text-white/80">
             {error}
           </p>
         ) : null}

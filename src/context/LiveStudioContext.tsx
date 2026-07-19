@@ -243,6 +243,41 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
     return () => clearInterval(t);
   }, [myLiveRoom?.isLive]);
 
+  /** Keep API live room + presence fresh so Luma can join the Agora channel */
+  useEffect(() => {
+    if (!myLiveRoom?.isLive || !myLiveRoom.id) return;
+    const roomSnapshot = myLiveRoom;
+    const beat = () => {
+      void publishLiveRoom({
+        ...roomSnapshot,
+        viewers: Math.max(1, roomSnapshot.viewers || 1),
+        isLive: true,
+      });
+      void publishHostPresence({
+        id: user.id,
+        name: user.name,
+        avatarUrl: user.avatarUrl,
+        country: user.country,
+        ratePerMinute: 60,
+        isOnline: true,
+        isLive: true,
+        isOnCall: false,
+        workspaceMode: 'waiting_1v1',
+      }).catch(() => undefined);
+    };
+    beat();
+    const t = setInterval(beat, 12_000);
+    return () => clearInterval(t);
+  }, [
+    myLiveRoom?.id,
+    myLiveRoom?.isLive,
+    myLiveRoom?.channel,
+    user.avatarUrl,
+    user.country,
+    user.id,
+    user.name,
+  ]);
+
   const startSoloLive = useCallback(async () => {
     const id = `live_${user.id}`;
     const room: LiveRoom = {
