@@ -39,6 +39,7 @@ function resolveApiBaseUrl() {
       return PRODUCTION_API;
     }
   }
+  // Native / EAS builds: prefer baked-in env, else production API
   if (fromEnv) return fromEnv;
   return PRODUCTION_API;
 }

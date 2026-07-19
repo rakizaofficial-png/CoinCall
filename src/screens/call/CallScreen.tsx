@@ -16,6 +16,10 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import {
+  AgoraCallSurfaces,
+  getWebVideoElements,
+} from '../../components/call/AgoraCallSurfaces';
 import { useApp } from '../../context/AppContext';
 import type { RootStackParamList } from '../../navigation/types';
 import {
@@ -99,12 +103,12 @@ export function CallScreen({ navigation, route }: Props) {
   const [beautyPreset] = useState<BeautyPreset>(beautyOn ? 'snap' : 'off');
   const [giftBurst, setGiftBurst] = useState<string | null>(null);
   const [disconnected, setDisconnected] = useState(false);
-  const agoraReady = isAgoraConfigured() && Platform.OS === 'web';
+  const agoraReady = isAgoraConfigured();
+  const isWeb = Platform.OS === 'web';
   const activeCallIdRef = useRef<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const localRef = useRef<HTMLDivElement | null>(null);
-  const remoteRef = useRef<HTMLDivElement | null>(null);
   const leavingRef = useRef(false);
+  const markSurfacesReady = useCallback(() => setSurfacesReady(true), []);
 
   const leaveAfterDisconnect = useCallback(async () => {
     if (leavingRef.current) return;
@@ -237,8 +241,12 @@ export function CallScreen({ navigation, route }: Props) {
     let active = true;
     (async () => {
       try {
-        const localEl = await waitForEl(() => localRef.current);
-        const remoteEl = await waitForEl(() => remoteRef.current);
+        let localEl: HTMLElement | null = null;
+        let remoteEl: HTMLElement | null = null;
+        if (isWeb) {
+          localEl = await waitForEl(() => getWebVideoElements().local);
+          remoteEl = await waitForEl(() => getWebVideoElements().remote);
+        }
         if (!active) return;
 
         setVideoStatus('Joining secure room…');
@@ -248,8 +256,8 @@ export function CallScreen({ navigation, route }: Props) {
           if (!active) return;
           await startAgoraCall({
             channel: tokenPayload.channel || channel,
-            localVideoEl: localEl,
-            remoteVideoEl: remoteEl,
+            localVideoEl: localEl ?? undefined,
+            remoteVideoEl: remoteEl ?? undefined,
             uid: tokenPayload.uid,
             token: tokenPayload.token,
             appId: tokenPayload.appId,
@@ -258,8 +266,8 @@ export function CallScreen({ navigation, route }: Props) {
         } else {
           await startAgoraCall({
             channel,
-            localVideoEl: localEl,
-            remoteVideoEl: remoteEl,
+            localVideoEl: localEl ?? undefined,
+            remoteVideoEl: remoteEl ?? undefined,
             beauty: beautyPreset,
           });
         }
@@ -289,10 +297,12 @@ export function CallScreen({ navigation, route }: Props) {
     };
   }, [
     agoraReady,
+    beautyPreset,
     bridgeCallId,
     call?.hostId,
     channel,
     isBridge,
+    isWeb,
     peerHost?.id,
     surfacesReady,
   ]);
@@ -352,16 +362,17 @@ export function CallScreen({ navigation, route }: Props) {
   return (
     <View style={[styles.container, { backgroundColor: '#05070F' }]}>
       {agoraReady ? (
-        <div
-          ref={(el: HTMLDivElement | null) => {
-            remoteRef.current = el;
-            if (el && localRef.current) setSurfacesReady(true);
-          }}
-          id="agora-remote"
-          style={webRemoteStyle}
-        />
+        <AgoraCallSurfaces onSurfacesReady={markSurfacesReady} />
       ) : (
-        <Image source={{ uri: peerAvatar }} style={styles.remote} />
+        <>
+          <Image source={{ uri: peerAvatar }} style={styles.remote} />
+          <View style={styles.localPreview}>
+            <Image
+              source={{ uri: user.avatarUrl }}
+              style={{ width: '100%', height: '100%', borderRadius: 20 }}
+            />
+          </View>
+        </>
       )}
 
       <View style={[styles.overlay]} pointerEvents="none" />
@@ -383,24 +394,6 @@ export function CallScreen({ navigation, route }: Props) {
             {displayCoins} coins · {rate}/min
           </Text>
         </View>
-      </View>
-
-      <View style={styles.localPreview}>
-        {agoraReady ? (
-          <div
-            ref={(el: HTMLDivElement | null) => {
-              localRef.current = el;
-              if (el && remoteRef.current) setSurfacesReady(true);
-            }}
-            id="agora-local"
-            style={webLocalStyle}
-          />
-        ) : (
-          <Image
-            source={{ uri: user.avatarUrl }}
-            style={{ width: '100%', height: '100%', borderRadius: 20 }}
-          />
-        )}
       </View>
 
       {giftBurst ? (
@@ -441,22 +434,6 @@ export function CallScreen({ navigation, route }: Props) {
     </View>
   );
 }
-
-const webRemoteStyle = {
-  position: 'absolute' as const,
-  inset: 0,
-  width: '100%',
-  height: '100%',
-  background: '#000',
-};
-
-const webLocalStyle = {
-  width: '100%',
-  height: '100%',
-  borderRadius: 18,
-  overflow: 'hidden' as const,
-  background: '#121826',
-};
 
 const styles = StyleSheet.create({
   container: { flex: 1 },

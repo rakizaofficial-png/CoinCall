@@ -26,6 +26,7 @@ import {
 import { AgenciesPanel } from './components/AgenciesPanel';
 import { AnimatedPage } from './components/AnimatedPage';
 import { DashboardAnalytics } from './components/DashboardAnalytics';
+import { ForceUpdatePanel } from './components/ForceUpdatePanel';
 import { HostManagementPanel } from './components/HostManagement';
 import { HostTypePanel } from './components/HostTypePanel';
 import {
@@ -1003,91 +1004,108 @@ export default function App() {
 
             {tab === 'control' ? (
               <>
+                {!isAgency ? <ForceUpdatePanel /> : null}
                 <PageHead
                   title="Remote control"
                   subtitle={`${remoteHosts.length} hosts · live presence from bridge`}
                 />
-                <div className="list">
+                <div className="desk-table-wrap">
                   {remoteHosts.length === 0 ? (
                     <div className="empty-state">
                       No approved hosts yet. Approve hosts in Host List.
                     </div>
                   ) : (
-                    remoteHosts.map((h) => (
-                      <div
-                        className="card"
-                        key={h.id}
-                        style={{ gridTemplateColumns: '64px 1fr' }}
-                      >
-                        <img src={h.photoUrl || h.avatarUrl || ''} alt="" />
-                        <div>
-                          <h3>
-                            {h.name} · {h.hostId || h.id.slice(0, 8)}
-                          </h3>
-                          <div className="meta" style={{ marginBottom: 8 }}>
-                            {h.readyToCall ? (
-                              <span className="badge online">READY TO CALL</span>
-                            ) : h.isLive ? (
-                              <span className="badge pending">LIVE</span>
-                            ) : h.isOnCall ? (
-                              <span className="badge under_review">ON CALL</span>
-                            ) : h.isOnline ? (
-                              <span className="badge online">ONLINE</span>
-                            ) : (
-                              <span className="badge">OFFLINE / NOT ON USER APP</span>
-                            )}
-                          </div>
-                          <div
-                            className="actions"
-                            style={{ flexDirection: 'row', marginTop: 8 }}
-                          >
-                            <button
-                              type="button"
-                              className="btn-ghost"
-                              onClick={() =>
-                                void sendControl(h.id, {
-                                  type: 'message',
-                                  message: 'Please stay online longer.',
-                                })
-                              }
-                            >
-                              Tip
-                            </button>
-                            <button
-                              type="button"
-                              className="btn-gold"
-                              onClick={() => void setHostOnline(h.id, true)}
-                            >
-                              Online
-                            </button>
-                            <button
-                              type="button"
-                              className="btn-ghost"
-                              onClick={() =>
-                                void sendControl(h.id, {
-                                  type: 'force_offline',
-                                  message: 'Admin set you Offline.',
-                                })
-                              }
-                            >
-                              Force offline
-                            </button>
-                            <button
-                              type="button"
-                              className="btn-red"
-                              onClick={() =>
-                                void sendControl(h.id, {
-                                  type: 'end_call',
-                                  message: 'Admin ended call.',
-                                })
-                              }
-                            >
-                              End call
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ))
+                    <table className="desk-table">
+                      <thead>
+                        <tr>
+                          <th>Profile</th>
+                          <th>Host</th>
+                          <th>Presence</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {remoteHosts.map((h) => (
+                          <tr key={h.id}>
+                            <td>
+                              <img
+                                className="desk-table-avatar"
+                                src={h.photoUrl || h.avatarUrl || ''}
+                                alt=""
+                              />
+                            </td>
+                            <td>
+                              <strong>{h.name}</strong>
+                              <div className="meta">
+                                {h.hostId || h.id.slice(0, 8)}
+                              </div>
+                            </td>
+                            <td>
+                              {h.readyToCall ? (
+                                <span className="badge solid approved">Ready</span>
+                              ) : h.isLive ? (
+                                <span className="badge solid live">Live</span>
+                              ) : h.isOnCall ? (
+                                <span className="badge solid under_review">
+                                  On call
+                                </span>
+                              ) : h.isOnline ? (
+                                <span className="badge solid online">Online</span>
+                              ) : (
+                                <span className="badge solid none">Offline</span>
+                              )}
+                            </td>
+                            <td>
+                              <div className="desk-row-actions">
+                                <button
+                                  type="button"
+                                  className="btn-ghost"
+                                  onClick={() =>
+                                    void sendControl(h.id, {
+                                      type: 'message',
+                                      message: 'Please stay online longer.',
+                                    })
+                                  }
+                                >
+                                  Tip
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn-gold"
+                                  onClick={() => void setHostOnline(h.id, true)}
+                                >
+                                  Online
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn-ghost"
+                                  onClick={() =>
+                                    void sendControl(h.id, {
+                                      type: 'force_offline',
+                                      message: 'Admin set you Offline.',
+                                    })
+                                  }
+                                >
+                                  Force offline
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn-red"
+                                  onClick={() =>
+                                    void sendControl(h.id, {
+                                      type: 'end_call',
+                                      message: 'Admin ended call.',
+                                    })
+                                  }
+                                >
+                                  End call
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   )}
                 </div>
               </>

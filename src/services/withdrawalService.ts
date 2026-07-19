@@ -44,7 +44,10 @@ export async function requestHostWithdrawal(
   const base = env.apiBaseUrl.replace(/\/$/, '');
   const res = await fetch(`${base}/host/withdrawals`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-User-Id': payload.hostId,
+    },
     body: JSON.stringify(payload),
   });
   const data = (await res.json()) as WithdrawalResult & { error?: string };
@@ -56,7 +59,12 @@ export async function requestHostWithdrawal(
 
 export async function listHostWithdrawals(hostId: string) {
   const base = env.apiBaseUrl.replace(/\/$/, '');
-  const res = await fetch(`${base}/host/withdrawals/${encodeURIComponent(hostId)}`);
+  const res = await fetch(
+    `${base}/host/withdrawals/${encodeURIComponent(hostId)}`,
+    {
+      headers: { 'X-User-Id': hostId },
+    },
+  );
   if (!res.ok) throw new Error('Could not load withdrawals');
   return (await res.json()) as { withdrawals: unknown[] };
 }

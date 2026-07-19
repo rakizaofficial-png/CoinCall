@@ -608,7 +608,7 @@ export function AppProvider({
 
     if (earned > 0) {
       void import('../services/walletSyncService').then(({ creditHostEarnings, syncHostWalletBalance }) => {
-        const next = user.coinBalance; // already includes call ticks
+        const next = user.coinBalance;
         void syncHostWalletBalance({
           hostId: user.id,
           coinBalance: next,
@@ -616,8 +616,8 @@ export function AppProvider({
         });
         void creditHostEarnings({
           hostId: user.id,
-          amount: 0, // balance already local; sync is enough
-          reason: 'call_end_sync',
+          amount: earned,
+          reason: 'call_end',
           displayName: user.name,
         }).catch(() => undefined);
       });
@@ -721,12 +721,19 @@ export function AppProvider({
         notify('Message from Admin', cmd.message || 'Hello from admin.');
       } else if (cmd.type === 'approval' || cmd.type === 'approved') {
         notify('Approved', cmd.message || 'Your host application was approved!');
+      } else if (cmd.type === 'force_update') {
+        notify(
+          'Update required',
+          cmd.message ||
+            'Admin requires a new Host app version. Please update to continue.',
+        );
       }
     });
   }, [endCall, setHostOnline, user.id]);
 
-  // Other hosts keep working — competition feels alive
+  // Other hosts keep working — competition feels alive (dev/demo only)
   useEffect(() => {
+    if (!__DEV__) return;
     const interval = setInterval(() => {
       setHosts((list) => {
         const nextHosts = list.map((h) => {
@@ -905,8 +912,9 @@ export function AppProvider({
     [myRoomId, rooms],
   );
 
-  // Simulate viewers + gifts while host party is live
+  // Simulate viewers + gifts while host party is live (dev/demo only)
   useEffect(() => {
+    if (!__DEV__) return;
     if (!myRoomId || !myRoom?.isLive) return;
 
     const interval = setInterval(() => {

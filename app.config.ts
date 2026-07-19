@@ -1,6 +1,16 @@
-import type { ExpoConfig } from 'expo/config';
+import type { ExpoConfig, ConfigContext } from 'expo/config';
 
-const config: ExpoConfig = {
+const IS_PROD =
+  process.env.EXPO_PUBLIC_APP_ENV === 'production' ||
+  process.env.EAS_BUILD_PROFILE === 'production' ||
+  process.env.NODE_ENV === 'production';
+
+/**
+ * CoinCall Host — Expo config for web + native (EAS AAB / IPA).
+ * Native video uses react-native-agora (requires Dev Client / EAS build, not Expo Go).
+ */
+export default ({ config }: ConfigContext): ExpoConfig => ({
+  ...config,
   name: 'CoinCall Beauty',
   slug: 'coincall-beauty',
   version: '1.0.0',
@@ -8,9 +18,11 @@ const config: ExpoConfig = {
   icon: './assets/icon.png',
   userInterfaceStyle: 'dark',
   scheme: 'coincall',
+  newArchEnabled: true,
   ios: {
     supportsTablet: true,
     bundleIdentifier: 'com.coincall.host',
+    buildNumber: process.env.EAS_BUILD_NUMBER || '1',
     infoPlist: {
       NSCameraUsageDescription:
         'CoinCall Beauty needs camera for host intro video and live calls.',
@@ -18,10 +30,13 @@ const config: ExpoConfig = {
         'CoinCall Beauty needs microphone for intro video and live calls.',
       NSPhotoLibraryUsageDescription:
         'CoinCall Beauty needs photo library for host profile picture and intro video.',
+      UIBackgroundModes: ['audio'],
+      ITSAppUsesNonExemptEncryption: false,
     },
   },
   android: {
     package: 'com.coincall.host',
+    versionCode: Number(process.env.ANDROID_VERSION_CODE || 1),
     adaptiveIcon: {
       backgroundColor: '#1A0F16',
       foregroundImage: './assets/android-icon-foreground.png',
@@ -32,6 +47,11 @@ const config: ExpoConfig = {
       'CAMERA',
       'RECORD_AUDIO',
       'INTERNET',
+      'ACCESS_NETWORK_STATE',
+      'MODIFY_AUDIO_SETTINGS',
+      'BLUETOOTH',
+      'BLUETOOTH_CONNECT',
+      'WAKE_LOCK',
       'POST_NOTIFICATIONS',
       'READ_MEDIA_IMAGES',
       'READ_MEDIA_VIDEO',
@@ -40,8 +60,23 @@ const config: ExpoConfig = {
   },
   web: {
     favicon: './assets/favicon.png',
+    bundler: 'metro',
   },
   plugins: [
+    'expo-dev-client',
+    [
+      'expo-build-properties',
+      {
+        android: {
+          minSdkVersion: 24,
+          compileSdkVersion: 35,
+          targetSdkVersion: 35,
+        },
+        ios: {
+          deploymentTarget: '16.4',
+        },
+      },
+    ],
     [
       'expo-image-picker',
       {
@@ -53,12 +88,23 @@ const config: ExpoConfig = {
           'CoinCall Beauty needs microphone for intro video and calls.',
       },
     ],
+    [
+      'expo-camera',
+      {
+        cameraPermission:
+          'CoinCall Beauty needs camera for host intro and calls.',
+        microphonePermission:
+          'CoinCall Beauty needs microphone for intro video and calls.',
+        recordAudioAndroid: true,
+      },
+    ],
   ],
   extra: {
     eas: {
-      projectId: process.env.EXPO_PUBLIC_EAS_PROJECT_ID ?? '',
+      // Filled by `npx eas init` → also set EXPO_PUBLIC_EAS_PROJECT_ID in .env / EAS secrets
+      projectId: process.env.EXPO_PUBLIC_EAS_PROJECT_ID || undefined,
     },
+    appEnv: IS_PROD ? 'production' : 'development',
   },
-};
-
-export default config;
+  owner: process.env.EXPO_OWNER || undefined,
+});

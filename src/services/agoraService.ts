@@ -6,6 +6,18 @@ export function isAgoraConfigured() {
   return Boolean(env.apiBaseUrl);
 }
 
+/** Stubs so TypeScript resolves shared imports; native override supplies real impl */
+export function getNativeRemoteUid(): number | null {
+  return null;
+}
+
+export function subscribeNativeRemoteUid(
+  listener: (uid: number | null) => void,
+) {
+  listener(null);
+  return () => undefined;
+}
+
 /** Snapchat-style beauty presets — applied to the published video track */
 export type BeautyPreset = 'off' | 'natural' | 'glamour' | 'snap';
 
@@ -173,18 +185,23 @@ async function createMicAndCam(AgoraRTC: any, encoder: string, facingMode?: stri
  */
 export async function startAgoraCall(options: {
   channel: string;
-  localVideoEl: HTMLElement;
-  remoteVideoEl: HTMLElement;
+  localVideoEl?: HTMLElement | null;
+  remoteVideoEl?: HTMLElement | null;
   uid?: number;
   token?: string;
   appId?: string;
   beauty?: BeautyPreset;
 }) {
   if (Platform.OS !== 'web') {
-    throw new Error('Phone video needs a Dev Build. Use web for live calls.');
+    throw new Error(
+      'Native video uses agoraService.native — rebuild with EAS Dev Client.',
+    );
   }
   if (!apiRoot()) {
     throw new Error('Missing API base URL for Agora token');
+  }
+  if (!options.localVideoEl || !options.remoteVideoEl) {
+    throw new Error('Video surfaces not ready');
   }
 
   await stopAgoraCall();

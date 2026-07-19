@@ -25,6 +25,8 @@ import { useTheme } from '../theme/ThemeContext';
 import { AuthNavigator } from './AuthNavigator';
 import { MainTabNavigator } from './MainTabNavigator';
 import type { RootStackParamList } from './types';
+import { useHostForceUpdate } from '../hooks/useHostForceUpdate';
+import { ForceUpdateScreen } from '../screens/system/ForceUpdateScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -86,6 +88,7 @@ function AuthenticatedApp() {
 export function RootNavigator() {
   const { isAuthenticated, isHostApproved, authReady } = useAuth();
   const { colors, isDark } = useTheme();
+  const { ready: updateReady, blocked, config } = useHostForceUpdate();
 
   const navTheme = {
     ...(isDark ? DarkTheme : DefaultTheme),
@@ -99,8 +102,13 @@ export function RootNavigator() {
     },
   };
 
-  if (!authReady) {
+  if (!authReady || !updateReady) {
     return <SplashScreen />;
+  }
+
+  // Admin force-update blocks the entire host app until they install
+  if (blocked && config) {
+    return <ForceUpdateScreen config={config} />;
   }
 
   return (

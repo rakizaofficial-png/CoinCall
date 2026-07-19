@@ -19,6 +19,7 @@ import {
   registerAgencyRoutes,
 } from './agencyManagement.ts';
 import { registerVideoLibraryRoutes } from './videoLibrary.ts';
+import { registerHostAppUpdateRoutes } from './hostAppUpdate.ts';
 import {
   loadWalletSnapshot,
   saveWalletSnapshot,
@@ -2374,6 +2375,8 @@ function broadcastWs(event: unknown) {
 registerHostManagementRoutes(app, { requireAdmin, broadcastWs });
 
 registerVideoLibraryRoutes(app, { requireAdmin });
+
+registerHostAppUpdateRoutes(app, { requireAdmin, broadcastWs });
 
 registerAgencyRoutes(app, {
   requireAdmin,

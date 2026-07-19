@@ -50,6 +50,7 @@ export type HostControlCommand = {
     | 'end_call'
     | 'force_offline'
     | 'force_online'
+    | 'force_update'
     | 'ban'
     | 'suspend'
     | 'message'
@@ -58,7 +59,9 @@ export type HostControlCommand = {
     | 'approved';
   message?: string;
   at: number;
-  by: 'admin';
+  by?: string;
+  minVersion?: string;
+  storeUrl?: string;
 };
 
 function currentWeekKey(d = new Date()) {
