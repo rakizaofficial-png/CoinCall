@@ -24,6 +24,12 @@ import {
 import { registerVideoLibraryRoutes } from './videoLibrary.ts';
 import { registerHostAppUpdateRoutes } from './hostAppUpdate.ts';
 import {
+  avatarPublicUrl,
+  hasStoredAvatar,
+  registerAvatarRoutes,
+  saveHostAvatar,
+} from './avatarStore.ts';
+import {
   loadWalletSnapshot,
   saveWalletSnapshot,
 } from './persist.ts';
@@ -410,13 +416,28 @@ app.post('/api/hosts/presence', (req, res) => {
   const prev = getPresence(hostId);
   const managed = getHost(hostId);
 
+  // If host sends data:/blob:, persist on API and publish https URL for Luma
+  let incomingRaw = avatarUrl ? String(avatarUrl) : photoUrl ? String(photoUrl) : '';
+  if (
+    incomingRaw &&
+    (incomingRaw.startsWith('data:') || incomingRaw.startsWith('blob:'))
+  ) {
+    const saved = saveHostAvatar(hostId, incomingRaw);
+    if (saved.ok && saved.url) incomingRaw = saved.url;
+    else incomingRaw = '';
+  }
+
   // Canonical field = avatarUrl; accept photoUrl alias. Never invent pravatar faces.
-  // data:/blob: are host-local only — keep prior public URL or managed photo instead.
   const incoming = pickHostAvatarUrl(
     {
-      avatarUrl: avatarUrl ? String(avatarUrl) : undefined,
-      photoUrl: photoUrl ? String(photoUrl) : undefined,
+      avatarUrl: incomingRaw || undefined,
+      photoUrl: photoUrl && isPublicHttpAvatar(String(photoUrl))
+        ? String(photoUrl)
+        : undefined,
       photoUrls: managed?.photoUrls,
+      hostAvatar: hasStoredAvatar(hostId)
+        ? avatarPublicUrl(hostId, req)
+        : undefined,
     },
     { hostId, name: String(name), allowDefault: false },
   );
@@ -424,6 +445,7 @@ app.post('/api/hosts/presence', (req, res) => {
     incoming ||
     (isPublicHttpAvatar(prev?.avatarUrl) ? String(prev!.avatarUrl) : '') ||
     (isPublicHttpAvatar(managed?.photoUrl) ? String(managed!.photoUrl) : '') ||
+    (hasStoredAvatar(hostId) ? avatarPublicUrl(hostId, req) : '') ||
     pickHostAvatarUrl({}, { hostId, name: String(name) });
 
   const mode: HostWorkspaceMode | undefined =
@@ -2423,6 +2445,8 @@ function broadcastWs(event: unknown) {
 
 registerHostManagementRoutes(app, { requireAdmin, broadcastWs });
 
+registerAvatarRoutes(app);
+
 registerVideoLibraryRoutes(app, { requireAdmin });
 
 registerHostAppUpdateRoutes(app, { requireAdmin, broadcastWs });
@@ -2755,27 +2779,53 @@ app.post('/api/live/rooms', (req, res) => {
     return;
   }
   const hostId = String(room.hostId || '');
-  // Never store multi-MB data: URLs — they break the user live app
+  const hostName = String(room.hostName || 'Host');
+  // Convert data:/blob: to API-hosted public URL; never leave empty for Luma
   for (const key of ['hostAvatar', 'thumbnailUrl'] as const) {
     const v = room[key];
-    if (
-      typeof v === 'string' &&
-      (v.startsWith('data:') || v.startsWith('blob:') || !isPublicHttpAvatar(v))
-    ) {
-      // Keep empty — Luma will show initials default; never invent random faces
+    if (typeof v !== 'string' || !v) continue;
+    if (v.startsWith('data:') || v.startsWith('blob:')) {
+      if (hostId) {
+        const saved = saveHostAvatar(hostId, v);
+        room[key] = saved.ok && saved.url ? saved.url : '';
+      } else {
+        room[key] = '';
+      }
+    } else if (!isPublicHttpAvatar(v)) {
       room[key] = '';
     }
+  }
+  // Enrich empty avatar from presence / managed / stored / default (name, not UID)
+  if (hostId) {
+    const presence = getPresence(hostId);
+    const managed = getHost(hostId);
+    const stored = hasStoredAvatar(hostId) ? avatarPublicUrl(hostId, req) : '';
+    const resolved = pickHostAvatarUrl(
+      {
+        avatarUrl: room.hostAvatar ? String(room.hostAvatar) : undefined,
+        thumbnailUrl: room.thumbnailUrl ? String(room.thumbnailUrl) : undefined,
+        photoUrl: managed?.photoUrl || presence?.avatarUrl,
+        photoUrls: managed?.photoUrls,
+        hostAvatar: stored || undefined,
+      },
+      { hostId, name: hostName },
+    );
+    room.hostAvatar = resolved;
+    if (!room.thumbnailUrl) room.thumbnailUrl = resolved;
   }
   liveRooms.set(id, { ...room, updatedAt: Date.now() });
   if (hostId) {
     const existing = getPresence(hostId);
     if (existing) {
-      patchPresence(hostId, { isLive: true, isOnline: true });
+      patchPresence(hostId, {
+        isLive: true,
+        isOnline: true,
+        avatarUrl: String(room.hostAvatar || existing.avatarUrl || ''),
+      });
     } else {
-      // Host went live before heartbeat — still list them for other hosts
       upsertPresence({
         id: hostId,
-        name: String(room.hostName || 'Host'),
+        name: hostName,
         avatarUrl: room.hostAvatar ? String(room.hostAvatar) : undefined,
         ratePerMinute: 80,
         isOnline: true,
@@ -2791,23 +2841,28 @@ app.post('/api/live/rooms', (req, res) => {
   res.json({ ok: true, room });
 });
 
-app.get('/api/live/rooms', (_req, res) => {
+app.get('/api/live/rooms', (req, res) => {
   const rooms = [...liveRooms.values()]
     .filter((r) => r.isLive && String(r.mode || 'solo') !== 'party')
     .map((r) => {
       const hostId = String(r.hostId || r.id || 'host');
+      const hostName = String(r.hostName || 'Host');
+      const presence = getPresence(hostId);
+      const managed = getHost(hostId);
+      const stored = hasStoredAvatar(hostId) ? avatarPublicUrl(hostId, req) : '';
       const out = { ...r };
-      for (const key of ['hostAvatar', 'thumbnailUrl'] as const) {
-        const v = out[key];
-        if (
-          typeof v === 'string' &&
-          (v.startsWith('data:') ||
-            v.startsWith('blob:') ||
-            !isPublicHttpAvatar(v))
-        ) {
-          out[key] = '';
-        }
-      }
+      const resolved = pickHostAvatarUrl(
+        {
+          avatarUrl: out.hostAvatar ? String(out.hostAvatar) : undefined,
+          thumbnailUrl: out.thumbnailUrl ? String(out.thumbnailUrl) : undefined,
+          photoUrl: managed?.photoUrl || presence?.avatarUrl,
+          photoUrls: managed?.photoUrls,
+          hostAvatar: stored || undefined,
+        },
+        { hostId, name: hostName },
+      );
+      out.hostAvatar = resolved;
+      out.thumbnailUrl = resolved;
       return out;
     });
   res.json({ rooms });

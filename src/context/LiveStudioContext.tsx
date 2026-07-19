@@ -356,15 +356,26 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
 
   const startSoloLive = useCallback(async () => {
     const id = `live_${user.id}`;
+    let publicAvatar = user.avatarUrl || user.photoUrl || '';
+    try {
+      const { ensurePublicAvatarUrl } = await import('../services/mediaUploadService');
+      const { isPublicHttpAvatar } = await import('../utils/hostAvatar');
+      if (publicAvatar && !isPublicHttpAvatar(publicAvatar)) {
+        const uploaded = await ensurePublicAvatarUrl(user.id, publicAvatar);
+        if (uploaded) publicAvatar = uploaded;
+      }
+    } catch {
+      /* keep local — API may convert data: on receive */
+    }
     const room: LiveRoom = {
       id,
       hostId: user.id,
       hostName: user.name,
-      hostAvatar: user.avatarUrl,
+      hostAvatar: publicAvatar,
       title: goLiveDraft.title.trim() || `${user.name}'s Live`,
       category: goLiveDraft.category,
       language: goLiveDraft.language,
-      thumbnailUrl: goLiveDraft.thumbnailUrl || user.avatarUrl,
+      thumbnailUrl: goLiveDraft.thumbnailUrl || publicAvatar,
       channel: `live_${user.id}`,
       viewers: 1,
       likes: 0,
@@ -389,31 +400,48 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
       isLive: true,
       isOnCall: false,
       name: user.name,
-      avatarUrl: user.avatarUrl,
+      avatarUrl: publicAvatar,
     });
     setBridgeLive(true);
     await publishHostPresence({
       id: user.id,
       name: user.name,
-      avatarUrl: user.avatarUrl || user.photoUrl,
-      photoUrl: user.photoUrl || user.avatarUrl,
+      avatarUrl: publicAvatar,
+      photoUrl: publicAvatar,
       country: user.country,
-      ratePerMinute: 60,
+      ratePerMinute: 80,
       isOnline: true,
       isLive: true,
       isOnCall: false,
       workspaceMode: 'waiting_1v1',
     }).catch(() => undefined);
-    await postRoomComment(room.id, {
-      userId: 'system',
-      userName: 'System',
-      text: `${user.name} started the live`,
-      createdAt: Date.now(),
-      kind: 'system',
-    });
-    notify('You are LIVE', 'Your room is now visible in Live.');
+    try {
+      await postRoomComment(room.id, {
+        userId: 'system',
+        userName: 'System',
+        text: `${user.name} started the live`,
+        createdAt: Date.now(),
+        kind: 'system',
+      });
+    } catch {
+      /* optional */
+    }
+    notify('You are Live', 'Luma users can join your stream now.');
     return room;
-  }, [goLiveDraft, setHostOnline, user]);
+  }, [
+    goLiveDraft.category,
+    goLiveDraft.language,
+    goLiveDraft.thumbnailUrl,
+    goLiveDraft.title,
+    setHostOnline,
+    user.avatarUrl,
+    user.country,
+    user.id,
+    user.isVerified,
+    user.level,
+    user.name,
+    user.photoUrl,
+  ]);
 
   const startPartyLive = useCallback(async () => {
     const seats = emptySeats();

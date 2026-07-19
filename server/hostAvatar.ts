@@ -25,8 +25,11 @@ export function isPublicHttpAvatar(url?: string | null): boolean {
 }
 
 export function defaultHostAvatar(hostId: string, name?: string): string {
+  const fromName = String(name || '')
+    .replace(/[^a-zA-Z\u00C0-\u024F\s]/g, '')
+    .trim();
   const label = encodeURIComponent(
-    (name || hostId || 'H').trim().slice(0, 2).toUpperCase() || 'H',
+    (fromName || 'H').slice(0, 2).toUpperCase() || 'H',
   );
   return `https://ui-avatars.com/api/?name=${label}&background=1a1520&color=f5f0ea&size=512&bold=true`;
 }

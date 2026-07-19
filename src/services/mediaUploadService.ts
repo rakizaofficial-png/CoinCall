@@ -139,7 +139,7 @@ export async function tryUploadToStorage(input: {
 
 /**
  * Ensure a URL Luma can load. Prefer Firebase Storage https;
- * never return data:/blob: for presence / cross-app use.
+ * fall back to CoinCall API avatar store; never return data:/blob:.
  */
 export async function ensurePublicAvatarUrl(
   hostUid: string,
@@ -147,12 +147,37 @@ export async function ensurePublicAvatarUrl(
 ): Promise<string | null> {
   if (!uri) return null;
   if (isPublicHttpAvatar(uri)) return uri.trim();
+
   const remote = await tryUploadToStorage({
     hostUid,
     uri,
     pathSuffix: `avatar_${Date.now()}.jpg`,
   });
-  return remote && isPublicHttpAvatar(remote) ? remote : null;
+  if (remote && isPublicHttpAvatar(remote)) return remote;
+
+  // Firebase often fails on web — host the JPEG on coincall-api instead
+  try {
+    const base = env.apiBaseUrl.replace(/\/$/, '');
+    const prepared = await prepareLocalPhotoUrl(uri);
+    const res = await fetch(`${base}/hosts/${encodeURIComponent(hostUid)}/avatar`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-User-Id': hostUid,
+      },
+      body: JSON.stringify({ image: prepared }),
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      avatarUrl?: string;
+      error?: string;
+    };
+    if (res.ok && data.avatarUrl && isPublicHttpAvatar(data.avatarUrl)) {
+      return data.avatarUrl;
+    }
+  } catch (e) {
+    console.warn('[mediaUpload] API avatar upload failed', e);
+  }
+  return null;
 }
 
 export type UploadProgressStage = 'photos' | 'video' | 'id' | 'selfie' | 'done';
