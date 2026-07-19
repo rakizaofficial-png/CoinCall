@@ -331,7 +331,8 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
       void publishHostPresence({
         id: user.id,
         name: user.name,
-        avatarUrl: user.avatarUrl,
+        avatarUrl: user.avatarUrl || user.photoUrl,
+        photoUrl: user.photoUrl || user.avatarUrl,
         country: user.country,
         ratePerMinute: 60,
         isOnline: true,
@@ -394,7 +395,8 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
     await publishHostPresence({
       id: user.id,
       name: user.name,
-      avatarUrl: user.avatarUrl,
+      avatarUrl: user.avatarUrl || user.photoUrl,
+      photoUrl: user.photoUrl || user.avatarUrl,
       country: user.country,
       ratePerMinute: 60,
       isOnline: true,
@@ -464,7 +466,8 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
     void publishHostPresence({
       id: user.id,
       name: user.name,
-      avatarUrl: user.avatarUrl,
+      avatarUrl: user.avatarUrl || user.photoUrl,
+      photoUrl: user.photoUrl || user.avatarUrl,
       country: user.country,
       ratePerMinute: 60,
       isOnline: true,
@@ -504,7 +507,8 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
     void publishHostPresence({
       id: user.id,
       name: user.name,
-      avatarUrl: user.avatarUrl,
+      avatarUrl: user.avatarUrl || user.photoUrl,
+      photoUrl: user.photoUrl || user.avatarUrl,
       country: user.country,
       ratePerMinute: 80,
       isOnline: true,

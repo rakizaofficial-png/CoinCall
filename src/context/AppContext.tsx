@@ -221,7 +221,8 @@ export function AppProvider({
       ...u,
       id: authId,
       name: initialUser.name || u.name,
-      avatarUrl: initialUser.avatarUrl || u.avatarUrl,
+      avatarUrl: initialUser.avatarUrl || initialUser.photoUrl || u.avatarUrl,
+      photoUrl: initialUser.photoUrl || initialUser.avatarUrl || u.photoUrl,
       hostId: initialUser.hostId || u.hostId,
       country: initialUser.country || u.country,
       hostStatus: initialUser.hostStatus || u.hostStatus,
@@ -233,6 +234,7 @@ export function AppProvider({
     initialUser?.id,
     initialUser?.name,
     initialUser?.avatarUrl,
+    initialUser?.photoUrl,
     initialUser?.hostId,
     initialUser?.country,
     initialUser?.hostStatus,
@@ -401,7 +403,8 @@ export function AppProvider({
     void publishHostPresence({
       id: user.id,
       name: user.name,
-      avatarUrl: user.avatarUrl,
+      avatarUrl: user.avatarUrl || user.photoUrl,
+      photoUrl: user.photoUrl || user.avatarUrl,
       country: user.country,
       ratePerMinute: 80,
       isOnline: v,
@@ -432,7 +435,7 @@ export function AppProvider({
           : 'You will not receive new calls until you go online again.',
       );
     }
-  }, [user.avatarUrl, user.country, user.id, user.name]);
+  }, [user.avatarUrl, user.photoUrl, user.country, user.id, user.name]);
 
   // Heartbeat + SSE so Luma users can find & ring this host
   useEffect(() => {
@@ -442,7 +445,8 @@ export function AppProvider({
       void publishHostPresence({
         id: user.id,
         name: user.name,
-        avatarUrl: user.avatarUrl,
+        avatarUrl: user.avatarUrl || user.photoUrl,
+        photoUrl: user.photoUrl || user.avatarUrl,
         country: user.country,
         ratePerMinute: 80,
         isOnline: true,
@@ -470,6 +474,7 @@ export function AppProvider({
     hostOnline,
     incomingBridgeCall,
     user.avatarUrl,
+    user.photoUrl,
     user.country,
     user.id,
     user.name,

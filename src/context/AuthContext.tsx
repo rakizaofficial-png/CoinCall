@@ -17,7 +17,8 @@ import {
   listenAuth,
   submitHostApplicationToFirebase,
 } from '../services/authService';
-import { uploadHostApplicationMedia } from '../services/mediaUploadService';
+import { uploadHostApplicationMedia, ensurePublicAvatarUrl } from '../services/mediaUploadService';
+import { isPublicHttpAvatar } from '../utils/hostAvatar';
 import {
   confirmPhoneOtp,
   sendPhoneOtp,
@@ -110,7 +111,7 @@ function createMockUser(
     gems: 0,
     level: 1,
     isVerified: false,
-    avatarUrl: `https://i.pravatar.cc/300?u=${encodeURIComponent(partial.name)}`,
+    avatarUrl: '',
     isOnline: false,
     hostStatus: 'none',
     appId: String(Math.floor(100000 + Math.random() * 900000)),
@@ -278,21 +279,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           },
           (stage) => onStage?.(stage),
         ),
-        15_000,
+        45_000,
         'Media prepare',
       );
       const photos = uploaded.photoUrls;
       if (!photos.length) throw new Error('Photo upload failed. Try another image.');
+      // Prefer public https so Luma can show the real DP (never data:/blob:)
+      let mainPhoto = photos[0];
+      if (!isPublicHttpAvatar(mainPhoto)) {
+        const published = await ensurePublicAvatarUrl(user.id, mainPhoto);
+        if (published) mainPhoto = published;
+      }
       const videoUrl = uploaded.videoUrl || '';
 
       const patch: User = {
         ...user,
         name: input.name.trim(),
         country: input.country.trim(),
-        photoUrl: photos[0],
-        photoUrls: photos,
+        photoUrl: mainPhoto,
+        photoUrls: [mainPhoto],
         videoUrl: videoUrl || undefined,
-        avatarUrl: photos[0],
+        avatarUrl: mainPhoto,
         hostId,
         hostStatus: 'pending',
         applicationSubmittedAt: Date.now(),
@@ -312,7 +319,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (usingFirebase) {
         try {
           // Prefer compact avatar for RTDB; avoid huge multi-photo payloads
-          const mainPhoto = photos[0];
+          const mainPhoto = patch.avatarUrl;
           await withTimeout(
             submitHostApplicationToFirebase(user.id, {
               name: patch.name,

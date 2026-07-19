@@ -1,4 +1,9 @@
 import { env } from '../config/env';
+import { isPublicHttpAvatar } from '../utils/hostAvatar';
+import { ensurePublicAvatarUrl } from './mediaUploadService';
+
+/** Cache public https avatars so heartbeats don't re-upload every 8s */
+const publicAvatarCache = new Map<string, string>();
 
 export type BridgeHost = {
   id: string;
@@ -55,6 +60,7 @@ export async function publishHostPresence(input: {
   id: string;
   name: string;
   avatarUrl?: string;
+  photoUrl?: string;
   country?: string;
   ratePerMinute?: number;
   isOnline: boolean;
@@ -62,14 +68,24 @@ export async function publishHostPresence(input: {
   isOnCall?: boolean;
   workspaceMode?: 'waiting_1v1' | 'solo_calling';
 }) {
-  let avatarUrl = input.avatarUrl;
-  if (
-    avatarUrl &&
-    (avatarUrl.startsWith('data:') ||
-      avatarUrl.startsWith('blob:') ||
-      avatarUrl.length > 500)
-  ) {
-    avatarUrl = undefined;
+  const candidate = input.avatarUrl || input.photoUrl || '';
+  let avatarUrl: string | undefined;
+
+  if (isPublicHttpAvatar(candidate)) {
+    avatarUrl = candidate.trim();
+    publicAvatarCache.set(input.id, avatarUrl);
+  } else if (publicAvatarCache.has(input.id)) {
+    avatarUrl = publicAvatarCache.get(input.id);
+  } else if (candidate && input.isOnline) {
+    try {
+      const uploaded = await ensurePublicAvatarUrl(input.id, candidate);
+      if (uploaded) {
+        avatarUrl = uploaded;
+        publicAvatarCache.set(input.id, uploaded);
+      }
+    } catch {
+      /* server may reuse prior presence / managed photo */
+    }
   }
 
   const res = await fetch(`${base()}/hosts/presence`, {
@@ -82,6 +98,7 @@ export async function publishHostPresence(input: {
       workspaceMode: 'waiting_1v1',
       ...input,
       avatarUrl,
+      photoUrl: avatarUrl,
     }),
   });
   if (!res.ok) {

@@ -7,9 +7,11 @@ import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import {
   assertHostCanReceiveCalls,
+  getHost,
   listHosts,
   registerHostManagementRoutes,
 } from './hostManagement.ts';
+import { isPublicHttpAvatar, pickHostAvatarUrl } from './hostAvatar.ts';
 import {
   getAgencyIdForHost,
   getAgency,
@@ -370,6 +372,7 @@ app.post('/api/hosts/presence', (req, res) => {
     id,
     name,
     avatarUrl,
+    photoUrl,
     country,
     ratePerMinute,
     isOnline = true,
@@ -403,16 +406,24 @@ app.post('/api/hosts/presence', (req, res) => {
     return;
   }
 
-  // blob: / data: avatars only work inside the host browser — drop them for Luma
-  let safeAvatar = avatarUrl ? String(avatarUrl) : undefined;
-  if (
-    safeAvatar &&
-    (safeAvatar.startsWith('blob:') ||
-      safeAvatar.startsWith('data:') ||
-      safeAvatar.length > 500)
-  ) {
-    safeAvatar = undefined;
-  }
+  const prev = getPresence(hostId);
+  const managed = getHost(hostId);
+
+  // Canonical field = avatarUrl; accept photoUrl alias. Never invent pravatar faces.
+  // data:/blob: are host-local only — keep prior public URL or managed photo instead.
+  const incoming = pickHostAvatarUrl(
+    {
+      avatarUrl: avatarUrl ? String(avatarUrl) : undefined,
+      photoUrl: photoUrl ? String(photoUrl) : undefined,
+      photoUrls: managed?.photoUrls,
+    },
+    { hostId, name: String(name), allowDefault: false },
+  );
+  const safeAvatar =
+    incoming ||
+    (isPublicHttpAvatar(prev?.avatarUrl) ? String(prev!.avatarUrl) : '') ||
+    (isPublicHttpAvatar(managed?.photoUrl) ? String(managed!.photoUrl) : '') ||
+    undefined;
 
   const mode: HostWorkspaceMode | undefined =
     workspaceMode === 'solo_calling' || workspaceMode === 'waiting_1v1'
@@ -422,9 +433,7 @@ app.post('/api/hosts/presence', (req, res) => {
   const record: HostPresence = {
     id: hostId,
     name: String(name),
-    avatarUrl:
-      safeAvatar ||
-      `https://i.pravatar.cc/150?u=${encodeURIComponent(hostId)}`,
+    avatarUrl: safeAvatar,
     country: country ? String(country) : undefined,
     ratePerMinute: Number(ratePerMinute) || 80,
     isOnline: true,
@@ -438,11 +447,20 @@ app.post('/api/hosts/presence', (req, res) => {
   record.readyToCall = computeReadyToCall(record);
   upsertPresence(record);
 
+  // Keep admin registry photo in sync when host publishes a live https DP
+  if (safeAvatar && managed && managed.photoUrl !== safeAvatar) {
+    managed.photoUrl = safeAvatar;
+    managed.photoUrls = [safeAvatar];
+    managed.updatedAt = Date.now();
+  }
+
   broadcastWs({
     type: 'host:presence',
     payload: {
       id: record.id,
       name: record.name,
+      avatarUrl: record.avatarUrl,
+      photoUrl: record.avatarUrl,
       isOnline: record.isOnline,
       isLive: record.isLive,
       isOnCall: record.isOnCall,
@@ -2709,8 +2727,12 @@ app.post('/api/live/rooms', (req, res) => {
   // Never store multi-MB data: URLs — they break the user live app
   for (const key of ['hostAvatar', 'thumbnailUrl'] as const) {
     const v = room[key];
-    if (typeof v === 'string' && (v.startsWith('data:') || v.startsWith('blob:') || v.length > 2000)) {
-      room[key] = `https://i.pravatar.cc/400?u=${encodeURIComponent(hostId || id)}`;
+    if (
+      typeof v === 'string' &&
+      (v.startsWith('data:') || v.startsWith('blob:') || !isPublicHttpAvatar(v))
+    ) {
+      // Keep empty — Luma will show initials default; never invent random faces
+      room[key] = '';
     }
   }
   liveRooms.set(id, { ...room, updatedAt: Date.now() });
@@ -2748,9 +2770,11 @@ app.get('/api/live/rooms', (_req, res) => {
         const v = out[key];
         if (
           typeof v === 'string' &&
-          (v.startsWith('data:') || v.startsWith('blob:') || v.length > 2000)
+          (v.startsWith('data:') ||
+            v.startsWith('blob:') ||
+            !isPublicHttpAvatar(v))
         ) {
-          out[key] = `https://i.pravatar.cc/400?u=${encodeURIComponent(hostId)}`;
+          out[key] = '';
         }
       }
       return out;
@@ -2775,9 +2799,11 @@ app.get('/api/live/rooms/:id', (req, res) => {
     const v = out[key];
     if (
       typeof v === 'string' &&
-      (v.startsWith('data:') || v.startsWith('blob:') || v.length > 2000)
+      (v.startsWith('data:') ||
+        v.startsWith('blob:') ||
+        !isPublicHttpAvatar(v))
     ) {
-      out[key] = `https://i.pravatar.cc/400?u=${encodeURIComponent(hostId)}`;
+      out[key] = '';
     }
   }
   res.json({

@@ -1,11 +1,11 @@
 /**
- * Host apply media — local-first (no Storage wait).
- * Firebase Storage often hangs on localhost CORS; we compress photos to
- * small data URLs so submit always completes in a few seconds.
+ * Host apply media — compress locally, then upload to Firebase Storage
+ * so Luma / the presence API receive a public https avatarUrl (not data:).
  */
 import { getDownloadURL, ref as storageRef, uploadBytes } from 'firebase/storage';
 import { env } from '../config/env';
 import { getFirebaseStorage, isFirebaseReady } from '../lib/firebase';
+import { isPublicHttpAvatar } from '../utils/hostAvatar';
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -53,15 +53,12 @@ async function compressToJpegDataUrl(
   quality = 0.62,
 ): Promise<string> {
   if (typeof document === 'undefined') {
-    // Native: keep original URI (no canvas). Storage optional later.
-    return URL.createObjectURL
-      ? await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(String(reader.result || ''));
-          reader.onerror = () => reject(new Error('encode failed'));
-          reader.readAsDataURL(blob);
-        })
-      : '';
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(new Error('encode failed'));
+      reader.readAsDataURL(blob);
+    });
   }
 
   const bitmap = await createImageBitmap(blob);
@@ -87,7 +84,6 @@ async function compressToJpegDataUrl(
     );
   });
 
-  // Keep under ~700KB for RTDB-friendly payloads
   if (out.size > 700_000 && quality > 0.45) {
     return compressToJpegDataUrl(out, Math.min(maxEdge, 720), quality - 0.15);
   }
@@ -100,48 +96,63 @@ async function compressToJpegDataUrl(
   });
 }
 
-/** Fast local photo URL — never waits on Firebase Storage. */
+/** Local preview URL (may be data:) — for in-app display only. */
 export async function prepareLocalPhotoUrl(uri: string): Promise<string> {
   if (!uri) throw new Error('Photo is required');
-  if (uri.startsWith('http://') || uri.startsWith('https://') || uri.startsWith('data:')) {
+  if (isPublicHttpAvatar(uri) || uri.startsWith('data:')) {
     return uri;
   }
   try {
     const blob = await withTimeout(uriToBlob(uri), 10_000, 'Reading photo');
     return await withTimeout(compressToJpegDataUrl(blob), 12_000, 'Compressing photo');
   } catch {
-    // Last resort: keep picker URI so apply still works in-session
     return uri;
   }
 }
 
-/** Optional Storage upload — short timeout, never blocks apply. */
+/** Upload any local/data URI to Firebase Storage → public https URL. */
 export async function tryUploadToStorage(input: {
   hostUid: string;
   uri: string;
   pathSuffix: string;
 }): Promise<string | null> {
   if (!isFirebaseReady() || !env.firebase.storageBucket) return null;
-  if (input.uri.startsWith('http://') || input.uri.startsWith('https://')) {
-    return input.uri;
-  }
-  if (input.uri.startsWith('data:')) return null; // already embedded
+  if (isPublicHttpAvatar(input.uri)) return input.uri.trim();
 
   try {
-    const blob = await withTimeout(uriToBlob(input.uri), 8_000, 'Read');
+    const blob = await withTimeout(uriToBlob(input.uri), 12_000, 'Read');
     const ref = storageRef(
       getFirebaseStorage(),
       `hosts/${input.hostUid}/${input.pathSuffix}`,
     );
     await withTimeout(
       uploadBytes(ref, blob, { contentType: blob.type || 'image/jpeg' }),
-      8_000,
+      20_000,
       'Storage',
     );
-    return await withTimeout(getDownloadURL(ref), 6_000, 'URL');
-  } catch {
+    return await withTimeout(getDownloadURL(ref), 10_000, 'URL');
+  } catch (e) {
+    console.warn('[mediaUpload] Storage upload failed', e);
     return null;
   }
+}
+
+/**
+ * Ensure a URL Luma can load. Prefer Firebase Storage https;
+ * never return data:/blob: for presence / cross-app use.
+ */
+export async function ensurePublicAvatarUrl(
+  hostUid: string,
+  uri: string,
+): Promise<string | null> {
+  if (!uri) return null;
+  if (isPublicHttpAvatar(uri)) return uri.trim();
+  const remote = await tryUploadToStorage({
+    hostUid,
+    uri,
+    pathSuffix: `avatar_${Date.now()}.jpg`,
+  });
+  return remote && isPublicHttpAvatar(remote) ? remote : null;
 }
 
 export type UploadProgressStage = 'photos' | 'video' | 'id' | 'selfie' | 'done';
@@ -164,11 +175,11 @@ export async function uploadHostApplicationMedia(
   onStage?.('photos');
   const photoUrls: string[] = [];
   for (let i = 0; i < input.photoUris.length; i += 1) {
-    // Local compress only — Storage is skipped so apply never hangs on CORS
-    photoUrls.push(await prepareLocalPhotoUrl(input.photoUris[i]));
+    const local = await prepareLocalPhotoUrl(input.photoUris[i]);
+    const publicUrl = await ensurePublicAvatarUrl(input.hostUid, local);
+    photoUrls.push(publicUrl || local);
   }
 
-  // Optional video: skip Storage entirely (often hangs). Apply without video.
   let videoUrl = '';
   if (input.videoUri?.trim()) {
     onStage?.('video');
@@ -179,11 +190,14 @@ export async function uploadHostApplicationMedia(
   let selfieUrl: string | undefined;
   if (input.idDocumentUri) {
     onStage?.('id');
-    idDocumentUrl = await prepareLocalPhotoUrl(input.idDocumentUri);
+    const local = await prepareLocalPhotoUrl(input.idDocumentUri);
+    idDocumentUrl =
+      (await ensurePublicAvatarUrl(input.hostUid, local)) || local;
   }
   if (input.selfieUri) {
     onStage?.('selfie');
-    selfieUrl = await prepareLocalPhotoUrl(input.selfieUri);
+    const local = await prepareLocalPhotoUrl(input.selfieUri);
+    selfieUrl = (await ensurePublicAvatarUrl(input.hostUid, local)) || local;
   }
 
   onStage?.('done');
@@ -208,10 +222,6 @@ export async function uploadHostMedia(input: {
     );
   }
   const local = await prepareLocalPhotoUrl(input.uri);
-  const remote = await tryUploadToStorage({
-    hostUid: input.hostUid,
-    uri: input.uri,
-    pathSuffix: `${input.folder || 'photos'}/file_${input.index ?? 0}_${Date.now()}.jpg`,
-  });
+  const remote = await ensurePublicAvatarUrl(input.hostUid, local);
   return remote || local;
 }

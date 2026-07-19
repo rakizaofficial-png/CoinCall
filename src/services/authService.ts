@@ -27,7 +27,10 @@ function mapHostUser(uid: string, data: Record<string, unknown>, fallbackName: s
     avatarUrl: String(
       data.photoUrl ||
         data.avatarUrl ||
-        `https://i.pravatar.cc/300?u=${encodeURIComponent(uid)}`,
+        (Array.isArray(data.photoUrls) && data.photoUrls[0]
+          ? data.photoUrls[0]
+          : '') ||
+        '',
     ),
     isOnline: Boolean(data.isOnline ?? false),
     hostId: data.hostId ? String(data.hostId) : undefined,
@@ -79,7 +82,7 @@ function blankHostProfile(uid: string, name: string, email?: string): User {
     gems: 0,
     level: 1,
     isVerified: false,
-    avatarUrl: `https://i.pravatar.cc/300?u=${encodeURIComponent(uid)}`,
+    avatarUrl: '',
     isOnline: false,
     hostStatus: 'none',
     appId,

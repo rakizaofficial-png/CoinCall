@@ -16,7 +16,15 @@ const EMPTY_PERMS: AgencyPerms = {
   canMonitor: false,
 };
 
-export function AgenciesPanel({ limited }: { limited?: boolean }) {
+export function AgenciesPanel({
+  limited,
+  onOpenHosts,
+  onOpenRevenue,
+}: {
+  limited?: boolean;
+  onOpenHosts?: () => void;
+  onOpenRevenue?: () => void;
+}) {
   const [rows, setRows] = useState<Agency[]>([]);
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
@@ -27,9 +35,8 @@ export function AgenciesPanel({ limited }: { limited?: boolean }) {
     email: '',
     commissionPercent: '30',
   });
-  const [permTarget, setPermTarget] = useState<Agency | null>(null);
+  const [manageTarget, setManageTarget] = useState<Agency | null>(null);
   const [perms, setPerms] = useState<AgencyPerms>(EMPTY_PERMS);
-  const [cutTarget, setCutTarget] = useState<Agency | null>(null);
   const [cutValue, setCutValue] = useState('30');
 
   const load = useCallback(async () => {
@@ -98,24 +105,30 @@ export function AgenciesPanel({ limited }: { limited?: boolean }) {
   }
 
   async function savePerms() {
-    if (!permTarget) return;
-    await updateAgency(permTarget.id, { permissions: perms });
-    setMsg(`Permissions updated · ${permTarget.name}`);
-    setPermTarget(null);
+    if (!manageTarget) return;
+    await updateAgency(manageTarget.id, { permissions: perms });
+    setMsg(`Permissions updated · ${manageTarget.name}`);
+    setManageTarget(null);
     await load();
   }
 
   async function saveCut() {
-    if (!cutTarget) return;
+    if (!manageTarget) return;
     const n = Number(cutValue);
     if (!Number.isFinite(n) || n < 0 || n > 80) {
       setMsg('Commission must be 0–80');
       return;
     }
-    await updateAgency(cutTarget.id, { commissionPercent: n });
-    setMsg(`Commission → ${n}% · ${cutTarget.name}`);
-    setCutTarget(null);
+    await updateAgency(manageTarget.id, { commissionPercent: n });
+    setMsg(`Commission → ${n}% · ${manageTarget.name}`);
+    setManageTarget(null);
     await load();
+  }
+
+  function openManage(a: Agency) {
+    setManageTarget(a);
+    setPerms({ ...a.permissions });
+    setCutValue(String(a.commissionPercent));
   }
 
   return (
@@ -124,7 +137,7 @@ export function AgenciesPanel({ limited }: { limited?: boolean }) {
         <div>
           <h2>Agencies</h2>
           <p className="sub">
-            Partner network · commission · portal permissions
+            Partner setup only · hosts live under Agency hosts · money under Revenue / Financials
           </p>
         </div>
         {!limited ? (
@@ -155,8 +168,7 @@ export function AgenciesPanel({ limited }: { limited?: boolean }) {
                 <th>Cut</th>
                 <th>Month</th>
                 <th>Total</th>
-                <th>Permissions</th>
-                {!limited ? <th>Actions</th> : null}
+                {!limited ? <th>Manage</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -178,56 +190,15 @@ export function AgenciesPanel({ limited }: { limited?: boolean }) {
                   <td>{a.commissionPercent}%</td>
                   <td>{a.revenueMonth.toLocaleString()}</td>
                   <td>{a.revenueTotal.toLocaleString()}</td>
-                  <td>
-                    <div className="desk-perm-inline">
-                      {a.permissions.canViewRevenue ? (
-                        <span className="chip on">Revenue</span>
-                      ) : null}
-                      {a.permissions.canManageHosts ? (
-                        <span className="chip on">Hosts</span>
-                      ) : null}
-                      {a.permissions.canRequestPayout ? (
-                        <span className="chip on">Payout</span>
-                      ) : null}
-                      {a.permissions.canViewCalls ? (
-                        <span className="chip on">Calls</span>
-                      ) : null}
-                      {a.permissions.canMonitor ? (
-                        <span className="chip on">Monitor</span>
-                      ) : null}
-                    </div>
-                  </td>
                   {!limited ? (
                     <td>
-                      <div className="desk-row-actions">
-                        <button
-                          type="button"
-                          className="btn-ghost"
-                          onClick={() => void toggleStatus(a)}
-                        >
-                          {a.status === 'active' ? 'Suspend' : 'Activate'}
-                        </button>
-                        <button
-                          type="button"
-                          className="btn-gold"
-                          onClick={() => {
-                            setCutTarget(a);
-                            setCutValue(String(a.commissionPercent));
-                          }}
-                        >
-                          Set cut
-                        </button>
-                        <button
-                          type="button"
-                          className="btn-teal"
-                          onClick={() => {
-                            setPermTarget(a);
-                            setPerms({ ...a.permissions });
-                          }}
-                        >
-                          Permissions
-                        </button>
-                      </div>
+                      <button
+                        type="button"
+                        className="btn-pink"
+                        onClick={() => openManage(a)}
+                      >
+                        Manage
+                      </button>
                     </td>
                   ) : null}
                 </tr>
@@ -301,74 +272,91 @@ export function AgenciesPanel({ limited }: { limited?: boolean }) {
       </DeskModal>
 
       <DeskModal
-        open={!!permTarget}
-        title="Portal permissions"
-        subtitle={permTarget?.name}
-        onClose={() => setPermTarget(null)}
+        open={!!manageTarget}
+        title="Manage agency"
+        subtitle={manageTarget?.name}
+        onClose={() => setManageTarget(null)}
         footer={
           <>
             <button
               type="button"
               className="btn-ghost"
-              onClick={() => setPermTarget(null)}
+              onClick={() => setManageTarget(null)}
             >
-              Cancel
+              Close
+            </button>
+            <button type="button" className="btn-gold" onClick={() => void saveCut()}>
+              Save cut
             </button>
             <button type="button" className="btn-pink" onClick={() => void savePerms()}>
-              Save
+              Save permissions
             </button>
           </>
         }
       >
-        {(
-          [
-            ['canManageHosts', 'Manage hosts'],
-            ['canViewRevenue', 'View revenue'],
-            ['canRequestPayout', 'Request payouts'],
-            ['canViewCalls', 'View live calls'],
-            ['canMonitor', 'Silent monitor'],
-          ] as const
-        ).map(([key, label]) => (
-          <label key={key} className="desk-check-row">
-            <input
-              type="checkbox"
-              checked={!!perms[key]}
-              onChange={(e) =>
-                setPerms((p) => ({ ...p, [key]: e.target.checked }))
-              }
-            />
-            <span>{label}</span>
-          </label>
-        ))}
-      </DeskModal>
-
-      <DeskModal
-        open={!!cutTarget}
-        title="Set commission"
-        subtitle={cutTarget?.name}
-        onClose={() => setCutTarget(null)}
-        footer={
+        {manageTarget ? (
           <>
-            <button
-              type="button"
-              className="btn-ghost"
-              onClick={() => setCutTarget(null)}
-            >
-              Cancel
-            </button>
-            <button type="button" className="btn-pink" onClick={() => void saveCut()}>
-              Save
-            </button>
+            <div className="agency-manage-paths">
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => {
+                  setManageTarget(null);
+                  onOpenHosts?.();
+                }}
+              >
+                → Agency hosts
+              </button>
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => {
+                  setManageTarget(null);
+                  onOpenRevenue?.();
+                }}
+              >
+                → Revenue
+              </button>
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => void toggleStatus(manageTarget)}
+              >
+                {manageTarget.status === 'active' ? 'Suspend' : 'Activate'}
+              </button>
+            </div>
+            <DeskField label="Commission % (0–80)">
+              <input
+                value={cutValue}
+                onChange={(e) => setCutValue(e.target.value)}
+                inputMode="numeric"
+              />
+            </DeskField>
+            <p className="sub" style={{ marginTop: 12 }}>
+              Portal permissions
+            </p>
+            {(
+              [
+                ['canManageHosts', 'Manage hosts'],
+                ['canViewRevenue', 'View revenue'],
+                ['canRequestPayout', 'Request payouts'],
+                ['canViewCalls', 'View live calls'],
+                ['canMonitor', 'Silent monitor'],
+              ] as const
+            ).map(([key, label]) => (
+              <label key={key} className="desk-check-row">
+                <input
+                  type="checkbox"
+                  checked={!!perms[key]}
+                  onChange={(e) =>
+                    setPerms((p) => ({ ...p, [key]: e.target.checked }))
+                  }
+                />
+                <span>{label}</span>
+              </label>
+            ))}
           </>
-        }
-      >
-        <DeskField label="Commission % (0–80)">
-          <input
-            value={cutValue}
-            onChange={(e) => setCutValue(e.target.value)}
-            inputMode="numeric"
-          />
-        </DeskField>
+        ) : null}
       </DeskModal>
     </div>
   );
