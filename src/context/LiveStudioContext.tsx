@@ -163,6 +163,51 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
   }, [activeRoomId]);
 
   useEffect(() => {
+    if (!activeRoomId || !user.id) return;
+    let es: EventSource | null = null;
+    try {
+      const base = (process.env.EXPO_PUBLIC_API_BASE_URL || 'https://coincall-api.onrender.com/api').replace(/\/$/, '');
+      es = new EventSource(`${base}/hosts/${encodeURIComponent(user.id)}/stream`);
+      es.addEventListener('live_comment', (ev) => {
+        try {
+          const data = JSON.parse((ev as MessageEvent).data) as {
+            roomId?: string;
+            comment?: {
+              id: string;
+              userId: string;
+              userName: string;
+              text: string;
+              createdAt: number;
+              kind?: LiveComment['kind'];
+            };
+          };
+          if (!data.comment) return;
+          if (data.roomId && data.roomId !== activeRoomId) return;
+          setComments((prev) => {
+            if (prev.some((c) => c.id === data.comment!.id)) return prev;
+            return [
+              ...prev,
+              {
+                id: data.comment!.id,
+                userId: data.comment!.userId,
+                userName: data.comment!.userName,
+                text: data.comment!.text,
+                createdAt: data.comment!.createdAt,
+                kind: data.comment!.kind || 'comment',
+              },
+            ].slice(-80);
+          });
+        } catch {
+          /* ignore */
+        }
+      });
+    } catch {
+      /* poll / ws only */
+    }
+    return () => es?.close();
+  }, [activeRoomId, user.id]);
+
+  useEffect(() => {
     let unsub: (() => void) | undefined;
     void import('../services/realtimeWs').then(({ subscribeRealtime }) => {
       unsub = subscribeRealtime((event) => {

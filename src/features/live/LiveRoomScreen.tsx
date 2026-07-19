@@ -117,13 +117,21 @@ export function LiveRoomScreen({ navigation, route }: Props) {
     }));
     const commentLines = comments
       .filter((c) => c.kind !== 'system' || /joined|gift/i.test(c.text))
-      .slice(0, 30)
+      .slice(-40)
       .map((c) => ({
         id: c.id,
-        text: c.kind === 'system' ? c.text : `${c.userName}: ${c.text}`,
+        text:
+          c.kind === 'join'
+            ? `${c.userName} joined`
+            : c.kind === 'gift'
+              ? `${c.userName} ${c.text}`
+              : c.kind === 'system'
+                ? c.text
+                : `${c.userName}: ${c.text}`,
         kind: (c.kind === 'gift' ? 'gift' : 'chat') as 'gift' | 'chat',
       }));
-    return [...giftLines, ...commentLines].slice(0, 40);
+    // Newest last so inverted FlatList shows them at the bottom visually
+    return [...giftLines, ...commentLines];
   }, [comments, gifts]);
 
   const onEnd = async () => {
@@ -298,6 +306,8 @@ const webFill: any = {
   width: '100%',
   height: '100%',
   background: '#000',
+  zIndex: 0,
+  pointerEvents: 'none',
 };
 
 const styles = StyleSheet.create({
@@ -309,7 +319,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'flex-start',
     paddingHorizontal: 12,
-    zIndex: 5,
+    zIndex: 20,
   },
   hostChip: {
     flexDirection: 'row',
@@ -355,12 +365,13 @@ const styles = StyleSheet.create({
     left: 12,
     right: 90,
     bottom: 110,
-    maxHeight: 180,
-    zIndex: 4,
+    maxHeight: 220,
+    zIndex: 20,
+    elevation: 20,
   },
   feedRow: {
     alignSelf: 'flex-start',
-    backgroundColor: 'rgba(0,0,0,0.4)',
+    backgroundColor: 'rgba(0,0,0,0.55)',
     borderRadius: 14,
     paddingHorizontal: 10,
     paddingVertical: 6,
@@ -374,7 +385,7 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 8,
+    zIndex: 25,
   },
   giftEmoji: { fontSize: 72 },
   giftLabel: {
@@ -396,7 +407,8 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingHorizontal: 8,
     backgroundColor: 'rgba(0,0,0,0.35)',
-    zIndex: 6,
+    zIndex: 20,
+    elevation: 20,
   },
   ctrl: {
     alignItems: 'center',
