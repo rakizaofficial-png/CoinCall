@@ -22,8 +22,18 @@ import {
   spendCoinsApi,
 } from "@/lib/walletApi";
 import { getRealtimeClient } from "@/lib/realtime/websocket";
+import { requireApiBase } from "@/config/apiConfig";
 
 type Toast = { id: number; text: string };
+
+export type InboxMessage = {
+  id: string;
+  hostId: string;
+  hostName: string;
+  text: string;
+  at: number;
+  unread?: boolean;
+};
 
 type AppStore = {
   ready: boolean;
@@ -34,6 +44,8 @@ type AppStore = {
   isPremium: boolean;
   following: string[];
   toasts: Toast[];
+  inbox: InboxMessage[];
+  unreadInbox: number;
   spend: (amount: number, label?: string) => boolean;
   spendAsync: (amount: number, label?: string) => Promise<boolean>;
   addCoins: (amount: number, label?: string) => void;
@@ -42,6 +54,7 @@ type AppStore = {
   toggleFollow: (id: string) => void;
   setPremium: (v: boolean) => void;
   pushToast: (text: string) => void;
+  markInboxRead: () => void;
   topUpOpen: boolean;
   topUpGrace: number;
   openTopUp: (grace?: number) => void;
@@ -66,9 +79,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [topUpGrace, setTopUpGrace] = useState(15);
   const [entranceBlast, setEntranceBlast] = useState(false);
   const [entranceReady, setEntranceReady] = useState(false);
+  const [inbox, setInbox] = useState<InboxMessage[]>([]);
   const graceRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const vipTier = useMemo(() => vipTierFromXp(xp), [xp]);
+  const unreadInbox = useMemo(
+    () => inbox.filter((m) => m.unread).length,
+    [inbox],
+  );
 
   const pushToast = useCallback((text: string) => {
     const id = Date.now();
@@ -76,6 +94,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setTimeout(() => {
       setToasts((t) => t.filter((x) => x.id !== id));
     }, 2400);
+  }, []);
+
+  const markInboxRead = useCallback(() => {
+    setInbox((list) => list.map((m) => ({ ...m, unread: false })));
+  }, []);
+
+  const prependInbox = useCallback((msg: InboxMessage) => {
+    setInbox((list) => {
+      if (list.some((m) => m.id === msg.id)) return list;
+      return [msg, ...list].slice(0, 50);
+    });
   }, []);
 
   const syncWallet = useCallback(async () => {
@@ -107,7 +136,47 @@ export function AppProvider({ children }: { children: ReactNode }) {
             setCoins(ev.payload.coinBalance);
             setXp(ev.payload.xp);
           }
+          if (ev.type === "mass:text") {
+            const p = ev.payload;
+            prependInbox({
+              id: p.id || `mt_${p.at}_${p.hostId}`,
+              hostId: p.hostId,
+              hostName: p.hostName,
+              text: p.text,
+              at: p.at || Date.now(),
+              unread: true,
+            });
+            pushToast(`${p.hostName}: ${p.text.slice(0, 60)}`);
+          }
         });
+
+        try {
+          const inboxRes = await fetch(
+            `${requireApiBase()}/users/inbox?userId=${encodeURIComponent(id)}`,
+            { cache: "no-store" },
+          );
+          if (inboxRes.ok) {
+            const data = (await inboxRes.json()) as {
+              items?: Array<{
+                id: string;
+                hostId: string;
+                hostName: string;
+                text: string;
+                at: number;
+              }>;
+            };
+            if (!cancelled && data.items?.length) {
+              setInbox(
+                data.items.map((m) => ({
+                  ...m,
+                  unread: false,
+                })),
+              );
+            }
+          }
+        } catch {
+          /* optional */
+        }
       } catch (e) {
         if (!cancelled) {
           pushToast(
@@ -125,7 +194,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       unsub?.();
       if (graceRef.current) clearInterval(graceRef.current);
     };
-  }, [pushToast, syncWallet]);
+  }, [prependInbox, pushToast, syncWallet]);
 
   const clearEntranceBlast = useCallback(() => setEntranceBlast(false), []);
   const triggerEntranceBlast = useCallback(() => setEntranceBlast(true), []);
@@ -223,6 +292,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       isPremium,
       following,
       toasts,
+      inbox,
+      unreadInbox,
       spend,
       spendAsync,
       addCoins,
@@ -231,6 +302,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       toggleFollow,
       setPremium,
       pushToast,
+      markInboxRead,
       topUpOpen,
       topUpGrace,
       openTopUp,
@@ -249,6 +321,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       isPremium,
       following,
       toasts,
+      inbox,
+      unreadInbox,
       spend,
       spendAsync,
       addCoins,
@@ -256,6 +330,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addXp,
       toggleFollow,
       pushToast,
+      markInboxRead,
       topUpOpen,
       topUpGrace,
       openTopUp,

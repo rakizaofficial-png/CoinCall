@@ -1,74 +1,96 @@
 "use client";
 
+import { useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { TopBar } from "@/components/TopBar";
-import { getCreator, threads } from "@/lib/data";
+import { useApp } from "@/lib/store";
+
+function timeAgo(at: number) {
+  const diff = Date.now() - at;
+  if (diff < 60_000) return "now";
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h`;
+  return `${Math.floor(diff / 86_400_000)}d`;
+}
 
 export default function MessagesPage() {
+  const { inbox, unreadInbox, markInboxRead } = useApp();
+
+  useEffect(() => {
+    markInboxRead();
+  }, [markInboxRead]);
+
   return (
     <main>
-      <TopBar title="Chat" subtitle="Keep the spark going" />
+      <TopBar
+        title="Chat"
+        subtitle={
+          unreadInbox
+            ? `${unreadInbox} new from hosts`
+            : "Mass texts & host messages"
+        }
+      />
 
       <section className="space-y-1 px-3 pb-6">
-        {threads.map((t, i) => {
-          const creator = getCreator(t.creatorId);
-          if (!creator) return null;
+        {!inbox.length ? (
+          <div className="mx-1 rounded-2xl border border-dashed border-line bg-ink-2/50 px-4 py-10 text-center">
+            <p className="font-display text-sm font-bold text-sand">
+              No host messages yet
+            </p>
+            <p className="mt-2 text-xs text-muted">
+              When a host sends Mass Texting, it appears here instantly.
+            </p>
+          </div>
+        ) : null}
+
+        {inbox.map((t, i) => {
+          const avatar = `https://i.pravatar.cc/120?u=${encodeURIComponent(t.hostId)}`;
           return (
             <motion.div
               key={t.id}
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.05 }}
+              transition={{ delay: i * 0.04 }}
             >
               <Link
-                href={`/messages/${t.id}`}
+                href={`/messages/host_${encodeURIComponent(t.hostId)}`}
                 className="flex items-center gap-3 rounded-2xl px-2 py-3 transition active:bg-ink-2"
               >
                 <div className="relative">
                   <Image
-                    src={creator.image}
-                    alt={creator.name}
+                    src={avatar}
+                    alt={t.hostName}
                     width={56}
                     height={56}
+                    unoptimized
                     className="h-14 w-14 rounded-full object-cover"
                   />
-                  {creator.online && (
-                    <span className="absolute bottom-0 right-0 h-3.5 w-3.5 rounded-full border-2 border-ink bg-teal" />
-                  )}
+                  {t.unread ? (
+                    <span className="absolute bottom-0 right-0 h-3.5 w-3.5 rounded-full border-2 border-ink bg-coral" />
+                  ) : null}
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="font-display font-bold">{creator.name}</p>
-                    <span className="text-[10px] text-muted">{t.time}</span>
+                    <p className="font-display font-bold">{t.hostName}</p>
+                    <span className="text-[10px] text-muted">
+                      {timeAgo(t.at)}
+                    </span>
                   </div>
                   <p
                     className={`truncate text-sm ${
                       t.unread ? "font-semibold text-sand" : "text-muted"
                     }`}
                   >
-                    {t.lastMessage}
+                    {t.text}
                   </p>
                 </div>
-                {t.unread > 0 && (
-                  <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-coral px-1.5 text-[10px] font-bold">
-                    {t.unread}
-                  </span>
-                )}
               </Link>
             </motion.div>
           );
         })}
       </section>
-
-      <div className="mx-4 mb-6 rounded-2xl border border-dashed border-line bg-ink-2/50 px-4 py-5 text-center">
-        <p className="font-display text-sm font-bold">Icebreakers that work</p>
-        <p className="mt-1 text-xs text-muted">
-          “That live was fire — what’s your next set?” · “Coffee or midnight
-          talk?” · “Teach me one word in your language”
-        </p>
-      </div>
     </main>
   );
 }

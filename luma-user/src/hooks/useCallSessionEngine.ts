@@ -5,6 +5,7 @@ import {
   createCall,
   endCall as endBridgeCall,
   fetchCallToken,
+  getCall,
   waitForAccept,
   type BridgeCall,
   type LiveHost,
@@ -64,12 +65,49 @@ export function useCallSessionEngine(opts: {
     stopRingingTone();
     await stopUserAgoraCall();
     if (callIdRef.current) {
-      await endBridgeCall(callIdRef.current);
+      try {
+        await endBridgeCall(callIdRef.current);
+      } catch {
+        /* peer may have already ended */
+      }
       callIdRef.current = null;
     }
     setState("DISCONNECTED");
-    setStatusText("Call ended");
+    setStatusText("Disconnected");
   }, []);
+
+  /** Peer hang-up: poll call status while connected */
+  useEffect(() => {
+    if (state !== "CONNECTED" || !bridgeCall?.id) return;
+    const callId = bridgeCall.id;
+    let stopped = false;
+
+    const poll = setInterval(() => {
+      void getCall(callId)
+        .then((call) => {
+          if (stopped) return;
+          if (
+            call.status === "ended" ||
+            call.status === "missed" ||
+            call.status === "rejected"
+          ) {
+            cancelledRef.current = true;
+            stopRingingTone();
+            void stopUserAgoraCall();
+            callIdRef.current = null;
+            setBridgeCall(call);
+            setState("DISCONNECTED");
+            setStatusText("Disconnected");
+          }
+        })
+        .catch(() => undefined);
+    }, 2000);
+
+    return () => {
+      stopped = true;
+      clearInterval(poll);
+    };
+  }, [state, bridgeCall?.id]);
 
   useEffect(() => {
     if (!enabled) return;

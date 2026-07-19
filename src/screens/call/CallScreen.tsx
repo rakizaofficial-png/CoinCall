@@ -10,7 +10,7 @@ import {
   Video,
   VideoOff,
 } from 'lucide-react-native';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Image,
   Platform,
@@ -35,7 +35,7 @@ import {
   stopAgoraCall,
   switchAgoraCamera,
 } from '../../services/agoraService';
-import { endBridgeCall, fetchCallToken } from '../../services/callBridge';
+import { endBridgeCall, fetchCallToken, watchBridgeCallEnd } from '../../services/callBridge';
 import {
   type GiftRequest,
   listenGiftRequestEvents,
@@ -121,17 +121,37 @@ export function CallScreen({ navigation, route }: Props) {
   const [giftBusy, setGiftBusy] = useState(false);
   const [pendingGiftReq, setPendingGiftReq] = useState<GiftRequest | null>(null);
   const [giftBurst, setGiftBurst] = useState<string | null>(null);
+  const [disconnected, setDisconnected] = useState(false);
   const agoraReady = isAgoraConfigured() && Platform.OS === 'web';
   const activeCallIdRef = useRef<string | null>(null);
   const localRef = useRef<HTMLDivElement | null>(null);
   const remoteRef = useRef<HTMLDivElement | null>(null);
+  const leavingRef = useRef(false);
+
+  const leaveAfterDisconnect = useCallback(async () => {
+    if (leavingRef.current) return;
+    leavingRef.current = true;
+    setDisconnected(true);
+    await stopAgoraCall();
+    const id = activeCallIdRef.current;
+    activeCallIdRef.current = null;
+    await endActiveCall(id);
+    endCall();
+    setTimeout(() => {
+      navigation.goBack();
+    }, 1600);
+  }, [endCall, navigation]);
 
   useEffect(() => {
     if (isBridge) return;
     if (!call || call.status === 'ended') {
-      navigation.goBack();
+      if (call?.status === 'ended') {
+        void leaveAfterDisconnect();
+      } else if (!call) {
+        navigation.goBack();
+      }
     }
-  }, [call, isBridge, navigation]);
+  }, [call, isBridge, leaveAfterDisconnect, navigation]);
 
   useEffect(() => {
     if (!isBridge) return;
@@ -273,6 +293,13 @@ export function CallScreen({ navigation, route }: Props) {
     });
   }, [bridgeCallId, peerName]);
 
+  useEffect(() => {
+    if (!bridgeCallId || !user.id) return;
+    return watchBridgeCallEnd(user.id, bridgeCallId, () => {
+      void leaveAfterDisconnect();
+    });
+  }, [bridgeCallId, leaveAfterDisconnect, user.id]);
+
   const sendGiftRequest = async (giftId: string) => {
     if (!bridgeCallId) {
       notify('Gift request', 'Available on live user calls.');
@@ -312,7 +339,7 @@ export function CallScreen({ navigation, route }: Props) {
   }
 
   const hangUp = async () => {
-    await stopAgoraCall();
+    if (leavingRef.current) return;
     if (bridgeCallId) {
       try {
         await endBridgeCall(bridgeCallId);
@@ -320,11 +347,7 @@ export function CallScreen({ navigation, route }: Props) {
         // ignore
       }
     }
-    const id = activeCallIdRef.current;
-    activeCallIdRef.current = null;
-    await endActiveCall(id);
-    endCall();
-    navigation.goBack();
+    await leaveAfterDisconnect();
   };
 
   const netColor =
@@ -411,6 +434,14 @@ export function CallScreen({ navigation, route }: Props) {
           <Text style={styles.pendingText}>
             Waiting for {peerName} · {pendingGiftReq.giftEmoji} {pendingGiftReq.giftName}
           </Text>
+        </View>
+      ) : null}
+
+      {disconnected ? (
+        <View style={styles.disconnectOverlay} pointerEvents="none">
+          <PhoneOff size={36} color="#fff" />
+          <Text style={styles.disconnectTitle}>Disconnected</Text>
+          <Text style={styles.disconnectSub}>Call ended</Text>
         </View>
       ) : null}
 
@@ -518,6 +549,25 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   remote: { ...StyleSheet.absoluteFill, width: '100%', height: '100%' },
   overlay: { ...StyleSheet.absoluteFill },
+  disconnectOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    backgroundColor: 'rgba(5,7,15,0.82)',
+  },
+  disconnectTitle: {
+    color: '#fff',
+    fontSize: 28,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+  disconnectSub: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 14,
+    fontWeight: '600',
+  },
   topBar: { alignItems: 'center', zIndex: 2, gap: 6, paddingHorizontal: 16 },
   topRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   timerPill: {

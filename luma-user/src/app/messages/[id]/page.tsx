@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useState } from "react";
+import { use, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { motion } from "framer-motion";
@@ -23,10 +23,37 @@ export default function ChatThreadPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
-  const thread = threads.find((t) => t.id === id) ?? threads[0];
-  const creator = getCreator(thread.creatorId) ?? creators[0];
-  const { spend, vipTier, triggerEntranceBlast } = useApp();
-  const [messages, setMessages] = useState(starter);
+  const { spend, vipTier, triggerEntranceBlast, inbox } = useApp();
+
+  const hostIdFromRoute = id.startsWith("host_")
+    ? decodeURIComponent(id.slice(5))
+    : null;
+
+  const thread = threads.find((t) => t.id === id) ?? null;
+  const mockCreator = thread
+    ? getCreator(thread.creatorId) ?? creators[0]
+    : null;
+
+  const hostId = hostIdFromRoute || mockCreator?.id || "host";
+  const hostName =
+    inbox.find((m) => m.hostId === hostId)?.hostName ||
+    mockCreator?.name ||
+    "Host";
+  const hostImage =
+    mockCreator?.image ||
+    `https://i.pravatar.cc/200?u=${encodeURIComponent(hostId)}`;
+
+  const massNotes = useMemo(
+    () =>
+      inbox
+        .filter((m) => m.hostId === hostId)
+        .map((m) => ({ from: "them" as const, text: m.text })),
+    [inbox, hostId],
+  );
+
+  const [messages, setMessages] = useState(() =>
+    massNotes.length ? massNotes : starter,
+  );
   const [text, setText] = useState("");
   const [giftOpen, setGiftOpen] = useState(false);
 
@@ -42,7 +69,7 @@ export default function ChatThreadPage({
         ...m,
         {
           from: "them" as const,
-          text: "Haha love that — talk soon? 💫",
+          text: "Got your message 💫",
         },
       ]);
     }, 900);
@@ -59,21 +86,20 @@ export default function ChatThreadPage({
           <ArrowLeft className="h-5 w-5" />
         </Link>
         <Image
-          src={creator.image}
-          alt={creator.name}
+          src={hostImage}
+          alt={hostName}
           width={40}
           height={40}
+          unoptimized
           className="h-10 w-10 rounded-full object-cover ring-2 ring-cyan/40"
         />
         <div className="min-w-0 flex-1">
-          <p className="font-display font-bold leading-tight">{creator.name}</p>
-          <p className="text-[11px] font-semibold text-cyan">
-            {creator.online ? "Online now" : "Last seen recently"}
-          </p>
+          <p className="font-display font-bold leading-tight">{hostName}</p>
+          <p className="text-[11px] font-semibold text-cyan">Online now</p>
         </div>
         <WalletDiamond compact />
         <Link
-          href={`/call/${creator.id}`}
+          href={`/call/${encodeURIComponent(hostId)}?live=1`}
           className="rounded-full bg-coral p-2.5 shadow-[0_0_16px_rgba(255,42,122,0.4)]"
         >
           <Video className="h-4 w-4" />
@@ -83,7 +109,7 @@ export default function ChatThreadPage({
       <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
         {messages.map((m, i) => (
           <motion.div
-            key={i}
+            key={`${m.from}-${i}-${m.text.slice(0, 12)}`}
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
             className={`flex ${m.from === "me" ? "justify-end" : "justify-start"}`}
@@ -135,7 +161,7 @@ export default function ChatThreadPage({
       <GiftSheet
         open={giftOpen}
         onClose={() => setGiftOpen(false)}
-        hostId={creator?.id || thread.creatorId}
+        hostId={hostId}
       />
     </main>
   );

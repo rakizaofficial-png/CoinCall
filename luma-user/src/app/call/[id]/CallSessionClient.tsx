@@ -87,14 +87,23 @@ export default function CallSessionClient({
   const isRinging = state === "RINGING" || state === "ROUTING";
   const isConnected = state === "CONNECTED";
   const isFailed = state === "FAILED";
+  const isDisconnected = state === "DISCONNECTED";
   const isAi = transport === "ai_prerecorded";
 
   const hangUp = async () => {
     await disconnect();
     await stopUserAgoraCall();
-    pushToast("Call ended");
   };
   hangUpRef.current = hangUp;
+
+  // After either side hangs up, show Disconnected briefly then leave
+  useEffect(() => {
+    if (!isDisconnected) return;
+    const t = setTimeout(() => {
+      window.location.href = "/call";
+    }, 1600);
+    return () => clearTimeout(t);
+  }, [isDisconnected]);
 
   // Dynamic 10-second coin deduction — identical for Agora + AI fallback
   useEffect(() => {
@@ -204,6 +213,16 @@ export default function CallSessionClient({
         </div>
       )}
 
+      {isDisconnected && (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/80">
+          <PhoneOff className="mb-4 h-10 w-10 text-white" />
+          <p className="font-display text-3xl font-extrabold text-white">
+            Disconnected
+          </p>
+          <p className="mt-2 text-sm text-white/70">Call ended</p>
+        </div>
+      )}
+
       {/* Agora remote surface — only for live transport */}
       <div
         ref={remoteRef}
@@ -264,9 +283,11 @@ export default function CallSessionClient({
                   ? isAi
                     ? "Private 1v1"
                     : "Private 1v1 · Live"
-                  : isFailed
-                    ? "Failed"
-                    : "1v1"}
+                  : isDisconnected
+                    ? "Disconnected"
+                    : isFailed
+                      ? "Failed"
+                      : "1v1"}
             </p>
             <p className="font-mono text-sm tabular-nums text-gold">
               {mm}:{ss}

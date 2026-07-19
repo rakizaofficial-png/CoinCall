@@ -84,6 +84,53 @@ export async function startUserAgoraCall(options: {
   return session;
 }
 
+/** Watch a host live broadcast (audience — no cam/mic publish) */
+export async function startUserAgoraLiveAudience(options: {
+  appId: string;
+  channel: string;
+  token: string;
+  uid: number;
+  remoteVideoEl: HTMLElement;
+}) {
+  await stopUserAgoraCall();
+  prep(options.remoteVideoEl);
+
+  const AgoraRTC = (await import('agora-rtc-sdk-ng')).default;
+  AgoraRTC.setLogLevel(4);
+  const client = AgoraRTC.createClient({ mode: 'live', codec: 'vp8' });
+  await client.setClientRole('audience');
+
+  const playRemote = async (
+    user: import('agora-rtc-sdk-ng').IAgoraRTCRemoteUser,
+    mediaType: 'audio' | 'video',
+  ) => {
+    await client.subscribe(user, mediaType);
+    if (mediaType === 'video' && user.videoTrack) {
+      user.videoTrack.play(options.remoteVideoEl, { fit: 'cover' });
+    }
+    if (mediaType === 'audio' && user.audioTrack) {
+      user.audioTrack.play();
+    }
+  };
+
+  client.on('user-published', playRemote);
+
+  await client.join(
+    options.appId,
+    options.channel,
+    options.token,
+    options.uid,
+  );
+
+  for (const user of client.remoteUsers) {
+    if (user.hasVideo) await playRemote(user, 'video');
+    if (user.hasAudio) await playRemote(user, 'audio');
+  }
+
+  session = { client, mic: null, cam: null };
+  return session;
+}
+
 export async function setUserMuted(muted: boolean) {
   if (!session?.mic) return;
   await session.mic.setEnabled(!muted);

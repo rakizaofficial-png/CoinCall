@@ -15,6 +15,7 @@ import {
   Users,
 } from "lucide-react";
 import { GiftSheet } from "@/components/GiftSheet";
+import { HostProfileSheet } from "@/components/HostProfileSheet";
 import { LoungeShell } from "@/components/LoungeShell";
 import { VipRibbon } from "@/components/VipRibbon";
 import { WalletDiamond } from "@/components/WalletDiamond";
@@ -78,6 +79,7 @@ export function SwipeFeed() {
   const [giftOpen, setGiftOpen] = useState(false);
   const [ticker, setTicker] = useState(0);
   const [blurOn, setBlurOn] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const touchY = useRef<number | null>(null);
 
   const load = useCallback(async () => {
@@ -143,21 +145,9 @@ export function SwipeFeed() {
 
   const rate = current?.host.ratePerMinute ?? 80;
 
-  const routeToHost = () => {
-    if (!current || !activity) return;
-    if (coins < rate) {
-      openTopUp(15);
-      return;
-    }
-    if (activity.mode === "party_room") {
-      router.push(`/party/${current.host.id}`);
-      return;
-    }
-    router.push(
-      blurOn
-        ? `/call/${current.host.id}?live=1&blur=1`
-        : `/call/${current.host.id}?live=1`,
-    );
+  const openProfile = () => {
+    if (!current) return;
+    setProfileOpen(true);
   };
 
   const callNow = () => {
@@ -232,7 +222,7 @@ export function SwipeFeed() {
             exit={{ opacity: 0, y: -40 }}
             transition={{ duration: 0.28 }}
             className="absolute inset-0 cursor-pointer"
-            onClick={routeToHost}
+            onClick={openProfile}
           >
             <Image
               src={image}
@@ -284,7 +274,7 @@ export function SwipeFeed() {
               </div>
               <button
                 type="button"
-                onClick={routeToHost}
+                onClick={openProfile}
                 className="text-left"
               >
                 <h1 className="font-display text-3xl font-extrabold text-white drop-shadow-[0_0_20px_rgba(0,240,255,0.25)]">
@@ -292,11 +282,7 @@ export function SwipeFeed() {
                 </h1>
                 <p className="mt-1 text-sm text-cyan/75">{meta}</p>
                 <p className="mt-2 text-[11px] font-semibold text-sand/80">
-                  {activity.mode === "party_room"
-                    ? "Tap → join as Party audience"
-                    : activity.mode === "pk_battle"
-                      ? "Tap → watch PK / start private 1v1"
-                      : "Tap → instant private 1v1"}
+                  Tap profile · gifts · text · call
                 </p>
               </button>
               <AnimatePresence mode="wait">
@@ -405,6 +391,24 @@ export function SwipeFeed() {
           open={giftOpen}
           onClose={() => setGiftOpen(false)}
           hostId={current?.host.id}
+        />
+
+        <HostProfileSheet
+          open={profileOpen}
+          onClose={() => setProfileOpen(false)}
+          host={
+            current
+              ? {
+                  id: current.host.id,
+                  name: current.host.name,
+                  avatarUrl: image,
+                  country: current.host.country,
+                  ratePerMinute: rate,
+                  isLive: current.host.isLive,
+                  isOnline: current.host.isOnline,
+                }
+              : null
+          }
         />
       </div>
     </LoungeShell>

@@ -159,3 +159,81 @@ export function listenIncomingCalls(
     if (pollTimer) clearInterval(pollTimer);
   };
 }
+
+export async function fetchBridgeCall(callId: string): Promise<BridgeCall> {
+  const res = await fetch(`${base()}/calls/${encodeURIComponent(callId)}`, {
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(body || 'Call lookup failed');
+  }
+  const data = (await res.json()) as { call: BridgeCall };
+  return data.call;
+}
+
+/**
+ * Watch an active bridge call — SSE call_ended + poll backup.
+ * Fires onEnded when the peer hangs up (or call ends for any reason).
+ */
+export function watchBridgeCallEnd(
+  hostId: string,
+  callId: string,
+  onEnded: (call: BridgeCall) => void,
+) {
+  if (!hostId || !callId) return () => undefined;
+
+  let stopped = false;
+  let es: EventSource | null = null;
+  let pollTimer: ReturnType<typeof setInterval> | null = null;
+  let fired = false;
+
+  const fire = (call: BridgeCall) => {
+    if (stopped || fired) return;
+    if (call.id !== callId) return;
+    if (call.status !== 'ended' && call.status !== 'missed' && call.status !== 'rejected') {
+      return;
+    }
+    fired = true;
+    onEnded(call);
+  };
+
+  try {
+    es = new EventSource(`${base()}/hosts/${encodeURIComponent(hostId)}/stream`);
+    es.addEventListener('call_ended', (ev) => {
+      try {
+        fire(JSON.parse((ev as MessageEvent).data) as BridgeCall);
+      } catch {
+        /* ignore */
+      }
+    });
+    es.addEventListener('call_missed', (ev) => {
+      try {
+        fire(JSON.parse((ev as MessageEvent).data) as BridgeCall);
+      } catch {
+        /* ignore */
+      }
+    });
+    es.addEventListener('call_rejected', (ev) => {
+      try {
+        fire(JSON.parse((ev as MessageEvent).data) as BridgeCall);
+      } catch {
+        /* ignore */
+      }
+    });
+  } catch {
+    /* poll only */
+  }
+
+  pollTimer = setInterval(() => {
+    void fetchBridgeCall(callId)
+      .then(fire)
+      .catch(() => undefined);
+  }, 2000);
+
+  return () => {
+    stopped = true;
+    es?.close();
+    if (pollTimer) clearInterval(pollTimer);
+  };
+}

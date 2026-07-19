@@ -444,6 +444,7 @@ app.post('/api/calls/:id/end', (req, res) => {
   calls.set(call.id, call);
   patchPresence(call.hostId, { isOnCall: false });
   pushToHost(call.hostId, 'call_ended', call);
+  broadcastWs({ type: 'call:ended', payload: call });
   res.json({ call });
 });
 
@@ -1881,11 +1882,13 @@ app.post('/api/host/mass-text', (req, res) => {
     text,
     toCount: targets.length,
     userIds: targets.map((u) => u.userId),
+    broadcast: true,
     at: Date.now(),
   };
   massTextHistory.unshift(payload);
   if (massTextHistory.length > 50) massTextHistory.length = 50;
 
+  // Reach every connected Luma fan over WS (not only listed targets)
   broadcastWs({ type: 'mass:text', payload });
   for (const u of targets) {
     pushToHost(u.userId, 'mass_text', payload);
@@ -1911,6 +1914,44 @@ app.get('/api/host/mass-text/history', (req, res) => {
     ? massTextHistory.filter((m) => m.hostId === hostId)
     : massTextHistory;
   res.json({ items: list.slice(0, 30) });
+});
+
+/** Fan inbox — mass texts addressed to this user (or broadcast to all) */
+app.get('/api/users/inbox', (req, res) => {
+  const userId = String(req.query.userId || '').trim();
+  if (!userId) {
+    res.status(400).json({ error: 'userId required' });
+    return;
+  }
+  const items = massTextHistory
+    .filter((m) => !m.userIds?.length || m.userIds.includes(userId))
+    .slice(0, 40)
+    .map((m) => ({
+      id: m.id,
+      hostId: m.hostId,
+      hostName: m.hostName,
+      text: m.text,
+      at: m.at,
+      kind: 'mass_text' as const,
+    }));
+  res.json({ items });
+});
+
+/** Audience token for watching a host live stream (Agora live mode) */
+app.get('/api/live/token', (req, res) => {
+  try {
+    const hostId = String(req.query.hostId || '').trim();
+    const channelParam = String(req.query.channel || '').trim();
+    const channel = channelParam || (hostId ? `live_${hostId}` : '');
+    if (!channel) {
+      res.status(400).json({ error: 'hostId or channel required' });
+      return;
+    }
+    const uid = Number(req.query.uid || Math.floor(100000 + Math.random() * 800000));
+    res.json(mintToken(channel, uid, 'subscriber'));
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || 'Token error' });
+  }
 });
 
 /** Host creates admin support ticket */
@@ -2001,7 +2042,7 @@ wss.on('connection', (socket, req) => {
       const coins = Number(raw.coins ?? payload.coins ?? 0);
       const hostId = String(raw.userId || payload.hostId || payload.userId || userId);
 
-      if (type === 'host:hello' || type === 'user:hello') {
+      if (type === 'host:hello' || type === 'user:hello' || type === 'hello') {
         touchActiveUser({
           userId: hostId,
           userName: String(payload.name || payload.userName || userName),

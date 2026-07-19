@@ -44,6 +44,18 @@ export type RealtimeEvent =
       type: "wallet:updated";
       payload: { userId: string; coinBalance: number; xp: number };
     }
+  | {
+      type: "mass:text";
+      payload: {
+        id?: string;
+        hostId: string;
+        hostName: string;
+        text: string;
+        userIds?: string[];
+        toCount?: number;
+        at: number;
+      };
+    }
   | { type: "ping"; payload?: unknown };
 
 type Handler = (event: RealtimeEvent) => void;
@@ -75,7 +87,13 @@ export class RealtimeClient {
 
     ws.onopen = () => {
       this.emit({ type: "connected", payload: { userId: this.userId } });
-      ws.send(JSON.stringify({ type: "hello", userId: this.userId }));
+      ws.send(
+        JSON.stringify({
+          type: "user:hello",
+          userId: this.userId,
+          payload: { userId: this.userId, name: "Luma Fan" },
+        }),
+      );
     };
 
     ws.onmessage = (ev) => {

@@ -2,11 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { BadgeCheck, Shuffle, Video } from "lucide-react";
 import { WalletDiamond } from "@/components/WalletDiamond";
+import {
+  HostProfileSheet,
+  type HostProfileData,
+} from "@/components/HostProfileSheet";
 import { creators } from "@/lib/data";
 import { fetchLiveHosts, type LiveHost } from "@/lib/api";
 import { useApp } from "@/lib/store";
@@ -44,6 +47,7 @@ export default function CallingLoungePage() {
   const { spend, pushToast, isPremium } = useApp();
   const [liveHosts, setLiveHosts] = useState<LiveHost[]>([]);
   const [loading, setLoading] = useState(true);
+  const [profileHost, setProfileHost] = useState<HostProfileData | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -77,7 +81,6 @@ export default function CallingLoungePage() {
         live: h.isLive,
       }));
     }
-    // Fallback demo cards so the Lounge still looks complete offline
     return creators
       .filter((c) => c.online)
       .slice(0, 6)
@@ -100,6 +103,18 @@ export default function CallingLoungePage() {
     const cost = isPremium ? 30 : 60;
     if (!spend(cost, "Matching a host…")) return;
     router.push(`/call/${pick.id}?live=1`);
+  };
+
+  const openProfile = (h: CardHost) => {
+    setProfileHost({
+      id: h.id,
+      name: h.name,
+      avatarUrl: h.avatarUrl,
+      country: h.country,
+      ratePerMinute: h.ratePerMinute,
+      isLive: h.live,
+      isOnline: h.online,
+    });
   };
 
   return (
@@ -136,7 +151,8 @@ export default function CallingLoungePage() {
 
         {!loading && liveHosts.length === 0 ? (
           <div className="rounded-3xl border border-dashed border-line bg-ink-2/50 px-4 py-4 text-center text-xs text-muted">
-            Showing lounge preview — open CoinCall host → Go Online for live calls
+            Showing lounge preview — open CoinCall host → Go Online for live
+            calls
           </div>
         ) : null}
 
@@ -148,7 +164,11 @@ export default function CallingLoungePage() {
             transition={{ delay: i * 0.05 }}
             className="relative overflow-hidden rounded-[28px] border border-white/10 bg-ink-2 shadow-[0_20px_50px_rgba(0,0,0,0.45)]"
           >
-            <div className="relative aspect-[4/5] w-full">
+            <button
+              type="button"
+              className="relative block aspect-[4/5] w-full text-left"
+              onClick={() => openProfile(h)}
+            >
               <Image
                 src={h.avatarUrl}
                 alt={h.name}
@@ -167,33 +187,37 @@ export default function CallingLoungePage() {
                 </span>
               </div>
 
-              <div className="absolute inset-x-0 bottom-0 p-4">
-                <div className="mb-1 flex items-center gap-1.5">
-                  <h2 className="font-display text-2xl font-extrabold text-white">
-                    {h.name}
-                  </h2>
-                  <BadgeCheck className="h-5 w-5 fill-cyan text-ink" />
+              <div className="absolute inset-x-0 bottom-0 space-y-3 p-4">
+                <div>
+                  <div className="mb-1 flex items-center gap-1.5">
+                    <h2 className="font-display text-2xl font-extrabold text-white">
+                      {h.name}
+                    </h2>
+                    <BadgeCheck className="h-5 w-5 fill-cyan text-ink" />
+                  </div>
+                  <p className="text-sm text-sand/85">
+                    {flagFor(h.country)} {h.country || "CoinCall"} · ★{" "}
+                    {ratingFor(h.id)}
+                  </p>
+                  <p className="mt-1 text-sm font-semibold text-gold">
+                    {h.ratePerMinute} coins/min
+                  </p>
                 </div>
-                <p className="text-sm text-sand/85">
-                  {flagFor(h.country)} {h.country || "CoinCall"} · ★{" "}
-                  {ratingFor(h.id)}
-                </p>
-                <p className="mt-1 text-sm font-semibold text-gold">
-                  {h.ratePerMinute} coins/min
-                </p>
-
-                <Link
-                  href={`/call/${h.id}?live=1`}
-                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-full bg-sand py-3.5 text-sm font-extrabold text-ink"
-                >
+                <span className="flex w-full items-center justify-center gap-2 rounded-full bg-sand py-3.5 text-sm font-extrabold text-ink">
                   <Video className="h-4 w-4" />
-                  Call
-                </Link>
+                  View profile
+                </span>
               </div>
-            </div>
+            </button>
           </motion.article>
         ))}
       </section>
+
+      <HostProfileSheet
+        open={Boolean(profileHost)}
+        onClose={() => setProfileHost(null)}
+        host={profileHost}
+      />
     </main>
   );
 }
