@@ -82,15 +82,20 @@ export function HostManagementPanel({
   canAct = true,
   title,
   subtitle,
+  initialStatus,
 }: {
   firebaseHosts: HostRow[];
   agencyId?: string | null;
   canAct?: boolean;
   title?: string;
   subtitle?: string;
+  /** Separate sidebar paths: Host Approver / Host KYC */
+  initialStatus?: string;
 }) {
   const [query, setQuery] = useState('');
-  const [status, setStatus] = useState<string>(agencyId ? 'all' : 'pending');
+  const [status, setStatus] = useState<string>(
+    initialStatus || (agencyId ? 'all' : 'pending'),
+  );
   const [sort, setSort] = useState('updated');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [detail, setDetail] = useState<ManagedHost | null>(null);
@@ -106,6 +111,10 @@ export function HostManagementPanel({
     | { type: 'docs' | 'commission' | 'coins'; host: ManagedHost }
   >(null);
   const [formValue, setFormValue] = useState('');
+
+  useEffect(() => {
+    if (initialStatus) setStatus(initialStatus);
+  }, [initialStatus]);
 
   const hosts = useMemo(() => {
     if (agencyId) return managed;

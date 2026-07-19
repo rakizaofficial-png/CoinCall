@@ -12,6 +12,8 @@ export type AdminSection =
   | 'agencies'
   | 'agency_hosts'
   | 'individual_hosts'
+  | 'host_approver'
+  | 'host_kyc'
   | 'hosts'
   | 'users'
   | 'revenue'
@@ -34,6 +36,8 @@ const FULL: AdminSection[] = [
   'agencies',
   'agency_hosts',
   'individual_hosts',
+  'host_approver',
+  'host_kyc',
   'hosts',
   'users',
   'revenue',
@@ -50,6 +54,8 @@ const ROLE_SECTIONS: Record<AdminRole, AdminSection[]> = {
     'dashboard',
     'agency_hosts',
     'individual_hosts',
+    'host_approver',
+    'host_kyc',
     'hosts',
     'calls',
     'control',
@@ -57,7 +63,7 @@ const ROLE_SECTIONS: Record<AdminRole, AdminSection[]> = {
     'videos',
   ],
   finance: ['dashboard', 'revenue', 'payouts', 'users', 'agencies'],
-  support: ['dashboard', 'users', 'reports', 'hosts'],
+  support: ['dashboard', 'users', 'reports', 'host_approver', 'host_kyc', 'hosts'],
   agency: ['dashboard', 'agency_hosts', 'revenue', 'calls', 'payouts'],
 };
 

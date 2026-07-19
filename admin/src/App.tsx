@@ -70,6 +70,8 @@ const ICONS: Partial<Record<Tab, string>> = {
   agencies: 'M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6',
   agency_hosts: 'M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8z',
   individual_hosts: 'M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 11a4 4 0 100-8 4 4 0 000 8z',
+  host_approver: 'M9 12l2 2 4-4M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z',
+  host_kyc: 'M12 11a4 4 0 100-8 4 4 0 000 8zM4 21v-1a6 6 0 0112 0v1M16 11l2 2 4-4',
   hosts: 'M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75',
   users: 'M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 11a4 4 0 100-8 4 4 0 000 8z',
   revenue: 'M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6',
@@ -85,6 +87,8 @@ const LABELS: Record<Tab, string> = {
   agencies: 'Agencies',
   agency_hosts: 'Agency hosts',
   individual_hosts: 'Individual hosts',
+  host_approver: 'Host Approver',
+  host_kyc: 'Host KYC',
   hosts: 'Host List',
   users: 'User List',
   revenue: 'Revenue',
@@ -96,12 +100,14 @@ const LABELS: Record<Tab, string> = {
 };
 
 const GROUPS: Record<Tab, string> = {
-  dashboard: 'Main',
-  agencies: 'Network',
-  agency_hosts: 'Network',
-  individual_hosts: 'Network',
-  hosts: 'Network',
-  users: 'Network',
+  dashboard: 'Management',
+  agencies: 'Management',
+  agency_hosts: 'Management',
+  individual_hosts: 'Management',
+  host_approver: 'Management',
+  host_kyc: 'Management',
+  hosts: 'Management',
+  users: 'Management',
   revenue: 'Finance',
   payouts: 'Finance',
   reports: 'Finance',
@@ -162,7 +168,7 @@ export default function App() {
   const [monitor, setMonitor] = useState<MonitorTarget | null>(null);
   const [reports, setReports] = useState<ReportAdminRow[]>([]);
   const [theme, setTheme] = useState<'dark' | 'light'>(() =>
-    (localStorage.getItem('cc_admin_theme') as 'dark' | 'light') || 'dark',
+    (localStorage.getItem('cc_admin_theme') as 'dark' | 'light') || 'light',
   );
   const [openPayouts, setOpenPayouts] = useState(0);
   const [bridgeHosts, setBridgeHosts] = useState<
@@ -466,15 +472,17 @@ export default function App() {
     label: LABELS[id],
     group: GROUPS[id],
     count:
-      id === 'hosts'
-        ? stats.total
-        : id === 'calls'
-          ? stats.liveCalls + stats.liveStreams
-          : id === 'payouts'
-            ? stats.openPayouts
-            : id === 'reports'
-              ? stats.openReports
-              : undefined,
+      id === 'host_approver'
+        ? stats.pending
+        : id === 'hosts'
+          ? stats.total
+          : id === 'calls'
+            ? stats.liveCalls + stats.liveStreams
+            : id === 'payouts'
+              ? stats.openPayouts
+              : id === 'reports'
+                ? stats.openReports
+                : undefined,
   }));
 
   if (!authed) {
@@ -559,10 +567,12 @@ export default function App() {
     <div className={`shell ${monitor ? 'shell-monitor-open' : ''}`} data-theme={theme}>
       <aside className="side">
         <div className="brand">
-          <div className="brand-mark">CC</div>
+          <div className="brand-mark" aria-hidden>
+            ⚙
+          </div>
           <div className="brand-text">
-            <strong>CoinCall</strong>
-            <span>{isAgency ? 'Agency portal' : 'Super Admin'}</span>
+            <strong>ADMIN</strong>
+            <span>{isAgency ? 'Agency portal' : 'CoinCall'}</span>
           </div>
         </div>
         <div className="side-role">
@@ -629,11 +639,11 @@ export default function App() {
             {tab === 'dashboard' ? (
               <>
                 <PageHead
-                  title={isAgency ? 'Agency dashboard' : 'Super Admin dashboard'}
+                  title={isAgency ? 'Agency dashboard' : 'Platform Overview'}
                   subtitle={
                     isAgency
                       ? 'Your hosts · earnings · withdrawals'
-                      : 'Active hosts · users · live · revenue'
+                      : 'Real-time hosts · users · live · revenue'
                   }
                 />
                 <DashboardAnalytics
@@ -748,6 +758,22 @@ export default function App() {
             ) : null}
             {tab === 'individual_hosts' ? (
               <HostTypePanel mode="individual" canManage={!isAgency} />
+            ) : null}
+            {tab === 'host_approver' ? (
+              <HostManagementPanel
+                firebaseHosts={hosts}
+                title="Host Approver"
+                subtitle="Approve or reject pending host applications — KYC is a separate path"
+                initialStatus="pending"
+              />
+            ) : null}
+            {tab === 'host_kyc' ? (
+              <HostManagementPanel
+                firebaseHosts={hosts}
+                title="Host KYC"
+                subtitle="Review ID · selfie · request documents — approvals stay on Host Approver"
+                initialStatus="under_review"
+              />
             ) : null}
             {tab === 'hosts' ? (
               <HostManagementPanel firebaseHosts={hosts} />
