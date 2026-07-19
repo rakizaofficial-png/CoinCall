@@ -166,6 +166,36 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
     let unsub: (() => void) | undefined;
     void import('../services/realtimeWs').then(({ subscribeRealtime }) => {
       unsub = subscribeRealtime((event) => {
+        if (event.type === 'live:comment') {
+          const p = event.payload as {
+            roomId?: string;
+            comment?: {
+              id: string;
+              userId: string;
+              userName: string;
+              text: string;
+              createdAt: number;
+              kind?: LiveComment['kind'];
+            };
+          };
+          if (!p.comment) return;
+          if (p.roomId && activeRoomId && p.roomId !== activeRoomId) return;
+          setComments((prev) => {
+            if (prev.some((c) => c.id === p.comment!.id)) return prev;
+            return [
+              ...prev,
+              {
+                id: p.comment!.id,
+                userId: p.comment!.userId,
+                userName: p.comment!.userName,
+                text: p.comment!.text,
+                createdAt: p.comment!.createdAt,
+                kind: p.comment!.kind || 'comment',
+              },
+            ].slice(-80);
+          });
+          return;
+        }
         if (event.type === 'gift:received') {
           const p = event.payload as {
             toHostId?: string;
