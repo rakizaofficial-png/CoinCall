@@ -59,18 +59,23 @@ export function HostPendingScreen() {
             ? 'Account banned'
             : user?.hostStatus === 'suspended'
               ? 'Account suspended'
-              : user?.hostStatus === 'under_review'
-                ? 'Under review'
-                : 'Waiting for approval'}
+              : user?.hostStatus === 'rejected'
+                ? 'Application rejected'
+                : user?.hostStatus === 'under_review'
+                  ? 'Under review'
+                  : 'Waiting for approval'}
         </Text>
         <Text style={[styles.sub, { color: colors.textSecondary }]}>
           {user?.hostStatus === 'banned'
             ? user.rejectionReason || 'Your host account was banned by admin.'
             : user?.hostStatus === 'suspended'
               ? 'Admin suspended your hosting access. Contact support if this is unexpected.'
-              : user?.docsRequested
-                ? `Admin requested documents: ${user.docsRequested}`
-                : 'Admin is reviewing your profile. Hosting unlocks after approval.'}
+              : user?.hostStatus === 'rejected'
+                ? user.rejectionReason ||
+                  'Your application was rejected. Update your profile and re-apply.'
+                : user?.docsRequested
+                  ? `Admin requested documents: ${user.docsRequested}`
+                  : 'Admin is reviewing your profile. Hosting unlocks after approval.'}
         </Text>
 
         <View
