@@ -1,0 +1,17 @@
+# Luma user app on Render (Next.js)
+# Dashboard → New → Blueprint → connect repo luma-coincall-user → Deploy
+
+services:
+  - type: web
+    name: luma-user
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_API_BASE_URL
+        value: https://coincall-api.onrender.com/api

@@ -93,3 +93,22 @@ services:
         sync: false
       - key: VITE_AGORA_APP_ID
         sync: false
+
+  # Fan / user app (Luma) — lists CoinCall hosts & 1v1 calls
+  - type: web
+    name: luma-user
+    runtime: node
+    plan: free
+    region: oregon
+    rootDir: luma-user
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_API_BASE_URL
+        value: https://coincall-api.onrender.com/api
+      - key: NEXT_PUBLIC_AGORA_APP_ID
+        sync: false
+
