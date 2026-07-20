@@ -703,6 +703,8 @@ app.post('/api/calls', (req, res) => {
     return;
   }
 
+  if (!assertUserAccountActive(String(userId), res)) return;
+
   const host = getPresence(hid);
   if (!host || !host.isOnline) {
     res.status(404).json({ error: 'Host is offline. Ask them to Go Online in CoinCall.' });
@@ -852,6 +854,7 @@ app.post('/api/calls/:id/minute', (req, res) => {
     return;
   }
   if (!requireUserMatch(req, res, userId)) return;
+  if (!assertUserAccountActive(userId, res)) return;
 
   const amount = Math.max(1, Math.floor(Number(call.ratePerMinute) || 80));
   const userWallet = ensureWallet(userId, { role: 'user', displayName: call.userName });
@@ -860,6 +863,7 @@ app.post('/api/calls/:id/minute', (req, res) => {
     res.status(402).json({
       error: 'Coins exhausted',
       wallet: walletPublic(userWallet),
+      userWallet: walletPublic(userWallet),
       need: amount,
       callEnded: true,
     });
@@ -1760,8 +1764,8 @@ function pruneActiveUsers(maxAgeMs = 15 * 60_000) {
   }
 }
 
-function listActiveUsers() {
-  pruneActiveUsers();
+function listActiveUsers(maxAgeMs = 15 * 60_000) {
+  pruneActiveUsers(maxAgeMs);
   return [...activeUsers.values()]
     .filter((u) => u.role === 'user')
     .map((u) => {
@@ -1964,6 +1968,24 @@ function walletPublic(row: WalletRow) {
     appId: row.appId,
     accountStatus: row.accountStatus || 'active',
   };
+}
+
+/** Block spend / calls when admin suspended or banned the user */
+function assertUserAccountActive(
+  userId: string,
+  res: express.Response,
+): boolean {
+  const row = ensureWallet(userId);
+  const status = row.accountStatus || 'active';
+  if (status === 'banned' || status === 'suspended') {
+    res.status(403).json({
+      error: status === 'banned' ? 'Account banned' : 'Account suspended',
+      accountStatus: status,
+      wallet: walletPublic(row),
+    });
+    return false;
+  }
+  return true;
 }
 
 app.post('/api/wallet/me', (req, res) => {
@@ -2187,6 +2209,7 @@ app.post('/api/wallet/spend', (req, res) => {
     return;
   }
   if (!requireUserMatch(req, res, userId)) return;
+  if (!assertUserAccountActive(userId, res)) return;
   const row = ensureWallet(userId);
   if (row.coinBalance < amount) {
     res.status(402).json({ error: 'Insufficient coins', wallet: walletPublic(row) });
@@ -2705,7 +2728,20 @@ function broadcastWs(event: unknown) {
 
 registerHostManagementRoutes(app, { requireAdmin, broadcastWs });
 
-registerAvatarRoutes(app, { onSaved: () => persist() });
+registerAvatarRoutes(app, {
+  onSaved: (hostId, avatarUrl) => {
+    if (hostId && avatarUrl) {
+      const existing = getPresence(hostId);
+      if (existing) {
+        const next = patchPresence(hostId, { avatarUrl });
+        if (next) {
+          broadcastWs({ type: 'host:presence', payload: next });
+        }
+      }
+    }
+    persist();
+  },
+});
 
 registerVideoLibraryRoutes(app, { requireAdmin });
 
@@ -3162,6 +3198,13 @@ app.post('/api/live/rooms', (req, res) => {
   }
   const hostId = String(room.hostId || '');
   const hostName = String(room.hostName || 'Host');
+  if (hostId) {
+    const gate = assertHostCanReceiveCalls(hostId);
+    if (!gate.ok) {
+      res.status(gate.status || 403).json({ error: gate.error });
+      return;
+    }
+  }
   // Convert data:/blob: to API-hosted public URL; never leave empty for Luma
   for (const key of ['hostAvatar', 'thumbnailUrl'] as const) {
     const v = room[key];
@@ -3489,8 +3532,8 @@ app.post('/api/host/mass-text', (req, res) => {
     return;
   }
 
-  pruneActiveUsers();
-  const targets = listActiveUsers()
+  // Only users seen in the last 2 minutes count as "online" for mass text
+  const targets = listActiveUsers(2 * 60_000)
     .filter((u) => u.role === 'user' && u.userId !== hostId)
     .map((u) => ({
       userId: u.userId,

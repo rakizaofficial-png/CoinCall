@@ -487,7 +487,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     () => ({
       user,
       isAuthenticated: user !== null,
-      isHostApproved: user?.hostStatus === 'approved',
+      isHostApproved:
+        user?.hostStatus === 'approved' &&
+        !user?.banned &&
+        !user?.suspended &&
+        user.hostStatus !== 'banned' &&
+        user.hostStatus !== 'suspended',
       usingFirebase,
       authReady,
       signIn,

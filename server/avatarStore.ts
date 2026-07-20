@@ -168,31 +168,32 @@ export function restoreAvatarsFromSnapshot(rows?: AvatarSnapshotRow[] | null) {
 }
 
 /**
- * Prefer a real stored file; drop dead /avatar links that 404 after redeploy.
+ * Prefer explicit HTTPS/CDN avatars over a stale on-disk file.
+ * Fall back to stored /api avatar when no public HTTPS candidate exists.
  */
 export function resolveStoredOrHttpAvatar(
   hostId: string,
   candidates: Array<string | null | undefined>,
   req?: Request,
 ): string {
-  if (hasStoredAvatar(hostId)) {
-    return avatarPublicUrl(hostId, req);
-  }
   for (const c of candidates) {
     const u = String(c || '').trim();
     if (!u) continue;
-    if (isApiAvatarUrl(u)) continue; // file missing — skip stale link
+    if (isApiAvatarUrl(u)) continue; // resolve via disk below if file exists
     if (u.startsWith('http://') || u.startsWith('https://')) {
       if (u.startsWith('data:') || u.startsWith('blob:')) continue;
       return u;
     }
+  }
+  if (hasStoredAvatar(hostId)) {
+    return avatarPublicUrl(hostId, req);
   }
   return '';
 }
 
 export function registerAvatarRoutes(
   app: Express,
-  opts?: { onSaved?: () => void },
+  opts?: { onSaved?: (hostId: string, avatarUrl: string) => void },
 ) {
   /** Host uploads DP (data URL or base64) → public https URL for Luma */
   app.post('/api/hosts/:hostId/avatar', (req: Request, res: Response) => {
@@ -210,8 +211,9 @@ export function registerAvatarRoutes(
       res.status(400).json({ error: saved.error });
       return;
     }
-    opts?.onSaved?.();
-    res.json({ ok: true, avatarUrl: saved.url });
+    const avatarUrl = saved.url || '';
+    opts?.onSaved?.(hostId, avatarUrl);
+    res.json({ ok: true, avatarUrl });
   });
 
   /** Public image for Next/Luma <img src> */

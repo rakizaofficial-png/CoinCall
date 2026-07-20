@@ -81,7 +81,7 @@ function waitForEl(
 export function CallScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
-  const { getHost, call, endCall, user, beautyOn, registerBridgeCallStart, creditBridgeMinute } =
+  const { getHost, call, endCall, user, beautyOn, registerBridgeCallStart } =
     useApp();
   const bridgeCallId = route.params.bridgeCallId;
   const isBridge = Boolean(bridgeCallId);
@@ -142,20 +142,20 @@ export function CallScreen({ navigation, route }: Props) {
     if (!bridgeLedgerStarted.current) {
       bridgeLedgerStarted.current = true;
       registerBridgeCallStart();
-      creditBridgeMinute(rate);
+      // Wallet credits come from server call_minute / listenHostBillingEvents only
+      // (avoid double-credit with optimistic local add).
     }
     const t = setInterval(() => {
       setBridgeSeconds((s) => {
         const next = s + 1;
         if (next > 0 && next % 60 === 0) {
           setBridgeCoins((c) => c + rate);
-          creditBridgeMinute(rate);
         }
         return next;
       });
     }, 1000);
     return () => clearInterval(t);
-  }, [isBridge, rate, registerBridgeCallStart, creditBridgeMinute]);
+  }, [isBridge, rate, registerBridgeCallStart]);
 
   // Publish shared Firebase session for BOTH demo + bridge calls
   useEffect(() => {

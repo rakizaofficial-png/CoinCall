@@ -935,18 +935,32 @@ export function AppProvider({
     };
   }, [user.avatarUrl, user.id, user.name]);
 
-  // Live billing events from Luma — keep wallet in sync (CallScreen owns today ledger)
+  // Live billing events from Luma — authoritative wallet + earnings (no optimistic double-credit)
   useEffect(() => {
     if (!user.id || !hostOnline) return;
     let stop: (() => void) | undefined;
     void import('../services/callBridge').then(({ listenHostBillingEvents }) => {
       stop = listenHostBillingEvents(user.id, (payload) => {
+        const amount = Math.max(0, Math.floor(Number(payload.amount) || 0));
         const bal = payload.hostWallet?.coinBalance;
         if (typeof bal === 'number' && Number.isFinite(bal)) {
-          setUser((u) => ({
-            ...u,
-            coinBalance: Math.max(u.coinBalance, bal),
-          }));
+          setUser((u) => ({ ...u, coinBalance: Math.max(0, bal) }));
+        } else if (amount > 0) {
+          setUser((u) => ({ ...u, coinBalance: u.coinBalance + amount }));
+        }
+        if (amount > 0) {
+          setHostEarnings((e) => ({ ...e, call: e.call + amount }));
+          setMyTodayMinutes((m) => m + 1);
+          setTransactions((txs) => [
+            {
+              id: `tx_call_${payload.callId}_${payload.billedMinutes}`,
+              type: 'earn',
+              amount,
+              label: '1v1 call minute',
+              timestamp: Date.now(),
+            },
+            ...txs,
+          ]);
         }
       });
     });

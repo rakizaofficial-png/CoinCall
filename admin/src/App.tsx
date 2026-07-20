@@ -462,6 +462,8 @@ export default function App() {
 
   function signOut() {
     localStorage.removeItem('cc_admin');
+    localStorage.removeItem('cc_admin_key');
+    localStorage.removeItem('cc_admin_role');
     localStorage.removeItem('cc_agency_id');
     localStorage.removeItem('cc_agency_name');
     localStorage.removeItem('cc_agency_perms');
@@ -469,6 +471,7 @@ export default function App() {
     setMonitor(null);
     setAgencyId(null);
     setAgencyPerms(null);
+    setAgencyName('');
   }
 
   const navItems = allowed.map((id) => ({
