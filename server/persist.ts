@@ -18,6 +18,7 @@ export type PersistedWallet = {
   displayName: string;
   avatarUrl?: string;
   role: 'user' | 'host';
+  welcomeBonusGranted?: boolean;
 };
 
 export type PersistedLedger = {

@@ -38,6 +38,8 @@ export type PersistedSnapshot = {
     updatedAt: number;
     base64: string;
   }>;
+  /** User ids that already received the one-time +100 welcome bonus */
+  welcomeBonusPaidIds?: string[];
 };
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;

@@ -1532,6 +1532,8 @@ type WalletRow = {
   appId?: string;
   /** Account gate for Luma users / hosts mirrored in wallet */
   accountStatus?: 'active' | 'suspended' | 'banned';
+  /** One-time +100 welcome bonus already paid (survives wallet recreate) */
+  welcomeBonusGranted?: boolean;
 };
 
 type WithdrawalRequest = {
@@ -1573,15 +1575,50 @@ const withdrawals: WithdrawalRequest[] = [];
 const reports: ReportRow[] = [];
 
 const iapReceipts = new Set<string>();
+/** Survives wallet map wipe: never grant +100 welcome twice for same userId */
+const welcomeBonusPaidIds = new Set<string>();
+
+function markWelcomeBonusPaid(userId: string) {
+  welcomeBonusPaidIds.add(userId);
+  const row = wallets.get(userId);
+  if (row) {
+    row.welcomeBonusGranted = true;
+    wallets.set(userId, row);
+  }
+}
+
+function hasWelcomeBonusAlready(userId: string): boolean {
+  if (welcomeBonusPaidIds.has(userId)) return true;
+  const row = wallets.get(userId);
+  if (row?.welcomeBonusGranted) {
+    welcomeBonusPaidIds.add(userId);
+    return true;
+  }
+  const ledger = walletLedger.get(userId) || [];
+  if (ledger.some((e) => e.kind === 'credit' && /welcome\s*bonus/i.test(e.reason))) {
+    welcomeBonusPaidIds.add(userId);
+    return true;
+  }
+  return false;
+}
 
 (function hydrateWalletsFromDisk() {
   const snap = loadWalletSnapshot();
   if (!snap) return;
   for (const w of snap.wallets || []) {
-    wallets.set(w.userId, { ...w } as WalletRow);
+    const row = { ...w } as WalletRow;
+    wallets.set(w.userId, row);
+    if (row.welcomeBonusGranted) welcomeBonusPaidIds.add(w.userId);
   }
   for (const [uid, list] of Object.entries(snap.ledger || {})) {
     walletLedger.set(uid, list as LedgerEntry[]);
+    if (
+      (list as LedgerEntry[]).some(
+        (e) => e.kind === 'credit' && /welcome\s*bonus/i.test(String(e.reason || '')),
+      )
+    ) {
+      welcomeBonusPaidIds.add(uid);
+    }
   }
   for (const tok of snap.iapReceipts || []) iapReceipts.add(tok);
   console.log(`[persist] restored ${wallets.size} wallets from disk`);
@@ -1877,33 +1914,56 @@ app.post('/api/wallet/me', (req, res) => {
   const displayName = String(req.body?.displayName || '').trim();
   const avatarUrl = String(req.body?.avatarUrl || '').trim();
   const updateProfile = Boolean(req.body?.updateProfile);
+  /** Client already claimed welcome on this device — never re-grant after API wipe */
+  const clientWelcomeClaimed = Boolean(req.body?.welcomeAlreadyClaimed);
 
   let row: WalletRow;
+  let welcomeBonusGrantedNow = false;
   if (!existed) {
     row = ensureWallet(userId, {
       displayName: displayName || 'Luma Fan',
       avatarUrl: avatarUrl || undefined,
       role: req.body?.role === 'host' ? 'host' : 'user',
     });
-    // Welcome coins for brand-new user profiles
-    row.coinBalance = 100;
-    row.xp = 10;
-    wallets.set(userId, row);
-    pushLedger(userId, 100, 'Welcome bonus', 'credit');
-    broadcastWs({
-      type: 'wallet:updated',
-      payload: { userId, coinBalance: row.coinBalance, xp: row.xp },
-    });
+    const alreadyPaid =
+      hasWelcomeBonusAlready(userId) || clientWelcomeClaimed;
+    if (alreadyPaid) {
+      // Recreated after restart — do NOT add another +100
+      row.coinBalance = 0;
+      row.xp = row.xp || 0;
+      markWelcomeBonusPaid(userId);
+      wallets.set(userId, row);
+      persist();
+    } else {
+      row.coinBalance = 100;
+      row.xp = 10;
+      markWelcomeBonusPaid(userId);
+      wallets.set(userId, row);
+      pushLedger(userId, 100, 'Welcome bonus', 'credit');
+      welcomeBonusGrantedNow = true;
+      broadcastWs({
+        type: 'wallet:updated',
+        payload: { userId, coinBalance: row.coinBalance, xp: row.xp },
+      });
+    }
   } else {
     row = ensureWallet(userId);
+    if (row.welcomeBonusGranted || clientWelcomeClaimed) {
+      markWelcomeBonusPaid(userId);
+    }
     if (updateProfile || displayName) {
       if (displayName) row.displayName = displayName;
       if (avatarUrl) row.avatarUrl = avatarUrl;
       wallets.set(userId, row);
+      persist();
     }
   }
 
-  res.json({ wallet: walletPublic(row), created: !existed });
+  res.json({
+    wallet: walletPublic(row),
+    created: !existed,
+    welcomeBonus: welcomeBonusGrantedNow,
+  });
 });
 
 /**
@@ -2756,6 +2816,7 @@ function buildSnapshot(): PersistedSnapshot {
     giftHistory: giftHistory as unknown as Array<Record<string, unknown>>,
     liveSessionHistory: liveSessionHistory as unknown as Array<Record<string, unknown>>,
     avatars: dumpAvatarsForSnapshot(),
+    welcomeBonusPaidIds: [...welcomeBonusPaidIds],
   };
 }
 
@@ -2768,12 +2829,27 @@ function restoreFromDisk() {
   if (!snap) return;
   for (const w of snap.wallets || []) {
     const row = w as unknown as WalletRow;
-    if (row?.userId) wallets.set(row.userId, row);
+    if (row?.userId) {
+      wallets.set(row.userId, row);
+      if (row.welcomeBonusGranted) welcomeBonusPaidIds.add(row.userId);
+    }
   }
   for (const block of snap.walletLedger || []) {
     if (block?.userId && Array.isArray(block.entries)) {
       walletLedger.set(block.userId, block.entries as unknown as LedgerEntry[]);
+      if (
+        (block.entries as LedgerEntry[]).some(
+          (e) =>
+            e.kind === 'credit' &&
+            /welcome\s*bonus/i.test(String(e.reason || '')),
+        )
+      ) {
+        welcomeBonusPaidIds.add(block.userId);
+      }
     }
+  }
+  for (const id of snap.welcomeBonusPaidIds || []) {
+    if (id) welcomeBonusPaidIds.add(String(id));
   }
   if (Array.isArray(snap.withdrawals)) {
     withdrawals.length = 0;
@@ -2855,12 +2931,27 @@ async function applyMongoOrDisk() {
   }
   for (const w of snap.wallets || []) {
     const row = w as unknown as WalletRow;
-    if (row?.userId) wallets.set(row.userId, row);
+    if (row?.userId) {
+      wallets.set(row.userId, row);
+      if (row.welcomeBonusGranted) welcomeBonusPaidIds.add(row.userId);
+    }
   }
   for (const block of snap.walletLedger || []) {
     if (block?.userId && Array.isArray(block.entries)) {
       walletLedger.set(block.userId, block.entries as unknown as LedgerEntry[]);
+      if (
+        (block.entries as LedgerEntry[]).some(
+          (e) =>
+            e.kind === 'credit' &&
+            /welcome\s*bonus/i.test(String(e.reason || '')),
+        )
+      ) {
+        welcomeBonusPaidIds.add(block.userId);
+      }
     }
+  }
+  for (const id of snap.welcomeBonusPaidIds || []) {
+    if (id) welcomeBonusPaidIds.add(String(id));
   }
   if (Array.isArray(snap.withdrawals)) {
     withdrawals.length = 0;
