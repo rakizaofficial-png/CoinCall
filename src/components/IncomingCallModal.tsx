@@ -30,7 +30,7 @@ type Props = {
 function safeAvatar(call: BridgeCall) {
   const raw = call.userAvatar || '';
   if (!raw || raw.startsWith('blob:') || raw.startsWith('data:')) {
-    return `https://i.pravatar.cc/300?u=${encodeURIComponent(call.userId)}`;
+    return `https://api.dicebear.com/9.x/avataaars/png?seed=${encodeURIComponent(call.userId)}&size=300`;
   }
   return raw;
 }

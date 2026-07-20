@@ -1653,6 +1653,7 @@ setInterval(flushWalletsToDisk, 15_000);
 type ActiveUserRow = {
   userId: string;
   userName: string;
+  avatarUrl?: string;
   role: 'user' | 'host';
   lastSeen: number;
 };
@@ -1702,14 +1703,26 @@ const massTextHistory: Array<{
 function touchActiveUser(input: {
   userId: string;
   userName?: string;
+  avatarUrl?: string;
   role?: 'user' | 'host';
 }) {
   const userId = String(input.userId || '').trim();
   if (!userId || userId === 'anon' || userId === 'system') return;
   const prev = activeUsers.get(userId);
+  const wallet = wallets.get(userId);
+  const nextName = String(
+    input.userName ||
+      prev?.userName ||
+      wallet?.displayName ||
+      'User',
+  ).slice(0, 40);
+  const nextAvatar =
+    String(input.avatarUrl || prev?.avatarUrl || wallet?.avatarUrl || '').trim() ||
+    undefined;
   activeUsers.set(userId, {
     userId,
-    userName: String(input.userName || prev?.userName || 'User').slice(0, 40),
+    userName: nextName,
+    avatarUrl: nextAvatar,
     role: input.role || prev?.role || 'user',
     lastSeen: Date.now(),
   });
@@ -1726,6 +1739,17 @@ function listActiveUsers() {
   pruneActiveUsers();
   return [...activeUsers.values()]
     .filter((u) => u.role === 'user')
+    .map((u) => {
+      const wallet = wallets.get(u.userId);
+      return {
+        ...u,
+        userName:
+          u.userName && u.userName !== 'User'
+            ? u.userName
+            : wallet?.displayName || u.userName,
+        avatarUrl: u.avatarUrl || wallet?.avatarUrl,
+      };
+    })
     .sort((a, b) => b.lastSeen - a.lastSeen);
 }
 
@@ -3416,6 +3440,7 @@ app.post('/api/users/active', (req, res) => {
   touchActiveUser({
     userId,
     userName: String(req.body?.userName || 'User'),
+    avatarUrl: req.body?.avatarUrl ? String(req.body.avatarUrl) : undefined,
     role: req.body?.role === 'host' ? 'host' : 'user',
   });
   res.json({ ok: true, users: listActiveUsers() });
@@ -3698,8 +3723,9 @@ wss.on('connection', (socket, req) => {
   const url = new URL(req.url || '/', `http://${req.headers.host}`);
   const userId = url.searchParams.get('userId') || 'anon';
   const userName = url.searchParams.get('name') || 'User';
+  const avatarUrl = url.searchParams.get('avatar') || undefined;
   const role = url.searchParams.get('role') === 'host' ? 'host' : 'user';
-  touchActiveUser({ userId, userName, role });
+  touchActiveUser({ userId, userName, avatarUrl: avatarUrl || undefined, role });
   socket.send(JSON.stringify({ type: 'connected', payload: { userId } }));
 
   socket.on('message', (buf) => {
@@ -3727,6 +3753,7 @@ wss.on('connection', (socket, req) => {
         touchActiveUser({
           userId: hostId,
           userName: String(payload.name || payload.userName || userName),
+          avatarUrl: String(payload.avatarUrl || avatarUrl || '') || undefined,
           role: type === 'host:hello' ? 'host' : 'user',
         });
         socket.send(JSON.stringify({ type: 'host:welcome', payload: { hostId } }));

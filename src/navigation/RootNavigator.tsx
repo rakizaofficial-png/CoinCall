@@ -19,6 +19,7 @@ import { CallScreen } from '../screens/call/CallScreen';
 import { ChatScreen } from '../screens/main/ChatScreen';
 import { EarningsScreen } from '../screens/main/EarningsScreen';
 import { EditHostProfileScreen } from '../screens/main/EditHostProfileScreen';
+import { FanProfileScreen } from '../screens/main/FanProfileScreen';
 import { HostProfileScreen } from '../screens/main/HostProfileScreen';
 import { NotificationsScreen } from '../screens/main/NotificationsScreen';
 import { SettingsScreen } from '../screens/main/SettingsScreen';
@@ -70,6 +71,7 @@ function AuthenticatedApp() {
         <Stack.Navigator screenOptions={{ headerShown: false, animation: 'fade_from_bottom' }}>
           <Stack.Screen name="MainTabs" component={MainTabNavigator} />
           <Stack.Screen name="HostProfile" component={HostProfileScreen} />
+          <Stack.Screen name="FanProfile" component={FanProfileScreen} />
           <Stack.Screen name="Call" component={CallScreen} />
           <Stack.Screen name="DirectChat" component={ChatScreen} />
           <Stack.Screen name="Notifications" component={NotificationsScreen} />

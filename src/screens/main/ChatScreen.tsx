@@ -97,13 +97,27 @@ export function ChatScreen({ navigation, route }: Props) {
         <Pressable onPress={() => navigation.goBack()} style={styles.back}>
           <ChevronLeft size={22} color={colors.text} />
         </Pressable>
-        <Avatar uri={peerAvatar} size={36} />
-        <View style={{ flex: 1, marginLeft: 10 }}>
-          <Text style={[styles.name, { color: colors.text }]} numberOfLines={1}>
-            {peerName}
-          </Text>
-          <Text style={[styles.sub, { color: colors.textMuted }]}>Direct message</Text>
-        </View>
+        <Pressable
+          onPress={() => {
+            if (peerId.startsWith('admin') || peerId === 'admin_support') return;
+            navigation.navigate('FanProfile', {
+              userId: peerId,
+              userName: peerName,
+              avatarUrl: peerAvatar,
+            });
+          }}
+          style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}
+        >
+          <Avatar uri={peerAvatar} size={36} />
+          <View style={{ flex: 1, marginLeft: 10 }}>
+            <Text style={[styles.name, { color: colors.text }]} numberOfLines={1}>
+              {peerName}
+            </Text>
+            <Text style={[styles.sub, { color: colors.textMuted }]}>
+              Direct message
+            </Text>
+          </View>
+        </Pressable>
         <Pressable
           onPress={() => {
             const r = startCall(peerId);

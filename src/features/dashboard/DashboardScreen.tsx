@@ -80,10 +80,10 @@ export function DashboardScreen({ navigation }: { navigation: any }) {
       const p = data.profile;
       notify('Found', `${p.displayName} · ${p.role}`);
       if (p.role === 'user') {
-        navigation.navigate('DirectChat', {
-          peerId: p.userId,
-          peerName: p.displayName,
-          peerAvatar: p.avatarUrl,
+        navigation.navigate('FanProfile', {
+          userId: p.userId,
+          userName: p.displayName,
+          avatarUrl: p.avatarUrl,
         });
       } else {
         navigation.navigate('HostProfile', { hostId: p.userId });

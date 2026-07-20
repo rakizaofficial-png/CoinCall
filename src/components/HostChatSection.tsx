@@ -48,6 +48,7 @@ export function HostChatSection({ compact, onOpenImage }: Props) {
   const [activeUsers, setActiveUsers] = useState<ActiveUserRow[]>([]);
   const [peerId, setPeerId] = useState<string | null>(null);
   const [peerName, setPeerName] = useState('');
+  const [peerAvatar, setPeerAvatar] = useState('');
   const [dmMessages, setDmMessages] = useState<ChatMessage[]>([]);
 
   useEffect(() => {
@@ -71,18 +72,37 @@ export function HostChatSection({ compact, onOpenImage }: Props) {
   }, [peerId, user.id]);
 
   const chatUsers = useMemo(() => {
-    const map = new Map<string, { id: string; name: string }>();
+    const map = new Map<
+      string,
+      { id: string; name: string; avatarUrl?: string }
+    >();
     for (const u of activeUsers) {
-      if (u.userId !== user.id) map.set(u.userId, { id: u.userId, name: u.userName });
+      if (u.userId !== user.id) {
+        map.set(u.userId, {
+          id: u.userId,
+          name: u.userName,
+          avatarUrl: u.avatarUrl,
+        });
+      }
     }
     for (const c of comments) {
       if (c.userId && c.userId !== user.id && c.userId !== 'system') {
-        map.set(c.userId, { id: c.userId, name: c.userName });
+        const prev = map.get(c.userId);
+        map.set(c.userId, {
+          id: c.userId,
+          name: c.userName,
+          avatarUrl: prev?.avatarUrl,
+        });
       }
     }
     for (const g of gifts) {
       if (g.fromId && g.fromId !== user.id) {
-        map.set(g.fromId, { id: g.fromId, name: g.fromName });
+        const prev = map.get(g.fromId);
+        map.set(g.fromId, {
+          id: g.fromId,
+          name: g.fromName,
+          avatarUrl: prev?.avatarUrl,
+        });
       }
     }
     return [...map.values()];
@@ -117,6 +137,7 @@ export function HostChatSection({ compact, onOpenImage }: Props) {
         fromName: user.name,
         fromAvatar: user.avatarUrl,
         peerName,
+        peerAvatar: peerAvatar || undefined,
         fromRole: 'host',
       });
       setText('');
@@ -194,14 +215,19 @@ export function HostChatSection({ compact, onOpenImage }: Props) {
           }
           renderItem={({ item }) => {
             const on = peerId === item.id;
+            const photo =
+              item.avatarUrl ||
+              `https://api.dicebear.com/9.x/avataaars/png?seed=${encodeURIComponent(item.id)}&size=96`;
             return (
               <Pressable
                 onPress={() => {
                   setPeerId(item.id);
                   setPeerName(item.name);
+                  setPeerAvatar(photo);
                 }}
                 style={[styles.userChip, on && styles.userChipOn]}
               >
+                <Image source={{ uri: photo }} style={styles.userChipAvatar} />
                 <Text style={styles.userChipText} numberOfLines={1}>
                   {item.name}
                 </Text>
@@ -333,10 +359,18 @@ const styles = StyleSheet.create({
     minWidth: 88,
     borderWidth: 1,
     borderColor: 'transparent',
+    alignItems: 'center',
   },
   userChipOn: {
     borderColor: '#9B8CFF',
     backgroundColor: 'rgba(155,140,255,0.25)',
+  },
+  userChipAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 10,
+    marginBottom: 4,
+    backgroundColor: 'rgba(255,255,255,0.1)',
   },
   userChipText: { color: '#fff', fontWeight: '800', fontSize: 12 },
   userChipId: { color: 'rgba(255,255,255,0.45)', fontSize: 9, marginTop: 2 },

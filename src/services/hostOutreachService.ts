@@ -38,8 +38,19 @@ export type RechargeEvent = {
 export type ActiveUserRow = {
   userId: string;
   userName: string;
+  avatarUrl?: string;
   role: 'user' | 'host';
   lastSeen: number;
+};
+
+export type FanProfile = {
+  userId: string;
+  displayName: string;
+  avatarUrl?: string;
+  appId?: string;
+  xp?: number;
+  isPremium?: boolean;
+  online?: boolean;
 };
 
 export async function fetchActiveUsers(): Promise<ActiveUserRow[]> {
@@ -48,6 +59,56 @@ export async function fetchActiveUsers(): Promise<ActiveUserRow[]> {
   const data = (await res.json()) as { users?: ActiveUserRow[] };
   return data.users || [];
 }
+
+/** Public fan profile for host UI (name + avatar + app id). */
+export async function fetchFanProfile(userId: string): Promise<FanProfile | null> {
+  const id = String(userId || '').trim();
+  if (!id) return null;
+  try {
+    const [walletRes, active] = await Promise.all([
+      fetch(`${apiBase()}/wallet/${encodeURIComponent(id)}`),
+      fetchActiveUsers(),
+    ]);
+    const online = active.some((u) => u.userId === id && u.role === 'user');
+    const activeRow = active.find((u) => u.userId === id);
+    if (walletRes.ok) {
+      const data = (await walletRes.json()) as {
+        wallet?: {
+          userId: string;
+          displayName?: string;
+          avatarUrl?: string;
+          appId?: string;
+          xp?: number;
+          isPremium?: boolean;
+        };
+      };
+      const w = data.wallet;
+      if (w) {
+        return {
+          userId: w.userId,
+          displayName: w.displayName || activeRow?.userName || 'Fan',
+          avatarUrl: w.avatarUrl || activeRow?.avatarUrl,
+          appId: w.appId,
+          xp: w.xp,
+          isPremium: w.isPremium,
+          online,
+        };
+      }
+    }
+    if (activeRow) {
+      return {
+        userId: activeRow.userId,
+        displayName: activeRow.userName,
+        avatarUrl: activeRow.avatarUrl,
+        online,
+      };
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
 
 export async function fetchRechargeBoard(): Promise<{
   users: RechargeUserRow[];

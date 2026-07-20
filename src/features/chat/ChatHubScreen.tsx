@@ -9,6 +9,7 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import {
   FlatList,
+  Image,
   Modal,
   Pressable,
   StyleSheet,
@@ -24,6 +25,7 @@ import {
   fetchActiveUsers,
   fetchRechargeBoard,
   massTextAllActiveUsers,
+  type ActiveUserRow,
   type RechargeEvent,
 } from '../../services/hostOutreachService';
 import {
@@ -69,6 +71,7 @@ export function ChatHubScreen({ navigation }: { navigation: any }) {
   const [rechargeEvents, setRechargeEvents] = useState<RechargeEvent[]>([]);
   const [dmThreads, setDmThreads] = useState<DmThreadRow[]>([]);
   const [activeCount, setActiveCount] = useState(0);
+  const [activeFans, setActiveFans] = useState<ActiveUserRow[]>([]);
   const [massOpen, setMassOpen] = useState(false);
   const [massText, setMassText] = useState('');
   const [sending, setSending] = useState(false);
@@ -82,7 +85,11 @@ export function ChatHubScreen({ navigation }: { navigation: any }) {
   useEffect(() => {
     const load = () => {
       void fetchRechargeBoard().then((b) => setRechargeEvents(b.events || []));
-      void fetchActiveUsers().then((u) => setActiveCount(u.length));
+      void fetchActiveUsers().then((u) => {
+        const fans = u.filter((row) => row.role === 'user');
+        setActiveCount(fans.length);
+        setActiveFans(fans.slice(0, 24));
+      });
       void fetchDmThreadsForHost(hostId).then(setDmThreads);
     };
     load();
@@ -239,26 +246,63 @@ export function ChatHubScreen({ navigation }: { navigation: any }) {
 
       <Text style={[styles.pageTitle, { color: colors.text }]}>Messages</Text>
 
+      {activeFans.length > 0 ? (
+        <View style={{ marginBottom: 10 }}>
+          <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>
+            Active fans · tap to message
+          </Text>
+          <FlatList
+            horizontal
+            data={activeFans}
+            keyExtractor={(u) => u.userId}
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ gap: 10, paddingHorizontal: 2, paddingBottom: 6 }}
+            renderItem={({ item }) => {
+              const photo =
+                item.avatarUrl ||
+                `https://api.dicebear.com/9.x/avataaars/png?seed=${encodeURIComponent(item.userId)}&size=128`;
+              return (
+                <Pressable
+                  onPress={() =>
+                    navigation.navigate('FanProfile', {
+                      userId: item.userId,
+                      userName: item.userName,
+                      avatarUrl: item.avatarUrl,
+                    })
+                  }
+                  style={styles.fanChip}
+                >
+                  <Image source={{ uri: photo }} style={styles.fanChipAvatar} />
+                  <Text style={[styles.fanChipName, { color: colors.text }]} numberOfLines={1}>
+                    {item.userName}
+                  </Text>
+                </Pressable>
+              );
+            }}
+          />
+        </View>
+      ) : null}
+
       {dmThreads.length > 0 ? (
         <View style={{ marginBottom: 8 }}>
           <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>Fan chats</Text>
-          {dmThreads.slice(0, 20).map((t) => (
+          {dmThreads.slice(0, 20).map((t) => {
+            const photo =
+              t.userAvatar ||
+              `https://api.dicebear.com/9.x/avataaars/png?seed=${encodeURIComponent(t.userId)}&size=128`;
+            return (
             <Pressable
               key={t.id}
               onPress={() =>
                 navigation.navigate('DirectChat', {
                   peerId: t.userId,
                   peerName: t.userName,
-                  peerAvatar: t.userAvatar,
+                  peerAvatar: t.userAvatar || photo,
                 })
               }
               style={[styles.row, { borderBottomColor: 'rgba(255,255,255,0.06)' }]}
             >
-              <View style={[styles.iconOrb, { backgroundColor: '#F59E0B' }]}>
-                <Text style={{ color: '#fff', fontWeight: '900' }}>
-                  {(t.userName || 'F').slice(0, 1).toUpperCase()}
-                </Text>
-              </View>
+              <Image source={{ uri: photo }} style={styles.threadAvatar} />
               <View style={styles.rowBody}>
                 <View style={styles.rowTop}>
                   <Text style={[styles.rowTitle, { color: colors.text }]}>
@@ -271,7 +315,8 @@ export function ChatHubScreen({ navigation }: { navigation: any }) {
                 </Text>
               </View>
             </Pressable>
-          ))}
+            );
+          })}
         </View>
       ) : (
         <Text style={[styles.emptyFans, { color: colors.textMuted }]}>
@@ -431,6 +476,31 @@ const styles = StyleSheet.create({
     borderRadius: 26,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  threadAvatar: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  fanChip: {
+    width: 76,
+    alignItems: 'center',
+  },
+  fanChipAvatar: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    borderWidth: 2,
+    borderColor: 'rgba(255,77,109,0.45)',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  fanChipName: {
+    marginTop: 6,
+    fontSize: 11,
+    fontWeight: '700',
+    textAlign: 'center',
+    width: 76,
   },
   rowBody: { flex: 1, minWidth: 0 },
   rowTop: {

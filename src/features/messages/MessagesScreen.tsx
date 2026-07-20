@@ -6,7 +6,7 @@ import {
   Sparkles,
 } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Image, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import {
   BodyText,
   DisplayText,
@@ -33,7 +33,15 @@ type InboxRow = {
   body: string;
   kind: 'private' | 'support' | 'system';
   at: number;
+  avatarUrl?: string;
 };
+
+function fanAvatar(userId: string, avatarUrl?: string) {
+  if (avatarUrl && !avatarUrl.startsWith('blob:') && !avatarUrl.startsWith('data:')) {
+    return avatarUrl;
+  }
+  return `https://api.dicebear.com/9.x/avataaars/png?seed=${encodeURIComponent(userId)}&size=128`;
+}
 
 export function MessagesScreen({ navigation }: { navigation: any }) {
   const { user } = useApp();
@@ -41,7 +49,9 @@ export function MessagesScreen({ navigation }: { navigation: any }) {
   const [compose, setCompose] = useState('');
   const [supportNote, setSupportNote] = useState('');
   const [recharges, setRecharges] = useState<RechargeUserRow[]>([]);
-  const [fans, setFans] = useState<{ id: string; name: string }[]>([]);
+  const [fans, setFans] = useState<
+    { id: string; name: string; avatarUrl?: string }[]
+  >([]);
 
   useEffect(() => {
     let dead = false;
@@ -56,8 +66,12 @@ export function MessagesScreen({ navigation }: { navigation: any }) {
         setFans(
           users
             .filter((u) => u.role === 'user')
-            .slice(0, 12)
-            .map((u) => ({ id: u.userId, name: u.userName })),
+            .slice(0, 20)
+            .map((u) => ({
+              id: u.userId,
+              name: u.userName,
+              avatarUrl: u.avatarUrl,
+            })),
         );
       } catch {
         /* keep empty */
@@ -79,9 +93,10 @@ export function MessagesScreen({ navigation }: { navigation: any }) {
   const privateRows: InboxRow[] = fans.map((f, i) => ({
     id: f.id,
     title: f.name,
-    body: i === 0 ? 'Tap to open private chat' : 'Fan conversation',
+    body: i === 0 ? 'Tap to open profile · message' : 'Active on Luma',
     kind: 'private',
     at: Date.now() - i * 60_000,
+    avatarUrl: f.avatarUrl,
   }));
 
   const supportRow: InboxRow = {
@@ -120,7 +135,7 @@ export function MessagesScreen({ navigation }: { navigation: any }) {
           </BodyText>
           <DisplayText size={30}>Messages</DisplayText>
           <BodyText soft style={{ marginTop: 4 }}>
-            Private chat · host support · system alerts
+            Active fans · private chat · host support
           </BodyText>
         </View>
 
@@ -143,7 +158,12 @@ export function MessagesScreen({ navigation }: { navigation: any }) {
 
           <SectionLabel title="Host support" />
           <SoftPress
-            onPress={() => navigation.navigate('DirectChat', { peerId: ADMIN_SUPPORT_ID, peerName: 'Admin' })}
+            onPress={() =>
+              navigation.navigate('DirectChat', {
+                peerId: ADMIN_SUPPORT_ID,
+                peerName: 'Admin',
+              })
+            }
           >
             <GlassPanel pad={14} style={{ marginBottom: 10 }}>
               <View style={styles.inboxRow}>
@@ -175,32 +195,44 @@ export function MessagesScreen({ navigation }: { navigation: any }) {
             />
           </GlassPanel>
 
-          <SectionLabel title="Private chat" />
+          <SectionLabel title="Active fans" />
           {privateRows.length === 0 ? (
             <GlassPanel style={{ marginBottom: 10 }}>
-              <BodyText soft>Fans appear when they message or recharge.</BodyText>
+              <BodyText soft>
+                Fans appear when they open Luma or join your live.
+              </BodyText>
             </GlassPanel>
           ) : (
             privateRows.map((row) => (
               <SoftPress
                 key={row.id}
                 onPress={() =>
-                  navigation.navigate('DirectChat', {
-                    peerId: row.id,
-                    peerName: row.title,
+                  navigation.navigate('FanProfile', {
+                    userId: row.id,
+                    userName: row.title,
+                    avatarUrl: row.avatarUrl,
                   })
                 }
               >
                 <GlassPanel pad={14} style={{ marginBottom: 10 }}>
                   <View style={styles.inboxRow}>
-                    <View style={[styles.iconBubble, { backgroundColor: 'rgba(255,77,109,0.14)' }]}>
-                      <MessageCircle size={18} color={premium.rose} />
-                    </View>
+                    <Image
+                      source={{ uri: fanAvatar(row.id, row.avatarUrl) }}
+                      style={styles.fanAvatar}
+                    />
                     <View style={{ flex: 1 }}>
                       <BodyText style={{ fontWeight: '800' }}>{row.title}</BodyText>
                       <BodyText mute style={{ fontSize: 12 }} numberOfLines={1}>
                         {row.body}
                       </BodyText>
+                    </View>
+                    <View
+                      style={[
+                        styles.iconBubble,
+                        { backgroundColor: 'rgba(255,77,109,0.14)' },
+                      ]}
+                    >
+                      <MessageCircle size={18} color={premium.rose} />
                     </View>
                   </View>
                 </GlassPanel>
@@ -220,7 +252,12 @@ export function MessagesScreen({ navigation }: { navigation: any }) {
             systemRows.map((row) => (
               <GlassPanel key={row.id} pad={14} style={{ marginBottom: 10 }}>
                 <View style={styles.inboxRow}>
-                  <View style={[styles.iconBubble, { backgroundColor: 'rgba(232,196,124,0.16)' }]}>
+                  <View
+                    style={[
+                      styles.iconBubble,
+                      { backgroundColor: 'rgba(232,196,124,0.16)' },
+                    ]}
+                  >
                     <Sparkles size={18} color={premium.gold} />
                   </View>
                   <View style={{ flex: 1 }}>
@@ -273,5 +310,11 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  fanAvatar: {
+    width: 46,
+    height: 46,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.08)',
   },
 });

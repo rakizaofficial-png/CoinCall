@@ -24,6 +24,7 @@ export type RootStackParamList = {
     role?: 'host' | 'user';
   };
   DirectChat: { peerId: string; peerName?: string; peerAvatar?: string };
+  FanProfile: { userId: string; userName?: string; avatarUrl?: string };
   Notifications: undefined;
   Settings: undefined;
   GoLive: { mode?: 'solo' | 'party' };
