@@ -498,14 +498,15 @@ export default function App() {
         <motion.form
           className="login-card"
           onSubmit={onLogin}
-          initial={{ opacity: 0, y: 20, scale: 0.98 }}
+          initial={{ opacity: 0, y: 22, scale: 0.97 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
-          transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+          transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
         >
-          <p className="login-eyebrow">Web control center</p>
-          <h1>CoinCall Admin</h1>
+          <p className="login-eyebrow">CoinCall · Command</p>
+          <h1>Control Center</h1>
           <p>
-            Agency-grade panel · hosts · revenue · limited agency portal
+            Professional ops console for hosts, agencies, live calls, and
+            revenue — powered for real-time decisions.
           </p>
 
           <div className="login-modes">
@@ -543,7 +544,7 @@ export default function App() {
           />
           {loginMode === 'admin' ? (
             <>
-              <label htmlFor="admin-role">Role</label>
+              <label htmlFor="admin-role">Access role</label>
               <select
                 id="admin-role"
                 value={adminRole === 'agency' ? 'super_admin' : adminRole}
@@ -556,7 +557,7 @@ export default function App() {
               </select>
             </>
           ) : null}
-          <button type="submit">Enter panel</button>
+          <button type="submit">Launch console</button>
           {loginError ? <div className="error">{loginError}</div> : null}
           <p className="login-hint">
             Admin: <code>coincall-admin</code> · Agency demo:{' '}
@@ -575,11 +576,11 @@ export default function App() {
       <aside className="side">
         <div className="brand">
           <div className="brand-mark" aria-hidden>
-            ⚙
+            CC
           </div>
           <div className="brand-text">
-            <strong>ADMIN</strong>
-            <span>{isAgency ? 'Agency portal' : 'CoinCall'}</span>
+            <strong>CoinCall</strong>
+            <span>{isAgency ? 'Agency portal' : 'Command Center'}</span>
           </div>
         </div>
         <div className="side-role">
@@ -619,7 +620,7 @@ export default function App() {
             className="theme-toggle"
             onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
           >
-            {theme === 'dark' ? 'Light mode' : 'Dark mode'}
+            {theme === 'dark' ? '☀ Light mode' : '☾ Dark mode'}
           </button>
           <button className="logout" type="button" onClick={signOut}>
             Sign out
@@ -628,6 +629,16 @@ export default function App() {
       </aside>
 
       <main className="main">
+        <div className="topbar">
+          <div className="topbar-live">
+            <i aria-hidden />
+            Live systems · {stats.liveCalls + stats.liveStreams} active
+          </div>
+          <div className="topbar-live">
+            {isAgency ? agencyName || 'Agency' : 'Platform'} · {stats.online} hosts online
+          </div>
+        </div>
+
         {isAgency ? (
           <div className="limited-banner">
             Limited agency permissions · only your hosts &amp; allowed tools
