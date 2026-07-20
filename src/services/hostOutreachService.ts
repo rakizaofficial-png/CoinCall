@@ -144,13 +144,13 @@ export async function massTextAllActiveUsers(input: {
     error?: string;
   };
   if (!res.ok) {
-    throw new Error(data.error || 'Mass text failed');
+    throw new Error(data.error || 'Mass text failed — no active users');
   }
 
   const ids =
     data.userIds ||
     data.recipients?.map((r) => r.userId) ||
-    (await fetchActiveUsers()).map((u) => u.userId);
+    [];
 
   if (ids.length) {
     await massTextUsers({

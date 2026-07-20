@@ -84,7 +84,7 @@ export function PartyHubScreen({ navigation }: { navigation: any }) {
         <Pressable
           style={[styles.action, { borderColor: colors.border }]}
           onPress={() =>
-            promptText('Mass text', 'Message all active users', (msg) => {
+            promptText('Mass text', 'Message active users only', (msg) => {
               void massTextAllActive(msg);
             })
           }

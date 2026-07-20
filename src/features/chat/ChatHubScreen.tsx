@@ -382,9 +382,9 @@ export function ChatHubScreen({ navigation }: { navigation: any }) {
               </Pressable>
             </View>
             <Text style={styles.sheetSub}>
-              Send one message to all active users
-              {activeCount ? ` · ${activeCount} online` : ''}
-              {rechargeUsers.length ? ` · ${rechargeUsers.length} rechargers` : ''}
+              Send one message to active users only
+              {activeCount ? ` · ${activeCount} online` : ' · none online'}
+              {rechargeUsers.length ? ` · ${rechargeUsers.length} rechargers (not targeted)` : ''}
             </Text>
             <TextInput
               style={styles.massInput}

@@ -148,12 +148,12 @@ export function MessagesScreen({ navigation }: { navigation: any }) {
             <TextInput
               value={compose}
               onChangeText={setCompose}
-              placeholder="Message all active fans…"
+              placeholder="Message active fans only…"
               placeholderTextColor={premium.textMute}
               style={styles.input}
               multiline
             />
-            <GradientCTA label="Send to active users" onPress={() => void sendMass()} />
+            <GradientCTA label="Send to active users only" onPress={() => void sendMass()} />
           </GlassPanel>
 
           <SectionLabel title="Host support" />

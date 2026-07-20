@@ -3479,7 +3479,7 @@ app.get('/api/recharges', (_req, res) => {
   });
 });
 
-/** Host mass-texts ALL known users (active + rechargers + wallets) */
+/** Host mass-texts ONLY real-time active Luma users (role=user) */
 app.post('/api/host/mass-text', (req, res) => {
   const hostId = String(req.body?.hostId || '').trim();
   const hostName = String(req.body?.hostName || 'Host').slice(0, 40);
@@ -3490,36 +3490,23 @@ app.post('/api/host/mass-text', (req, res) => {
   }
 
   pruneActiveUsers();
-  const targetMap = new Map<string, { userId: string; userName: string }>();
-  for (const u of listActiveUsers()) {
-    if (u.userId !== hostId) targetMap.set(u.userId, { userId: u.userId, userName: u.userName });
-  }
-  for (const u of rechargeByUser.values()) {
-    if (u.userId !== hostId) {
-      targetMap.set(u.userId, { userId: u.userId, userName: u.userName });
-    }
-  }
-  for (const w of wallets.values()) {
-    if (w.role === 'user' && w.userId !== hostId) {
-      if (!targetMap.has(w.userId)) {
-        targetMap.set(w.userId, {
-          userId: w.userId,
-          userName: w.displayName || 'User',
-        });
-      }
-    }
+  const targets = listActiveUsers()
+    .filter((u) => u.role === 'user' && u.userId !== hostId)
+    .map((u) => ({
+      userId: u.userId,
+      userName: u.userName,
+    }));
+
+  if (targets.length === 0) {
+    res.status(409).json({
+      error: 'No active users online right now',
+      sent: 0,
+      userIds: [],
+      recipients: [],
+    });
+    return;
   }
 
-  // Ensure demo recipients so mass text always has targets in empty env
-  if (targetMap.size === 0) {
-    for (let i = 1; i <= 8; i++) {
-      const id = `demo_user_${i}`;
-      touchActiveUser({ userId: id, userName: `Fan ${i}`, role: 'user' });
-      targetMap.set(id, { userId: id, userName: `Fan ${i}` });
-    }
-  }
-
-  const targets = [...targetMap.values()];
   const payload = {
     id: randomUUID().slice(0, 10),
     hostId,
@@ -3527,13 +3514,13 @@ app.post('/api/host/mass-text', (req, res) => {
     text,
     toCount: targets.length,
     userIds: targets.map((u) => u.userId),
-    broadcast: true,
+    broadcast: false,
+    activeOnly: true,
     at: Date.now(),
   };
   massTextHistory.unshift(payload);
   if (massTextHistory.length > 50) massTextHistory.length = 50;
 
-  // Reach every connected Luma fan over WS (not only listed targets)
   broadcastWs({ type: 'mass:text', payload });
   for (const u of targets) {
     pushToHost(u.userId, 'mass_text', payload);
@@ -3541,7 +3528,7 @@ app.post('/api/host/mass-text', (req, res) => {
   pushToHost(hostId, 'mass_text_sent', {
     ...payload,
     title: 'Mass texting sent',
-    body: `Sent to ${targets.length} users`,
+    body: `Sent to ${targets.length} active users`,
   });
   persist();
 

@@ -3,7 +3,6 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
   Animated,
   Easing,
   Image,
@@ -35,6 +34,9 @@ function safeAvatar(call: BridgeCall) {
   return raw;
 }
 
+/**
+ * Zero-lag Attend: navigate to Call immediately, accept + stopLive in background.
+ */
 export function IncomingCallModal({ call, onClear }: Props) {
   const { colors } = useTheme();
   const { myLiveRoom, stopLive } = useLiveStudio();
@@ -87,27 +89,31 @@ export function IncomingCallModal({ call, onClear }: Props) {
     });
   };
 
-  const accept = async () => {
+  const accept = () => {
     if (busy) return;
     setBusy(true);
     stopIncomingRingtone();
-    try {
-      // Private call takes over — end live so video isn't dual-mode
-      if (myLiveRoom?.isLive) {
-        await stopLive().catch(() => undefined);
+
+    // Instant UI: open Call with ringing payload, sync accept in background
+    const optimistic: BridgeCall = { ...call };
+    goToCall(optimistic);
+
+    void (async () => {
+      try {
+        if (myLiveRoom?.isLive) {
+          void stopLive().catch(() => undefined);
+        }
+        await acceptBridgeCall(call.id);
+      } catch (e: unknown) {
+        const message =
+          e instanceof Error ? e.message : 'Could not accept call';
+        if (message.toLowerCase().includes('accepted')) {
+          return;
+        }
+        notify('Accept failed', message.slice(0, 140));
+        if (navigation.canGoBack()) navigation.goBack();
       }
-      const { call: accepted } = await acceptBridgeCall(call.id);
-      goToCall(accepted);
-    } catch (e: unknown) {
-      const message =
-        e instanceof Error ? e.message : 'Could not accept call';
-      if (message.toLowerCase().includes('accepted')) {
-        goToCall(call);
-        return;
-      }
-      notify('Accept failed', message.slice(0, 140));
-      setBusy(false);
-    }
+    })();
   };
 
   const reject = async () => {
@@ -144,7 +150,7 @@ export function IncomingCallModal({ call, onClear }: Props) {
         <View style={styles.row}>
           <Pressable
             style={[styles.btn, styles.reject]}
-            onPress={reject}
+            onPress={() => void reject()}
             disabled={busy}
           >
             <PhoneOff size={28} color="#fff" />
@@ -155,11 +161,7 @@ export function IncomingCallModal({ call, onClear }: Props) {
             onPress={accept}
             disabled={busy}
           >
-            {busy ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Video size={28} color="#fff" />
-            )}
+            <Video size={28} color="#fff" />
             <Text style={styles.btnLabel}>Attend</Text>
           </Pressable>
         </View>

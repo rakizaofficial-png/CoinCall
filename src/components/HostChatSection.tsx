@@ -175,7 +175,7 @@ export function HostChatSection({ compact, onOpenImage }: Props) {
         ? peerId
           ? `Message ${peerName || 'user'}…`
           : 'Select a user first…'
-        : 'Mass text all active users…';
+        : 'Mass text active users only…';
 
   return (
     <View style={[styles.wrap, compact && styles.wrapCompact]}>
@@ -242,7 +242,7 @@ export function HostChatSection({ compact, onOpenImage }: Props) {
 
       {tab === 'mass' ? (
         <Text style={styles.hint}>
-          Sends to every active user ({activeUsers.length} online)
+          Sends to active users only ({activeUsers.filter((u) => u.role === 'user').length} online)
         </Text>
       ) : null}
 
