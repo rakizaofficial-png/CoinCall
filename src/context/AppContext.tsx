@@ -8,9 +8,10 @@ import React, {
   useState,
 } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
-import { COIN_PACKAGES, MOCK_HOSTS, MOCK_NEWS, MOCK_ROOMS } from '../data/mockData';
+import { COIN_PACKAGES, MOCK_NEWS, MOCK_ROOMS } from '../data/mockData';
 import {
   type BridgeCall,
+  fetchBridgeHosts,
   listenIncomingCalls,
   publishHostPresence,
 } from '../services/callBridge';
@@ -252,7 +253,7 @@ export function AppProvider({
     initialUser?.email,
     initialUser?.phone,
   ]);
-  const [hosts, setHosts] = useState<Host[]>(MOCK_HOSTS);
+  const [hosts, setHosts] = useState<Host[]>([]);
   const [news, setNews] = useState<NewsItem[]>(MOCK_NEWS);
   const [rooms, setRooms] = useState<PartyRoom[]>(MOCK_ROOMS);
   const [transactions, setTransactions] = useState<Transaction[]>([
@@ -276,6 +277,52 @@ export function AppProvider({
   const [partyLiveSeconds, setPartyLiveSeconds] = useState(0);
   const [hostOnline, setHostOnlineState] = useState(true);
   const [beautyOn, setBeautyOn] = useState(true);
+
+  // Sync online hosts from API — offline hosts are never listed
+  useEffect(() => {
+    let cancelled = false;
+    const mapBridge = (list: Awaited<ReturnType<typeof fetchBridgeHosts>>): Host[] =>
+      list
+        .filter((h) => h.isOnline || h.isLive)
+        .map((h) => ({
+          id: h.id,
+          name: h.name,
+          avatarUrl: h.avatarUrl || '',
+          country: h.country || '',
+          level: 1,
+          isVip: false,
+          isOnline: Boolean(h.isOnline),
+          isLive: Boolean(h.isLive),
+          isOnCall: Boolean(h.isOnCall),
+          ratePerMinute: h.ratePerMinute || 80,
+          rating: 4.8,
+          bio: h.isLive ? 'Live now' : 'Online · ready for 1v1',
+          photos: h.avatarUrl ? [h.avatarUrl] : [],
+          totalCalls: 0,
+          todayMinutes: 0,
+          longestCallSeconds: 0,
+          todayCoins: 0,
+          currentCallSeconds: 0,
+        }));
+
+    const load = async () => {
+      try {
+        const list = await fetchBridgeHosts();
+        if (!cancelled) setHosts(mapBridge(list));
+      } catch {
+        if (!cancelled) {
+          setHosts((prev) => prev.filter((h) => h.isOnline || h.isLive));
+        }
+      }
+    };
+    void load();
+    const timer = setInterval(() => void load(), 8_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, []);
+
   const [points, setPoints] = useState(120);
   const [hostEarnings, setHostEarnings] = useState({
     call: 0,
@@ -1324,7 +1371,9 @@ export function AppProvider({
   );
 
   const filteredHosts = useMemo(() => {
-    let list = hosts.filter((h) => !blockedIds.includes(h.id));
+    let list = hosts.filter(
+      (h) => !blockedIds.includes(h.id) && (h.isOnline || h.isLive),
+    );
     if (homeFilter === 'working') {
       list = list.filter((h) => h.isOnCall || h.isLive || h.isOnline);
       list = [...list].sort((a, b) => {
@@ -1343,14 +1392,17 @@ export function AppProvider({
   }, [blockedIds, homeFilter, hosts]);
 
   const liveHosts = useMemo(
-    () => hosts.filter((h) => h.isLive && !blockedIds.includes(h.id)),
+    () => hosts.filter((h) => h.isLive && h.isOnline && !blockedIds.includes(h.id)),
     [blockedIds, hosts],
   );
 
   const workingHosts = useMemo(
     () =>
       hosts.filter(
-        (h) => !blockedIds.includes(h.id) && (h.isOnCall || h.isLive || h.isOnline),
+        (h) =>
+          !blockedIds.includes(h.id) &&
+          h.isOnline &&
+          (h.isOnCall || h.isLive || h.isOnline),
       ),
     [blockedIds, hosts],
   );
@@ -1379,7 +1431,7 @@ export function AppProvider({
       rank: 0,
     };
     const others: CompetitionEntry[] = hosts
-      .filter((h) => !blockedIds.includes(h.id))
+      .filter((h) => !blockedIds.includes(h.id) && (h.isOnline || h.isLive))
       .map((h) => ({
         id: h.id,
         name: h.name,

@@ -35,7 +35,16 @@ export function HomeScreen({ navigation }: { navigation: any }) {
   const { liveRooms, myLiveRoom, todayLiveGiftCoins, monthlyEarn } = useLiveStudio();
 
   const onlineHosts = hosts.filter((h) => h.isOnline || h.isLive).slice(0, 8);
-  const liveNow = liveRooms.filter((r) => r.isLive).slice(0, 6);
+  const liveNow = liveRooms.filter((r) => {
+    if (!r.isLive) return false;
+    // Hide rooms whose host is no longer online in the synced list
+    if (r.hostId && r.hostId !== user.id) {
+      const peer = hosts.find((h) => h.id === r.hostId);
+      if (peer && !peer.isOnline && !peer.isLive) return false;
+      if (!peer && r.hostId !== user.id) return false;
+    }
+    return true;
+  }).slice(0, 6);
   const todayEarn =
     hostEarnings.call +
     hostEarnings.gift +

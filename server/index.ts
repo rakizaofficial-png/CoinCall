@@ -401,7 +401,10 @@ function pushToHost(hostId: string, event: string, data: unknown) {
   }
 }
 
-setInterval(() => pruneHosts(), 10_000);
+setInterval(() => {
+  pruneHosts();
+  pruneZombieLiveRooms();
+}, 10_000);
 
 app.get('/api/health', (_req, res) => {
   pruneHosts();
@@ -463,9 +466,10 @@ app.post('/api/hosts/presence', (req, res) => {
 
   const hostId = String(id);
 
-  // Going offline always clears the bridge entry
+  // Going offline always clears the bridge entry + any live rooms
   if (!isOnline) {
     removePresence(hostId);
+    endLiveRoomsForHost(hostId, 'host_offline');
     broadcastWs({
       type: 'host:presence',
       payload: { id: hostId, isOnline: false, readyToCall: false, isLive: false, isOnCall: false },
@@ -582,10 +586,13 @@ app.post('/api/hosts/presence', (req, res) => {
 /** User app: list online CoinCall hosts */
 app.get('/api/hosts', (req, res) => {
   pruneHosts();
+  pruneZombieLiveRooms();
   const readyOnly =
     String(req.query.ready || '') === '1' ||
     String(req.query.ready || '').toLowerCase() === 'true';
   let list = listPresence().filter(isListablePresence);
+  // Never list offline hosts
+  list = list.filter((h) => h.isOnline);
   if (readyOnly) {
     list = list.filter((h) => h.readyToCall);
   }
@@ -2673,6 +2680,50 @@ registerAgencyRoutes(app, {
 
 /** In-memory live rooms (Firebase is source of truth on clients; API mirrors for Luma) */
 const liveRooms = new Map<string, Record<string, unknown>>();
+
+/** End all live rooms for a host (offline / TTL / force). */
+function endLiveRoomsForHost(hostId: string, reason = 'host_offline') {
+  const hid = String(hostId || '').trim();
+  if (!hid) return 0;
+  let n = 0;
+  for (const [id, room] of liveRooms) {
+    if (!room?.isLive) continue;
+    if (String(room.hostId || room.id || '') !== hid) continue;
+    const startedAt = Number(
+      room.startedAt || room.createdAt || room.updatedAt || Date.now(),
+    );
+    const endedAt = Date.now();
+    room.isLive = false;
+    room.endedAt = endedAt;
+    room.endReason = reason;
+    liveRooms.set(id, room);
+    pushLiveSession({
+      id: String(room.id || id),
+      hostId: hid,
+      startedAt,
+      endedAt,
+      durationSec: Math.max(0, Math.floor((endedAt - startedAt) / 1000)),
+      giftCoins: Math.max(0, Math.floor(Number(room.giftCoins) || 0)),
+    });
+    broadcastWs({ type: 'live:ended', payload: { id, reason } });
+    n += 1;
+  }
+  if (n) persist();
+  return n;
+}
+
+/** Drop live rooms whose host is no longer present/online */
+function pruneZombieLiveRooms() {
+  for (const [id, room] of liveRooms) {
+    if (!room?.isLive) continue;
+    const hostId = String(room.hostId || room.id || '');
+    if (!hostId) continue;
+    const presence = getPresence(hostId);
+    if (!presence || !presence.isOnline) {
+      endLiveRoomsForHost(hostId, 'presence_expired');
+    }
+  }
+}
 /** Live room chat (API mirror when Firebase RTDB unavailable on user app) */
 type LiveCommentRow = {
   id: string;
@@ -3095,8 +3146,16 @@ app.post('/api/live/rooms', (req, res) => {
 });
 
 app.get('/api/live/rooms', (req, res) => {
+  pruneHosts();
+  pruneZombieLiveRooms();
   const rooms = [...liveRooms.values()]
-    .filter((r) => r.isLive && String(r.mode || 'solo') !== 'party')
+    .filter((r) => {
+      if (!r.isLive || String(r.mode || 'solo') === 'party') return false;
+      const hostId = String(r.hostId || r.id || '');
+      const presence = hostId ? getPresence(hostId) : undefined;
+      // Host must still be online — offline hosts never appear as live
+      return Boolean(presence?.isOnline && (presence.isLive || r.isLive));
+    })
     .map((r) => {
       const hostId = String(r.hostId || r.id || 'host');
       const hostName = String(r.hostName || 'Host');

@@ -153,6 +153,14 @@ export async function publishHostPresence(input: {
   return (await res.json()) as { ok: boolean; host: BridgeHost };
 }
 
+/** Online hosts currently visible to Luma (offline hosts are omitted by API) */
+export async function fetchBridgeHosts(): Promise<BridgeHost[]> {
+  const res = await fetch(`${base()}/hosts`, { cache: 'no-store' as RequestCache });
+  if (!res.ok) throw new Error(await res.text());
+  const data = (await res.json()) as { hosts?: BridgeHost[] };
+  return (data.hosts || []).filter((h) => h.isOnline || h.isLive);
+}
+
 export async function acceptBridgeCall(callId: string) {
   const res = await fetch(`${base()}/calls/${callId}/accept`, { method: 'POST' });
   if (!res.ok) throw new Error(await res.text());

@@ -104,8 +104,15 @@ function emptySeats(): PartySeatPublic[] {
 }
 
 export function LiveStudioProvider({ children }: { children: React.ReactNode }) {
-  const { user, setHostOnline, hostEarnings, todayLiveSeconds, bumpTodayLiveSeconds, refreshTodayStats } =
-    useApp();
+  const {
+    user,
+    setHostOnline,
+    hostOnline,
+    hostEarnings,
+    todayLiveSeconds,
+    bumpTodayLiveSeconds,
+    refreshTodayStats,
+  } = useApp();
   const [liveRooms, setLiveRooms] = useState<LiveRoom[]>([]);
   const [myLiveRoom, setMyLiveRoom] = useState<LiveRoom | null>(null);
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
@@ -137,6 +144,35 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
   }, []);
 
   useEffect(() => listenLiveRooms(setLiveRooms), []);
+
+  // Going offline ends live so the room disappears from user + host lists
+  useEffect(() => {
+    if (hostOnline) return;
+    if (!myLiveRoom?.isLive) return;
+    const roomId = myLiveRoom.id;
+    void (async () => {
+      try {
+        await endLiveRoom(roomId, user.id);
+      } catch {
+        /* ignore */
+      }
+      setMyLiveRoom(null);
+      setActiveRoomId(null);
+      setBridgeLive(false);
+      void publishHostPresence({
+        id: user.id,
+        name: user.name,
+        avatarUrl: user.avatarUrl || user.photoUrl,
+        photoUrl: user.photoUrl || user.avatarUrl,
+        country: user.country,
+        ratePerMinute: 80,
+        isOnline: false,
+        isLive: false,
+        isOnCall: false,
+      }).catch(() => undefined);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hostOnline, myLiveRoom?.id, myLiveRoom?.isLive, user.id]);
 
   useEffect(() => listenRechargeBoard((users) => setRechargeUsers(users)), []);
 
