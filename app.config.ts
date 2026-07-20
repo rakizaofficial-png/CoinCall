@@ -12,7 +12,8 @@ const IS_PROD =
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: 'CoinCall Beauty',
-  slug: 'coincall-beauty',
+  slug: 'coin-call',
+  owner: 'salman112211',
   version: '1.0.0',
   orientation: 'portrait',
   icon: './assets/icon.png',
@@ -64,6 +65,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   plugins: [
     'expo-dev-client',
+    'expo-font',
     [
       'expo-build-properties',
       {
@@ -101,10 +103,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ],
   extra: {
     eas: {
-      // Filled by `npx eas init` → also set EXPO_PUBLIC_EAS_PROJECT_ID in .env / EAS secrets
+      // Set via `npx eas init` or EXPO_PUBLIC_EAS_PROJECT_ID — links CLI to @salman112211/coin-call
       projectId: process.env.EXPO_PUBLIC_EAS_PROJECT_ID || undefined,
     },
     appEnv: IS_PROD ? 'production' : 'development',
   },
-  owner: process.env.EXPO_OWNER || undefined,
 });

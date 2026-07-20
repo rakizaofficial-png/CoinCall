@@ -1,0 +1,12 @@
+# Keep EAS Android/iOS builds lean — host app only
+/admin
+/server
+/luma-user
+/.data
+/.cursor
+/.expo
+/.expo-home
+/android
+/ios
+**/*.md
+.render*
