@@ -16,8 +16,12 @@ import {
   firebaseSignOut,
   listenAuth,
   submitHostApplicationToFirebase,
+  updateHostProfileInFirebase,
 } from '../services/authService';
-import { uploadHostApplicationMedia, ensurePublicAvatarUrl } from '../services/mediaUploadService';
+import {
+  uploadHostApplicationMedia,
+  ensurePublicAvatarUrl,
+} from '../services/mediaUploadService';
 import { isPublicHttpAvatar } from '../utils/hostAvatar';
 import {
   confirmPhoneOtp,
@@ -95,6 +99,19 @@ type AuthContextValue = {
   /** Dev-only helper — production hosts are approved from Admin panel */
   approveCurrentHost: () => Promise<void>;
   sendLoginOtp: (phone: string) => Promise<void>;
+  /** Approved hosts: edit name, bio, photos, intro video */
+  saveHostProfile: (
+    input: {
+      name: string;
+      bio: string;
+      country?: string;
+      photoUrls: string[];
+      videoUrl?: string;
+      languages?: string[];
+      categories?: string[];
+    },
+    onStage?: (stage: string) => void,
+  ) => Promise<User>;
 };
 
 const STORAGE_KEY = 'coincall_host_user_v1';
@@ -377,6 +394,95 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
   }, [setAuthUser, user, usingFirebase]);
 
+  const saveHostProfile = useCallback(
+    async (
+      input: {
+        name: string;
+        bio: string;
+        country?: string;
+        photoUrls: string[];
+        videoUrl?: string;
+        languages?: string[];
+        categories?: string[];
+      },
+      onStage?: (stage: string) => void,
+    ) => {
+      if (!user) throw new Error('Please sign in first.');
+      if (!input.name.trim()) throw new Error('Display name is required.');
+      if (!input.photoUrls?.length) {
+        throw new Error('Add at least one profile photo.');
+      }
+
+      onStage?.('photos');
+      const uploaded = await withTimeout(
+        uploadHostApplicationMedia(
+          {
+            hostUid: user.id,
+            photoUris: input.photoUrls.slice(0, 6),
+            videoUri: input.videoUrl?.trim() || undefined,
+          },
+          (stage) => onStage?.(stage),
+        ),
+        90_000,
+        'Uploading media',
+      );
+
+      let photos = uploaded.photoUrls.filter(Boolean);
+      if (!photos.length) photos = input.photoUrls.slice(0, 1);
+      // Promote main photo to public https for Luma
+      let mainPhoto = photos[0];
+      if (!isPublicHttpAvatar(mainPhoto)) {
+        const published = await ensurePublicAvatarUrl(user.id, mainPhoto);
+        if (published) mainPhoto = published;
+      }
+      photos = [mainPhoto, ...photos.slice(1)];
+      const videoUrl =
+        uploaded.videoUrl &&
+        (uploaded.videoUrl.startsWith('http') ||
+          uploaded.videoUrl.startsWith('file:') ||
+          uploaded.videoUrl.startsWith('blob:') ||
+          uploaded.videoUrl.startsWith('data:'))
+          ? uploaded.videoUrl
+          : input.videoUrl?.trim() || user.videoUrl || '';
+
+      const patch: User = {
+        ...user,
+        name: input.name.trim(),
+        bio: input.bio.trim() || `${input.name.trim()} · CoinCall host`,
+        country: (input.country || user.country || '').trim() || user.country,
+        photoUrl: mainPhoto,
+        photoUrls: photos,
+        avatarUrl: mainPhoto,
+        videoUrl: videoUrl || undefined,
+        languages: input.languages?.length
+          ? input.languages
+          : user.languages || ['English'],
+        categories: input.categories?.length
+          ? input.categories
+          : user.categories || ['Talk'],
+      };
+
+      onStage?.('done');
+      if (usingFirebase) {
+        await updateHostProfileInFirebase(user.id, {
+          name: patch.name,
+          bio: patch.bio,
+          country: patch.country,
+          photoUrl: mainPhoto,
+          photoUrls: photos,
+          videoUrl: isPublicHttpAvatar(videoUrl) ? videoUrl : '',
+          languages: patch.languages,
+          categories: patch.categories,
+        }).catch((e) => {
+          console.warn('Profile Firebase sync failed', e);
+        });
+      }
+      setAuthUser(patch);
+      return patch;
+    },
+    [setAuthUser, user, usingFirebase],
+  );
+
   const value = useMemo(
     () => ({
       user,
@@ -391,6 +497,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       submitHostApplication,
       approveCurrentHost,
       sendLoginOtp,
+      saveHostProfile,
     }),
     [
       user,
@@ -403,6 +510,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       submitHostApplication,
       approveCurrentHost,
       sendLoginOtp,
+      saveHostProfile,
     ],
   );
 

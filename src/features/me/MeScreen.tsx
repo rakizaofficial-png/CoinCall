@@ -65,9 +65,9 @@ export function MeScreen({ navigation }: { navigation: any }) {
     },
     {
       icon: UserRound,
-      title: 'Profile',
-      sub: user.country || 'Host profile',
-      onPress: () => navigation.navigate('Settings'),
+      title: 'Edit profile',
+      sub: 'Photo · bio · intro video',
+      onPress: () => navigation.navigate('EditHostProfile'),
     },
   ];
 

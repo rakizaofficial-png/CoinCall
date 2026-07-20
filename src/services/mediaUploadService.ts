@@ -208,7 +208,14 @@ export async function uploadHostApplicationMedia(
   let videoUrl = '';
   if (input.videoUri?.trim()) {
     onStage?.('video');
-    videoUrl = '';
+    const remote = await tryUploadToStorage({
+      hostUid: input.hostUid,
+      uri: input.videoUri.trim(),
+      pathSuffix: `intro_${Date.now()}.mp4`,
+    });
+    videoUrl = remote || '';
+    // Keep local URI as last resort for in-app preview when Storage fails
+    if (!videoUrl) videoUrl = input.videoUri.trim();
   }
 
   let idDocumentUrl: string | undefined;

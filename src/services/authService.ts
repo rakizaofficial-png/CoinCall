@@ -266,3 +266,35 @@ export async function approveHostInFirebase(uid: string) {
     approvedAt: Date.now(),
   });
 }
+
+/** Approved hosts can refresh public profile without resetting lifecycle status */
+export async function updateHostProfileInFirebase(
+  uid: string,
+  data: {
+    name?: string;
+    bio?: string;
+    country?: string;
+    photoUrl?: string;
+    photoUrls?: string[];
+    videoUrl?: string;
+    languages?: string[];
+    categories?: string[];
+  },
+) {
+  if (!isFirebaseReady()) throw new Error('Firebase is not configured.');
+  const patch: Record<string, unknown> = {
+    updatedAt: Date.now(),
+  };
+  if (data.name != null) patch.name = data.name;
+  if (data.bio != null) patch.bio = data.bio;
+  if (data.country != null) patch.country = data.country;
+  if (data.photoUrl != null) {
+    patch.photoUrl = data.photoUrl;
+    patch.avatarUrl = data.photoUrl;
+  }
+  if (data.photoUrls != null) patch.photoUrls = data.photoUrls;
+  if (data.videoUrl != null) patch.videoUrl = data.videoUrl;
+  if (data.languages != null) patch.languages = data.languages;
+  if (data.categories != null) patch.categories = data.categories;
+  await update(ref(getFirebaseDb(), `hosts/${uid}`), patch);
+}

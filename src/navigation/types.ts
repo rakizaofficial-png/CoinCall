@@ -31,4 +31,5 @@ export type RootStackParamList = {
   Withdraw: undefined;
   Calling: undefined;
   Earnings: undefined;
+  EditHostProfile: undefined;
 };
