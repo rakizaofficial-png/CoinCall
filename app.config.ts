@@ -103,8 +103,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ],
   extra: {
     eas: {
-      // Set via `npx eas init` or EXPO_PUBLIC_EAS_PROJECT_ID — links CLI to @salman112211/coin-call
-      projectId: process.env.EXPO_PUBLIC_EAS_PROJECT_ID || undefined,
+      projectId: '41647246-54f9-40e6-9d86-2a014cd96613',
     },
     appEnv: IS_PROD ? 'production' : 'development',
   },
