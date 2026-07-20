@@ -30,11 +30,12 @@ export type HomeBannersConfig = {
 };
 
 async function adminFetch(path: string, init?: RequestInit) {
+  const key = localStorage.getItem('cc_admin_key') || adminKey;
   const res = await fetch(`${apiBaseUrl}${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
-      'X-Admin-Key': adminKey(),
+      'X-Admin-Key': key,
       ...(init?.headers || {}),
     },
   });
