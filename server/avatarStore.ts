@@ -1,10 +1,13 @@
 /**
  * Host avatar store — accepts data:/base64 photos and serves public https URLs
  * so Luma can load them when Firebase Storage upload fails on the host web app.
+ *
+ * Files live under DATA_DIR/avatars and are also embedded in the JSON snapshot
+ * so Render redeploys don't leave Luma with dead /avatar?v=… links.
  */
 
 import { createHash } from 'crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import type { Express, Request, Response } from 'express';
 
@@ -13,6 +16,13 @@ const AVATAR_DIR = join(DATA_DIR, 'avatars');
 const META_FILE = join(AVATAR_DIR, 'meta.json');
 
 type Meta = Record<string, { updatedAt: number; contentType: string }>;
+
+export type AvatarSnapshotRow = {
+  hostId: string;
+  contentType: string;
+  updatedAt: number;
+  base64: string;
+};
 
 function ensureDir() {
   if (!existsSync(AVATAR_DIR)) mkdirSync(AVATAR_DIR, { recursive: true });
@@ -58,6 +68,12 @@ export function hasStoredAvatar(hostId: string) {
   return existsSync(filePath(hostId));
 }
 
+/** True when URL points at our /api/hosts/:id/avatar endpoint */
+export function isApiAvatarUrl(url?: string | null): boolean {
+  if (!url || typeof url !== 'string') return false;
+  return /\/api\/hosts\/[^/]+\/avatar(?:\?|$)/i.test(url.trim());
+}
+
 /** Decode data URL / raw base64 → jpeg buffer */
 export function decodeImagePayload(raw: string): Buffer | null {
   const s = String(raw || '').trim();
@@ -95,7 +111,89 @@ export function saveHostAvatar(hostId: string, raw: string): {
   return { ok: true, url: avatarPublicUrl(id, undefined, meta[id].updatedAt) };
 }
 
-export function registerAvatarRoutes(app: Express) {
+/** Embed avatars in the durable JSON snapshot (survives process restart). */
+export function dumpAvatarsForSnapshot(maxBytes = 400_000): AvatarSnapshotRow[] {
+  ensureDir();
+  const meta = loadMeta();
+  const rows: AvatarSnapshotRow[] = [];
+  let files: string[] = [];
+  try {
+    files = readdirSync(AVATAR_DIR).filter((f) => f.endsWith('.jpg'));
+  } catch {
+    return rows;
+  }
+  for (const file of files) {
+    const hostId = file.replace(/\.jpg$/, '');
+    const path = join(AVATAR_DIR, file);
+    try {
+      const buf = readFileSync(path);
+      if (buf.length < 200 || buf.length > maxBytes) continue;
+      const m = meta[hostId] || { updatedAt: Date.now(), contentType: 'image/jpeg' };
+      rows.push({
+        hostId,
+        contentType: m.contentType || 'image/jpeg',
+        updatedAt: m.updatedAt || Date.now(),
+        base64: buf.toString('base64'),
+      });
+    } catch {
+      /* skip bad file */
+    }
+  }
+  return rows;
+}
+
+export function restoreAvatarsFromSnapshot(rows?: AvatarSnapshotRow[] | null) {
+  if (!Array.isArray(rows) || !rows.length) return 0;
+  ensureDir();
+  const meta = loadMeta();
+  let n = 0;
+  for (const row of rows) {
+    const id = String(row?.hostId || '').trim();
+    if (!id || !row.base64) continue;
+    try {
+      const buf = Buffer.from(row.base64, 'base64');
+      if (buf.length < 200) continue;
+      writeFileSync(filePath(id), buf);
+      meta[id] = {
+        updatedAt: Number(row.updatedAt) || Date.now(),
+        contentType: row.contentType || 'image/jpeg',
+      };
+      n += 1;
+    } catch {
+      /* skip */
+    }
+  }
+  saveMeta(meta);
+  return n;
+}
+
+/**
+ * Prefer a real stored file; drop dead /avatar links that 404 after redeploy.
+ */
+export function resolveStoredOrHttpAvatar(
+  hostId: string,
+  candidates: Array<string | null | undefined>,
+  req?: Request,
+): string {
+  if (hasStoredAvatar(hostId)) {
+    return avatarPublicUrl(hostId, req);
+  }
+  for (const c of candidates) {
+    const u = String(c || '').trim();
+    if (!u) continue;
+    if (isApiAvatarUrl(u)) continue; // file missing — skip stale link
+    if (u.startsWith('http://') || u.startsWith('https://')) {
+      if (u.startsWith('data:') || u.startsWith('blob:')) continue;
+      return u;
+    }
+  }
+  return '';
+}
+
+export function registerAvatarRoutes(
+  app: Express,
+  opts?: { onSaved?: () => void },
+) {
   /** Host uploads DP (data URL or base64) → public https URL for Luma */
   app.post('/api/hosts/:hostId/avatar', (req: Request, res: Response) => {
     const hostId = String(req.params.hostId || '').trim();
@@ -112,6 +210,7 @@ export function registerAvatarRoutes(app: Express) {
       res.status(400).json({ error: saved.error });
       return;
     }
+    opts?.onSaved?.();
     res.json({ ok: true, avatarUrl: saved.url });
   });
 
@@ -130,8 +229,9 @@ export function registerAvatarRoutes(app: Express) {
       return;
     }
     res.setHeader('Content-Type', 'image/jpeg');
-    res.setHeader('Cache-Control', 'public, max-age=300');
+    res.setHeader('Cache-Control', 'public, max-age=60');
     res.setHeader('ETag', etag);
+    res.setHeader('Access-Control-Allow-Origin', '*');
     res.send(buf);
   });
 }

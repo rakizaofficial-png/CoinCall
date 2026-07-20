@@ -5,6 +5,67 @@ import { ensurePublicAvatarUrl } from './mediaUploadService';
 /** Cache public https avatars so heartbeats don't re-upload every 8s */
 const publicAvatarCache = new Map<string, string>();
 
+function isApiAvatarUrl(url?: string | null) {
+  if (!url) return false;
+  return /\/api\/hosts\/[^/]+\/avatar(?:\?|$)/i.test(String(url).trim());
+}
+
+async function avatarUrlReachable(url: string): Promise<boolean> {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 4000);
+    const res = await fetch(url, { method: 'GET', signal: ctrl.signal });
+    clearTimeout(t);
+    if (!res.ok) return false;
+    const ct = String(res.headers.get('content-type') || '');
+    return ct.startsWith('image/') || ct.includes('octet-stream');
+  } catch {
+    return false;
+  }
+}
+
+async function resolvePresenceAvatar(
+  hostId: string,
+  avatarUrl?: string,
+  photoUrl?: string,
+): Promise<string | undefined> {
+  const cached = publicAvatarCache.get(hostId);
+  const candidates = [avatarUrl, photoUrl, cached].filter(Boolean) as string[];
+
+  for (const c of candidates) {
+    if (!isPublicHttpAvatar(c)) continue;
+    if (isApiAvatarUrl(c)) {
+      if (await avatarUrlReachable(c)) {
+        publicAvatarCache.set(hostId, c);
+        return c;
+      }
+      // Dead API avatar after redeploy — drop cache and keep looking
+      if (cached === c) publicAvatarCache.delete(hostId);
+      continue;
+    }
+    // Firebase / other https — trust and use
+    publicAvatarCache.set(hostId, c);
+    return c;
+  }
+
+  // Re-upload local data:/blob: photo
+  const local = [avatarUrl, photoUrl].find(
+    (u) => u && !isPublicHttpAvatar(u),
+  );
+  if (local) {
+    try {
+      const uploaded = await ensurePublicAvatarUrl(hostId, local);
+      if (uploaded) {
+        publicAvatarCache.set(hostId, uploaded);
+        return uploaded;
+      }
+    } catch {
+      /* fall through */
+    }
+  }
+  return undefined;
+}
+
 export type BridgeHost = {
   id: string;
   name: string;
@@ -68,25 +129,9 @@ export async function publishHostPresence(input: {
   isOnCall?: boolean;
   workspaceMode?: 'waiting_1v1' | 'solo_calling';
 }) {
-  const candidate = input.avatarUrl || input.photoUrl || '';
-  let avatarUrl: string | undefined;
-
-  if (isPublicHttpAvatar(candidate)) {
-    avatarUrl = candidate.trim();
-    publicAvatarCache.set(input.id, avatarUrl);
-  } else if (publicAvatarCache.has(input.id)) {
-    avatarUrl = publicAvatarCache.get(input.id);
-  } else if (candidate && input.isOnline) {
-    try {
-      const uploaded = await ensurePublicAvatarUrl(input.id, candidate);
-      if (uploaded) {
-        avatarUrl = uploaded;
-        publicAvatarCache.set(input.id, uploaded);
-      }
-    } catch {
-      /* server may reuse prior presence / managed photo */
-    }
-  }
+  const avatarUrl = input.isOnline
+    ? await resolvePresenceAvatar(input.id, input.avatarUrl, input.photoUrl)
+    : undefined;
 
   const res = await fetch(`${base()}/hosts/presence`, {
     method: 'POST',
@@ -98,7 +143,7 @@ export async function publishHostPresence(input: {
       workspaceMode: 'waiting_1v1',
       ...input,
       avatarUrl,
-      photoUrl: avatarUrl,
+      photoUrl: avatarUrl || input.photoUrl,
     }),
   });
   if (!res.ok) {

@@ -766,16 +766,34 @@ export function AppProvider({
     setTodayLiveSeconds((s) => s + n);
   }, []);
 
-  // Ensure local data:/blob: photos become public https for Luma
+  // Ensure local data:/blob: photos become public https for Luma.
+  // Also re-upload when the cached URL is a dead API /avatar link after redeploy.
   useEffect(() => {
     if (!user.id) return;
-    const raw = user.avatarUrl || user.photoUrl || '';
-    if (!raw || raw.startsWith('http://') || raw.startsWith('https://')) return;
+    const candidates = [
+      user.avatarUrl,
+      user.photoUrl,
+      ...(Array.isArray(user.photoUrls) ? user.photoUrls : []),
+    ].filter(Boolean) as string[];
+    if (!candidates.length) return;
+
+    const isApi = (u: string) =>
+      /\/api\/hosts\/[^/]+\/avatar(?:\?|$)/i.test(u);
+    const isLocal = (u: string) =>
+      u.startsWith('data:') || u.startsWith('blob:') || u.startsWith('file:');
+
+    const local = candidates.find(isLocal);
+    const apiLink = candidates.find(isApi);
+    // Prefer uploading real local bytes; otherwise verify/re-resolve API link
+    const source = local || apiLink;
+    if (!source) return;
+
     let cancelled = false;
     void import('../services/mediaUploadService').then(
       ({ ensurePublicAvatarUrl }) => {
-        void ensurePublicAvatarUrl(user.id, raw).then((url) => {
+        void ensurePublicAvatarUrl(user.id, source).then((url) => {
           if (cancelled || !url) return;
+          if (url === user.avatarUrl) return;
           setUser((u) => ({
             ...u,
             avatarUrl: url,
@@ -787,7 +805,7 @@ export function AppProvider({
     return () => {
       cancelled = true;
     };
-  }, [user.id, user.avatarUrl, user.photoUrl]);
+  }, [user.id, user.avatarUrl, user.photoUrl, user.photoUrls]);
 
   const registerBridgeCallStart = useCallback(() => {
     setCallsToday((n) => n + 1);

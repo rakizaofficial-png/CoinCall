@@ -146,11 +146,28 @@ export async function ensurePublicAvatarUrl(
   uri: string,
 ): Promise<string | null> {
   if (!uri) return null;
-  if (isPublicHttpAvatar(uri)) return uri.trim();
+  const trimmed = uri.trim();
+  const isApiAvatar = /\/api\/hosts\/[^/]+\/avatar(?:\?|$)/i.test(trimmed);
+
+  if (isPublicHttpAvatar(trimmed) && !isApiAvatar) return trimmed;
+
+  // Dead or unverified API avatar link — do not trust without a local re-upload
+  if (isPublicHttpAvatar(trimmed) && isApiAvatar) {
+    try {
+      const res = await fetch(trimmed, { method: 'GET' });
+      const ct = String(res.headers.get('content-type') || '');
+      if (res.ok && (ct.startsWith('image/') || ct.includes('octet-stream'))) {
+        return trimmed;
+      }
+    } catch {
+      /* re-upload below if we have local bytes — caller may pass data: next */
+    }
+    return null;
+  }
 
   const remote = await tryUploadToStorage({
     hostUid,
-    uri,
+    uri: trimmed,
     pathSuffix: `avatar_${Date.now()}.jpg`,
   });
   if (remote && isPublicHttpAvatar(remote)) return remote;
@@ -158,7 +175,7 @@ export async function ensurePublicAvatarUrl(
   // Firebase often fails on web — host the JPEG on coincall-api instead
   try {
     const base = env.apiBaseUrl.replace(/\/$/, '');
-    const prepared = await prepareLocalPhotoUrl(uri);
+    const prepared = await prepareLocalPhotoUrl(trimmed);
     const res = await fetch(`${base}/hosts/${encodeURIComponent(hostUid)}/avatar`, {
       method: 'POST',
       headers: {

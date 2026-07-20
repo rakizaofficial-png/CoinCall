@@ -31,6 +31,13 @@ export type PersistedSnapshot = {
   giftHistory?: Array<Record<string, unknown>>;
   /** Ended live sessions for host live-time stats */
   liveSessionHistory?: Array<Record<string, unknown>>;
+  /** Host DP binaries (base64) so avatars survive redeploy */
+  avatars?: Array<{
+    hostId: string;
+    contentType: string;
+    updatedAt: number;
+    base64: string;
+  }>;
 };
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;

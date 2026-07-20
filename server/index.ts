@@ -25,8 +25,12 @@ import { registerVideoLibraryRoutes } from './videoLibrary.ts';
 import { registerHostAppUpdateRoutes } from './hostAppUpdate.ts';
 import {
   avatarPublicUrl,
+  dumpAvatarsForSnapshot,
   hasStoredAvatar,
+  isApiAvatarUrl,
   registerAvatarRoutes,
+  resolveStoredOrHttpAvatar,
+  restoreAvatarsFromSnapshot,
   saveHostAvatar,
 } from './avatarStore.ts';
 import {
@@ -492,6 +496,7 @@ app.post('/api/hosts/presence', (req, res) => {
   }
 
   // Canonical field = avatarUrl; accept photoUrl alias. Never invent pravatar faces.
+  // Prefer a file we actually have on disk — never keep a dead /avatar?v= link after redeploy.
   const incoming = pickHostAvatarUrl(
     {
       avatarUrl: incomingRaw || undefined,
@@ -505,12 +510,26 @@ app.post('/api/hosts/presence', (req, res) => {
     },
     { hostId, name: String(name), allowDefault: false },
   );
+  const prevUsable =
+    prev?.avatarUrl &&
+    !isApiAvatarUrl(prev.avatarUrl) &&
+    isPublicHttpAvatar(prev.avatarUrl)
+      ? String(prev.avatarUrl)
+      : hasStoredAvatar(hostId)
+        ? avatarPublicUrl(hostId, req)
+        : '';
+  const managedUsable =
+    managed?.photoUrl &&
+    !isApiAvatarUrl(managed.photoUrl) &&
+    isPublicHttpAvatar(managed.photoUrl)
+      ? String(managed.photoUrl)
+      : '';
   const safeAvatar =
-    incoming ||
-    (isPublicHttpAvatar(prev?.avatarUrl) ? String(prev!.avatarUrl) : '') ||
-    (isPublicHttpAvatar(managed?.photoUrl) ? String(managed!.photoUrl) : '') ||
-    (hasStoredAvatar(hostId) ? avatarPublicUrl(hostId, req) : '') ||
-    pickHostAvatarUrl({}, { hostId, name: String(name) });
+    resolveStoredOrHttpAvatar(
+      hostId,
+      [incoming, incomingRaw, photoUrl, prevUsable, managedUsable],
+      req,
+    ) || pickHostAvatarUrl({}, { hostId, name: String(name) });
 
   const mode: HostWorkspaceMode | undefined =
     workspaceMode === 'solo_calling' || workspaceMode === 'waiting_1v1'
@@ -574,7 +593,55 @@ app.get('/api/hosts', (req, res) => {
     if (a.readyToCall !== b.readyToCall) return Number(b.readyToCall) - Number(a.readyToCall);
     return Number(b.isLive) - Number(a.isLive);
   });
-  res.json({ hosts: list });
+  // Never hand Luma a /avatar URL that 404s after disk wipe
+  const hosts = list.map((h) => {
+    const managed = getHost(h.id);
+    const avatarUrl =
+      resolveStoredOrHttpAvatar(
+        h.id,
+        [h.avatarUrl, managed?.photoUrl, ...(managed?.photoUrls || [])],
+        req,
+      ) || pickHostAvatarUrl({}, { hostId: h.id, name: h.name });
+    return { ...h, avatarUrl };
+  });
+  res.json({ hosts });
+});
+
+/** Single host profile (works even if briefly offline) */
+app.get('/api/hosts/:hostId/profile', (req, res) => {
+  const hostId = String(req.params.hostId || '').trim();
+  if (!hostId) {
+    res.status(400).json({ error: 'hostId required' });
+    return;
+  }
+  const presence = getPresence(hostId);
+  const managed = getHost(hostId);
+  const avatarUrl =
+    resolveStoredOrHttpAvatar(
+      hostId,
+      [
+        presence?.avatarUrl,
+        managed?.photoUrl,
+        ...(managed?.photoUrls || []),
+      ],
+      req,
+    ) ||
+    pickHostAvatarUrl({}, { hostId, name: presence?.name || managed?.name || 'Host' });
+  res.json({
+    host: {
+      id: hostId,
+      name: presence?.name || managed?.name || 'Host',
+      avatarUrl,
+      country: presence?.country || managed?.country,
+      ratePerMinute: presence?.ratePerMinute || managed?.callPrice || 80,
+      isOnline: Boolean(presence?.isOnline),
+      isLive: Boolean(presence?.isLive),
+      isOnCall: Boolean(presence?.isOnCall),
+      readyToCall: Boolean(presence?.readyToCall),
+      bio: managed?.bio,
+      photoUrls: managed?.photoUrls || [],
+    },
+  });
 });
 
 /** Host SSE stream for incoming user calls */
@@ -2516,7 +2583,7 @@ function broadcastWs(event: unknown) {
 
 registerHostManagementRoutes(app, { requireAdmin, broadcastWs });
 
-registerAvatarRoutes(app);
+registerAvatarRoutes(app, { onSaved: () => persist() });
 
 registerVideoLibraryRoutes(app, { requireAdmin });
 
@@ -2688,6 +2755,7 @@ function buildSnapshot(): PersistedSnapshot {
     callHistory: callHistory as unknown as Array<Record<string, unknown>>,
     giftHistory: giftHistory as unknown as Array<Record<string, unknown>>,
     liveSessionHistory: liveSessionHistory as unknown as Array<Record<string, unknown>>,
+    avatars: dumpAvatarsForSnapshot(),
   };
 }
 
@@ -2767,8 +2835,11 @@ function restoreFromDisk() {
       ...(snap.liveSessionHistory as unknown as LiveSessionRecord[]),
     );
   }
+  const restoredAvatars = restoreAvatarsFromSnapshot(
+    snap.avatars as Parameters<typeof restoreAvatarsFromSnapshot>[0],
+  );
   console.log(
-    `[persist] restored wallets=${wallets.size} withdrawals=${withdrawals.length} liveRooms=${liveRooms.size} dm=${dmThreads.size} calls=${callHistory.length} gifts=${giftHistory.length} liveSessions=${liveSessionHistory.length}`,
+    `[persist] restored wallets=${wallets.size} withdrawals=${withdrawals.length} liveRooms=${liveRooms.size} dm=${dmThreads.size} calls=${callHistory.length} gifts=${giftHistory.length} liveSessions=${liveSessionHistory.length} avatars=${restoredAvatars}`,
   );
 }
 
@@ -2832,8 +2903,11 @@ async function applyMongoOrDisk() {
       ...(snap.liveSessionHistory as unknown as LiveSessionRecord[]),
     );
   }
+  const restoredAvatars = restoreAvatarsFromSnapshot(
+    snap.avatars as Parameters<typeof restoreAvatarsFromSnapshot>[0],
+  );
   console.log(
-    `[persist] restored from Mongo wallets=${wallets.size} withdrawals=${withdrawals.length} calls=${callHistory.length} gifts=${giftHistory.length} liveSessions=${liveSessionHistory.length}`,
+    `[persist] restored from Mongo wallets=${wallets.size} withdrawals=${withdrawals.length} calls=${callHistory.length} gifts=${giftHistory.length} liveSessions=${liveSessionHistory.length} avatars=${restoredAvatars}`,
   );
 }
 
