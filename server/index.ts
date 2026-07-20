@@ -24,6 +24,12 @@ import {
 import { registerVideoLibraryRoutes } from './videoLibrary.ts';
 import { registerHostAppUpdateRoutes } from './hostAppUpdate.ts';
 import {
+  dumpHomeBannersForSnapshot,
+  getHomeBanners,
+  loadHomeBannersFromSnapshot,
+  setHomeBanners,
+} from './bannersStore.ts';
+import {
   avatarPublicUrl,
   dumpAvatarsForSnapshot,
   hasStoredAvatar,
@@ -2656,6 +2662,30 @@ registerVideoLibraryRoutes(app, { requireAdmin });
 
 registerHostAppUpdateRoutes(app, { requireAdmin, broadcastWs });
 
+/** Public Luma home banners (hero + swipe promos) */
+app.get('/api/banners/home', (_req, res) => {
+  const cfg = getHomeBanners();
+  res.json({
+    ok: true,
+    hero: cfg.hero.enabled ? cfg.hero : null,
+    promos: cfg.promos.filter((p) => p.enabled),
+    updatedAt: cfg.updatedAt,
+  });
+});
+
+app.get('/api/admin/banners/home', (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  res.json({ ok: true, banners: getHomeBanners() });
+});
+
+app.put('/api/admin/banners/home', (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const saved = setHomeBanners(req.body || {});
+  persist();
+  broadcastWs({ type: 'banners:home', payload: saved });
+  res.json({ ok: true, banners: saved });
+});
+
 registerAgencyRoutes(app, {
   requireAdmin,
   getHostRevenueSnapshot: () => {
@@ -2868,6 +2898,7 @@ function buildSnapshot(): PersistedSnapshot {
     liveSessionHistory: liveSessionHistory as unknown as Array<Record<string, unknown>>,
     avatars: dumpAvatarsForSnapshot(),
     welcomeBonusPaidIds: [...welcomeBonusPaidIds],
+    homeBanners: dumpHomeBannersForSnapshot() as unknown as Record<string, unknown>,
   };
 }
 
@@ -2902,6 +2933,7 @@ function restoreFromDisk() {
   for (const id of snap.welcomeBonusPaidIds || []) {
     if (id) welcomeBonusPaidIds.add(String(id));
   }
+  if (snap.homeBanners) loadHomeBannersFromSnapshot(snap.homeBanners);
   if (Array.isArray(snap.withdrawals)) {
     withdrawals.length = 0;
     withdrawals.push(...(snap.withdrawals as unknown as WithdrawalRequest[]));
@@ -3004,6 +3036,7 @@ async function applyMongoOrDisk() {
   for (const id of snap.welcomeBonusPaidIds || []) {
     if (id) welcomeBonusPaidIds.add(String(id));
   }
+  if (snap.homeBanners) loadHomeBannersFromSnapshot(snap.homeBanners);
   if (Array.isArray(snap.withdrawals)) {
     withdrawals.length = 0;
     withdrawals.push(...(snap.withdrawals as unknown as WithdrawalRequest[]));

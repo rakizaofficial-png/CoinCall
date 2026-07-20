@@ -21,7 +21,8 @@ export type AdminSection =
   | 'control'
   | 'payouts'
   | 'reports'
-  | 'videos';
+  | 'videos'
+  | 'banners';
 
 export type AgencyPerms = {
   canViewRevenue: boolean;
@@ -46,6 +47,7 @@ const FULL: AdminSection[] = [
   'payouts',
   'reports',
   'videos',
+  'banners',
 ];
 
 const ROLE_SECTIONS: Record<AdminRole, AdminSection[]> = {
@@ -61,6 +63,7 @@ const ROLE_SECTIONS: Record<AdminRole, AdminSection[]> = {
     'control',
     'reports',
     'videos',
+    'banners',
   ],
   finance: ['dashboard', 'revenue', 'payouts', 'users', 'agencies'],
   support: ['dashboard', 'users', 'reports', 'host_approver', 'host_kyc', 'hosts'],

@@ -40,6 +40,8 @@ export type PersistedSnapshot = {
   }>;
   /** User ids that already received the one-time +100 welcome bonus */
   welcomeBonusPaidIds?: string[];
+  /** Luma home hero + swipe promo banners */
+  homeBanners?: Record<string, unknown>;
 };
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
