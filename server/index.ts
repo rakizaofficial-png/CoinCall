@@ -1402,61 +1402,86 @@ function aiClip(hostId: string, file: 'intro' | 'loop', demo: string) {
   return `${AI_HOST_CDN}/${hostId}/${file}.mp4`;
 }
 
-function aiAvatar(hostId: string) {
+function aiAvatar(hostId: string, n?: number) {
   if (AI_HOST_CDN) return `${AI_HOST_CDN}/${hostId}/avatar.jpg`;
-  return `https://i.pravatar.cc/800?u=${encodeURIComponent(hostId)}`;
+  const i = n && n >= 1 && n <= 7 ? n : 1;
+  return `https://luma-user.onrender.com/hosts/asian/${String(i).padStart(2, '0')}.png`;
 }
 
 const AI_HOST_TABLE: AiHostRow[] = [
   {
-    host_id: 'ai_mira',
-    name: 'Mira',
-    avatar: aiAvatar('ai_mira'),
-    video_url_1: aiClip('ai_mira', 'intro', DEMO_INTRO),
-    video_url_2: aiClip('ai_mira', 'loop', DEMO_LOOP),
-    age: 23,
+    host_id: 'ai_yuna',
+    name: 'Yuna',
+    avatar: aiAvatar('ai_yuna', 1),
+    video_url_1: aiClip('ai_yuna', 'intro', DEMO_INTRO),
+    video_url_2: aiClip('ai_yuna', 'loop', DEMO_LOOP),
+    age: 22,
     cost_per_minute: 80,
   },
   {
-    host_id: 'ai_sofia',
-    name: 'Sofia',
-    avatar: aiAvatar('ai_sofia'),
-    video_url_1: aiClip('ai_sofia', 'intro', DEMO_INTRO),
-    video_url_2: aiClip('ai_sofia', 'loop', DEMO_LOOP),
-    age: 25,
-    cost_per_minute: 95,
+    host_id: 'ai_mei',
+    name: 'Mei',
+    avatar: aiAvatar('ai_mei', 2),
+    video_url_1: aiClip('ai_mei', 'intro', DEMO_INTRO),
+    video_url_2: aiClip('ai_mei', 'loop', DEMO_LOOP),
+    age: 24,
+    cost_per_minute: 85,
   },
   {
     host_id: 'ai_aya',
     name: 'Aya',
-    avatar: aiAvatar('ai_aya'),
+    avatar: aiAvatar('ai_aya', 3),
     video_url_1: aiClip('ai_aya', 'intro', DEMO_INTRO),
     video_url_2: aiClip('ai_aya', 'loop', DEMO_LOOP),
-    age: 22,
+    age: 23,
+    cost_per_minute: 75,
+  },
+  {
+    host_id: 'ai_hana',
+    name: 'Hana',
+    avatar: aiAvatar('ai_hana', 4),
+    video_url_1: aiClip('ai_hana', 'intro', DEMO_INTRO),
+    video_url_2: aiClip('ai_hana', 'loop', DEMO_LOOP),
+    age: 21,
     cost_per_minute: 70,
+  },
+  {
+    host_id: 'ai_rin',
+    name: 'Rin',
+    avatar: aiAvatar('ai_rin', 5),
+    video_url_1: aiClip('ai_rin', 'intro', DEMO_INTRO),
+    video_url_2: aiClip('ai_rin', 'loop', DEMO_LOOP),
+    age: 25,
+    cost_per_minute: 90,
+  },
+  {
+    host_id: 'ai_sora',
+    name: 'Sora',
+    avatar: aiAvatar('ai_sora', 6),
+    video_url_1: aiClip('ai_sora', 'intro', DEMO_INTRO),
+    video_url_2: aiClip('ai_sora', 'loop', DEMO_LOOP),
+    age: 22,
+    cost_per_minute: 80,
   },
   {
     host_id: 'ai_lina',
     name: 'Lina',
-    avatar: aiAvatar('ai_lina'),
+    avatar: aiAvatar('ai_lina', 7),
     video_url_1: aiClip('ai_lina', 'intro', DEMO_INTRO),
     video_url_2: aiClip('ai_lina', 'loop', DEMO_LOOP),
     age: 24,
     cost_per_minute: 85,
   },
-  {
-    host_id: 'ai_elena',
-    name: 'Elena',
-    avatar: aiAvatar('ai_elena'),
-    video_url_1: aiClip('ai_elena', 'intro', DEMO_INTRO),
-    video_url_2: aiClip('ai_elena', 'loop', DEMO_LOOP),
-    age: 27,
-    cost_per_minute: 100,
-  },
 ];
 
 function pickAiHost(requestedId: string): AiHostRow {
-  const direct = AI_HOST_TABLE.find((h) => h.host_id === requestedId);
+  const legacy: Record<string, string> = {
+    ai_mira: 'ai_yuna',
+    ai_sofia: 'ai_mei',
+    ai_elena: 'ai_rin',
+  };
+  const id = legacy[requestedId] || requestedId;
+  const direct = AI_HOST_TABLE.find((h) => h.host_id === id);
   if (direct) return direct;
   let hash = 0;
   for (let i = 0; i < requestedId.length; i++) {
