@@ -1414,6 +1414,28 @@ html[data-theme='light'] body,
   color: var(--muted);
 }
 
+.referral-code {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  margin: 12px 0 16px;
+  color: var(--text);
+}
+
+.referral-link {
+  display: block;
+  word-break: break-all;
+  font-size: 12px;
+  margin: 10px 0 14px;
+  color: var(--muted);
+}
+
+.agency-overview .desk-table.compact td,
+.agency-overview .desk-table.compact th {
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
 /* Money Desk */
 .desk-tabs {
   display: flex;

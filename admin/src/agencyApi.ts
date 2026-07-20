@@ -13,7 +13,15 @@ export type Agency = {
   status: AgencyStatus;
   commissionPercent: number;
   hostIds: string[];
+  hostCount?: number;
   permissions: AgencyPerms;
+  referralCode?: string;
+  referralLink?: string;
+  minWithdrawCoins?: number;
+  maxWithdrawCoins?: number;
+  dailyWithdrawCap?: number;
+  inviteClicks?: number;
+  inviteJoins?: number;
   revenueTotal: number;
   revenueMonth: number;
   createdAt: number;
@@ -29,6 +37,15 @@ export type RevenueHostRow = {
   type: 'agency' | 'individual';
   agencyId?: string;
   agencyName?: string;
+};
+
+export type AgencyAnnouncement = {
+  id: string;
+  title: string;
+  body: string;
+  agencyIds: string[];
+  createdAt: number;
+  createdBy: string;
 };
 
 function adminKeyHeader() {
@@ -57,6 +74,15 @@ async function post<T>(path: string, body: Record<string, unknown>): Promise<T> 
   return res.json() as Promise<T>;
 }
 
+async function del<T>(path: string): Promise<T> {
+  const res = await fetch(`${apiBaseUrl}${path}`, {
+    method: 'DELETE',
+    headers: { 'x-admin-key': adminKeyHeader() },
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<T>;
+}
+
 export async function fetchAgencies() {
   return get<{ agencies: Agency[]; count: number }>('/admin/agencies');
 }
@@ -67,11 +93,17 @@ export async function createAgency(input: {
   email: string;
   commissionPercent?: number;
   country?: string;
+  minWithdrawCoins?: number;
+  maxWithdrawCoins?: number;
+  dailyWithdrawCap?: number;
 }) {
-  return post<{ ok: boolean; agency: Agency; loginKey: string }>(
-    '/admin/agencies',
-    input,
-  );
+  return post<{
+    ok: boolean;
+    agency: Agency;
+    loginKey: string;
+    referralCode: string;
+    referralLink: string;
+  }>('/admin/agencies', input);
 }
 
 export async function updateAgency(
@@ -81,6 +113,12 @@ export async function updateAgency(
   return post<{ ok: boolean; agency: Agency }>(
     `/admin/agencies/${encodeURIComponent(id)}`,
     patch as Record<string, unknown>,
+  );
+}
+
+export async function deleteAgency(id: string) {
+  return del<{ ok: boolean; deleted: string }>(
+    `/admin/agencies/${encodeURIComponent(id)}`,
   );
 }
 
@@ -132,9 +170,54 @@ export async function fetchAgencyLedger(agencyId: string) {
     hosts: RevenueHostRow[];
     totals: {
       hosts: number;
+      activeHosts: number;
       revenue: number;
       pending: number;
       paid: number;
+      agencyCommissionMonth: number;
+      inviteClicks: number;
+      inviteJoins: number;
+      conversionRate: number;
     };
   }>(`/admin/agency-ledger?agencyId=${encodeURIComponent(agencyId)}`);
+}
+
+export async function fetchAgencyReferrals(agencyId: string) {
+  return get<{
+    agencyId: string;
+    referralCode: string;
+    referralLink: string;
+    inviteClicks: number;
+    inviteJoins: number;
+    hostIds: string[];
+    conversionRate: number;
+  }>(`/admin/agency-referrals?agencyId=${encodeURIComponent(agencyId)}`);
+}
+
+export async function fetchAgencyAnnouncements() {
+  return get<{ announcements: AgencyAnnouncement[] }>(
+    '/admin/agency-announcements',
+  );
+}
+
+export async function broadcastAgencyAnnouncement(input: {
+  title: string;
+  body: string;
+  agencyIds?: string[];
+}) {
+  return post<{ ok: boolean; announcement: AgencyAnnouncement }>(
+    '/admin/agency-announcements',
+    input,
+  );
+}
+
+export async function sendAgencyHostMessage(input: {
+  agencyId: string;
+  text: string;
+  hostIds?: string[];
+}) {
+  return post<{ ok: boolean; sent: number; preview: string }>(
+    '/admin/agency-host-message',
+    input,
+  );
 }

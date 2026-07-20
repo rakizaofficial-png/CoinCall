@@ -9,6 +9,7 @@ import type { Express, Request, Response } from 'express';
 import {
   creditAgencyRevenue,
   getAgency,
+  getAgencyAuth,
   getAgencyIdForHost,
 } from './agencyManagement.ts';
 import {
@@ -333,6 +334,22 @@ function adminMeta(req: Request): {
   adminRole: AdminRole;
   agencyId?: string;
 } {
+  // Prefer server-bound agency auth (from login key) — never trust client alone
+  const auth = getAgencyAuth(req);
+  if (auth?.kind === 'agency' && auth.agency?.id) {
+    return {
+      adminId: `agency_${auth.agency.id}`,
+      adminRole: 'agency',
+      agencyId: auth.agency.id,
+    };
+  }
+  if (auth?.kind === 'admin') {
+    return {
+      adminId: String(req.headers['x-admin-id'] || req.body?.adminId || 'admin'),
+      adminRole: 'super_admin',
+      agencyId: undefined,
+    };
+  }
   const role = String(
     req.headers['x-admin-role'] || req.body?.adminRole || 'super_admin',
   );

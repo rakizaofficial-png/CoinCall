@@ -7,7 +7,9 @@ import {
   UserRound,
   Wallet,
 } from 'lucide-react-native';
-import { Image, ScrollView, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { Image, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import * as Linking from 'expo-linking';
 import {
   BodyText,
   DisplayText,
@@ -21,8 +23,14 @@ import {
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { useLiveStudio } from '../../context/LiveStudioContext';
+import {
+  joinAgencyByCode,
+  referralCodeFromUrl,
+  trackReferralClick,
+} from '../../services/agencyJoinService';
 import { useTheme } from '../../theme/ThemeContext';
 import { premium } from '../../theme/premium';
+import { notify } from '../../utils/notify';
 
 export function MeScreen({ navigation }: { navigation: any }) {
   const { user, hostEarnings, hostOnline, setHostOnline, callsToday, myTodayMinutes } =
@@ -30,6 +38,54 @@ export function MeScreen({ navigation }: { navigation: any }) {
   const { monthlyEarn, todayLiveGiftCoins, liveSeconds } = useLiveStudio();
   const { signOut } = useAuth();
   const { isDark, setScheme } = useTheme();
+  const [agencyCode, setAgencyCode] = useState('');
+  const [agencyBusy, setAgencyBusy] = useState(false);
+  const [agencyLinked, setAgencyLinked] = useState('');
+
+  const applyReferral = useCallback(
+    async (code: string, silent = false) => {
+      const trimmed = code.trim().toUpperCase();
+      if (!trimmed || !user?.id) return;
+      setAgencyBusy(true);
+      try {
+        await trackReferralClick(trimmed);
+        const res = await joinAgencyByCode(user.id, trimmed);
+        if (!res.ok) {
+          if (!silent) notify('Agency', res.error);
+          return;
+        }
+        setAgencyLinked(res.agencyName || trimmed);
+        setAgencyCode(trimmed);
+        notify(
+          'Agency linked',
+          res.joined
+            ? `You joined ${res.agencyName}`
+            : `Already with ${res.agencyName}`,
+        );
+      } catch (e) {
+        if (!silent) {
+          notify('Agency', e instanceof Error ? e.message : 'Join failed');
+        }
+      } finally {
+        setAgencyBusy(false);
+      }
+    },
+    [user?.id],
+  );
+
+  useEffect(() => {
+    let sub: { remove: () => void } | undefined;
+    void (async () => {
+      const initial = await Linking.getInitialURL();
+      const code = referralCodeFromUrl(initial);
+      if (code) void applyReferral(code, true);
+    })();
+    sub = Linking.addEventListener('url', ({ url }) => {
+      const code = referralCodeFromUrl(url);
+      if (code) void applyReferral(code, false);
+    });
+    return () => sub?.remove();
+  }, [applyReferral]);
 
   const giftCoinsToday = Math.max(hostEarnings.gift, todayLiveGiftCoins);
   const wallet =
@@ -147,6 +203,28 @@ export function MeScreen({ navigation }: { navigation: any }) {
             />
           </GlassPanel>
 
+          <SectionLabel title="Agency" />
+          <GlassPanel pad={16} style={{ marginBottom: 12 }}>
+            <BodyText mute style={{ marginBottom: 8, fontSize: 12 }}>
+              {agencyLinked
+                ? `Linked · ${agencyLinked}`
+                : 'Enter your agency invite code to join'}
+            </BodyText>
+            <TextInput
+              value={agencyCode}
+              onChangeText={(t) => setAgencyCode(t.toUpperCase())}
+              placeholder="e.g. NOVA30"
+              placeholderTextColor={premium.textMute}
+              autoCapitalize="characters"
+              style={styles.agencyInput}
+            />
+            <GradientCTA
+              label={agencyBusy ? 'Joining…' : 'Join agency'}
+              onPress={() => void applyReferral(agencyCode)}
+              style={{ marginTop: 10, opacity: agencyBusy ? 0.6 : 1 }}
+            />
+          </GlassPanel>
+
           <SectionLabel title="Workspace" />
           {rows.map((row) => (
             <SoftPress key={row.title} onPress={row.onPress}>
@@ -235,5 +313,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(255,77,109,0.12)',
+  },
+  agencyInput: {
+    borderWidth: 1,
+    borderColor: premium.line,
+    borderRadius: premium.radius.md,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    color: premium.text,
+    fontWeight: '700',
+    letterSpacing: 1,
+    backgroundColor: 'rgba(255,255,255,0.04)',
   },
 });

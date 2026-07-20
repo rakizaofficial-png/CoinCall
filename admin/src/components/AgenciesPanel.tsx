@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   createAgency,
+  deleteAgency,
   fetchAgencies,
   updateAgency,
   type Agency,
@@ -34,10 +35,23 @@ export function AgenciesPanel({
     ownerName: '',
     email: '',
     commissionPercent: '30',
+    minWithdrawCoins: '500',
+    maxWithdrawCoins: '50000',
+    dailyWithdrawCap: '100000',
   });
+  const [createdCreds, setCreatedCreds] = useState<{
+    loginKey: string;
+    referralCode: string;
+    referralLink: string;
+  } | null>(null);
   const [manageTarget, setManageTarget] = useState<Agency | null>(null);
   const [perms, setPerms] = useState<AgencyPerms>(EMPTY_PERMS);
   const [cutValue, setCutValue] = useState('30');
+  const [limits, setLimits] = useState({
+    minWithdrawCoins: '500',
+    maxWithdrawCoins: '50000',
+    dailyWithdrawCap: '100000',
+  });
 
   const load = useCallback(async () => {
     try {
@@ -71,14 +85,25 @@ export function AgenciesPanel({
         commissionPercent: Number.isFinite(commissionPercent)
           ? commissionPercent
           : 30,
+        minWithdrawCoins: Number(createForm.minWithdrawCoins) || 500,
+        maxWithdrawCoins: Number(createForm.maxWithdrawCoins) || 50000,
+        dailyWithdrawCap: Number(createForm.dailyWithdrawCap) || 100000,
       });
-      setMsg(`Created · login key: ${res.loginKey}`);
+      setCreatedCreds({
+        loginKey: res.loginKey,
+        referralCode: res.referralCode,
+        referralLink: res.referralLink,
+      });
+      setMsg(`Created ${res.agency.name}`);
       setCreateOpen(false);
       setCreateForm({
         name: '',
         ownerName: '',
         email: '',
         commissionPercent: '30',
+        minWithdrawCoins: '500',
+        maxWithdrawCoins: '50000',
+        dailyWithdrawCap: '100000',
       });
       await load();
     } catch (e) {
@@ -96,12 +121,29 @@ export function AgenciesPanel({
         : a.status === 'pending'
           ? 'active'
           : 'active';
-    // Optimistic
     setRows((prev) =>
       prev.map((r) => (r.id === a.id ? { ...r, status: next } : r)),
     );
     await updateAgency(a.id, { status: next });
     setMsg(`${a.name} → ${next}`);
+  }
+
+  async function onDelete(a: Agency) {
+    if (limited) return;
+    if (!window.confirm(`Delete agency “${a.name}”? This cannot be undone.`)) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await deleteAgency(a.id);
+      setMsg(`Deleted ${a.name}`);
+      if (manageTarget?.id === a.id) setManageTarget(null);
+      await load();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Delete failed');
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function savePerms() {
@@ -119,8 +161,13 @@ export function AgenciesPanel({
       setMsg('Commission must be 0–80');
       return;
     }
-    await updateAgency(manageTarget.id, { commissionPercent: n });
-    setMsg(`Commission → ${n}% · ${manageTarget.name}`);
+    await updateAgency(manageTarget.id, {
+      commissionPercent: n,
+      minWithdrawCoins: Number(limits.minWithdrawCoins) || 500,
+      maxWithdrawCoins: Number(limits.maxWithdrawCoins) || 50000,
+      dailyWithdrawCap: Number(limits.dailyWithdrawCap) || 100000,
+    });
+    setMsg(`Commission & limits saved · ${manageTarget.name}`);
     setManageTarget(null);
     await load();
   }
@@ -129,6 +176,11 @@ export function AgenciesPanel({
     setManageTarget(a);
     setPerms({ ...a.permissions });
     setCutValue(String(a.commissionPercent));
+    setLimits({
+      minWithdrawCoins: String(a.minWithdrawCoins ?? 500),
+      maxWithdrawCoins: String(a.maxWithdrawCoins ?? 50000),
+      dailyWithdrawCap: String(a.dailyWithdrawCap ?? 100000),
+    });
   }
 
   return (
@@ -137,7 +189,7 @@ export function AgenciesPanel({
         <div>
           <h2>Agencies</h2>
           <p className="sub">
-            Partner setup only · hosts live under Agency hosts · money under Revenue / Financials
+            Create partners · referral codes · commission · withdrawal rules · portal access
           </p>
         </div>
         {!limited ? (
@@ -154,6 +206,32 @@ export function AgenciesPanel({
 
       {msg ? <div className="hm-toast desk-toast">{msg}</div> : null}
 
+      {createdCreds ? (
+        <div className="agency-card" style={{ marginBottom: 16 }}>
+          <div className="agency-card-top">
+            <h3>Agency credentials</h3>
+            <p>Share once securely — login key is not shown again in the table</p>
+          </div>
+          <p>
+            <strong>Login key:</strong> <code>{createdCreds.loginKey}</code>
+          </p>
+          <p>
+            <strong>Referral code:</strong> <code>{createdCreds.referralCode}</code>
+          </p>
+          <p>
+            <strong>Referral link:</strong>{' '}
+            <code className="referral-link">{createdCreds.referralLink}</code>
+          </p>
+          <button
+            type="button"
+            className="btn-ghost"
+            onClick={() => setCreatedCreds(null)}
+          >
+            Dismiss
+          </button>
+        </div>
+      ) : null}
+
       <div className="desk-table-wrap">
         {!rows.length ? (
           <div className="empty-state">No agencies yet.</div>
@@ -164,6 +242,7 @@ export function AgenciesPanel({
                 <th>Agency</th>
                 <th>Owner</th>
                 <th>Status</th>
+                <th>Referral</th>
                 <th>Hosts</th>
                 <th>Cut</th>
                 <th>Month</th>
@@ -185,7 +264,10 @@ export function AgenciesPanel({
                     </span>
                   </td>
                   <td>
-                    <strong>{a.hostIds.length}</strong>
+                    <code>{a.referralCode || '—'}</code>
+                  </td>
+                  <td>
+                    <strong>{a.hostCount ?? a.hostIds.length}</strong>
                   </td>
                   <td>{a.commissionPercent}%</td>
                   <td>{a.revenueMonth.toLocaleString()}</td>
@@ -213,6 +295,13 @@ export function AgenciesPanel({
                         >
                           Manage
                         </button>
+                        <button
+                          type="button"
+                          className="btn-ghost"
+                          onClick={() => void onDelete(a)}
+                        >
+                          Delete
+                        </button>
                         {onOpenHosts ? (
                           <button
                             type="button"
@@ -235,7 +324,7 @@ export function AgenciesPanel({
       <DeskModal
         open={createOpen}
         title="Create agency"
-        subtitle="Issues a portal login key"
+        subtitle="Issues login key + referral code"
         onClose={() => setCreateOpen(false)}
         footer={
           <>
@@ -293,6 +382,39 @@ export function AgenciesPanel({
             }
           />
         </DeskField>
+        <DeskField label="Min withdraw (coins)">
+          <input
+            value={createForm.minWithdrawCoins}
+            onChange={(e) =>
+              setCreateForm((f) => ({
+                ...f,
+                minWithdrawCoins: e.target.value,
+              }))
+            }
+          />
+        </DeskField>
+        <DeskField label="Max withdraw (coins)">
+          <input
+            value={createForm.maxWithdrawCoins}
+            onChange={(e) =>
+              setCreateForm((f) => ({
+                ...f,
+                maxWithdrawCoins: e.target.value,
+              }))
+            }
+          />
+        </DeskField>
+        <DeskField label="Daily withdraw cap">
+          <input
+            value={createForm.dailyWithdrawCap}
+            onChange={(e) =>
+              setCreateForm((f) => ({
+                ...f,
+                dailyWithdrawCap: e.target.value,
+              }))
+            }
+          />
+        </DeskField>
       </DeskModal>
 
       <DeskModal
@@ -310,7 +432,7 @@ export function AgenciesPanel({
               Close
             </button>
             <button type="button" className="btn-gold" onClick={() => void saveCut()}>
-              Save cut
+              Save cut &amp; limits
             </button>
             <button type="button" className="btn-pink" onClick={() => void savePerms()}>
               Save permissions
@@ -348,12 +470,54 @@ export function AgenciesPanel({
               >
                 {manageTarget.status === 'active' ? 'Suspend' : 'Activate'}
               </button>
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => void onDelete(manageTarget)}
+              >
+                Delete
+              </button>
             </div>
+            {manageTarget.referralCode ? (
+              <p className="sub">
+                Referral: <code>{manageTarget.referralCode}</code>
+                {manageTarget.referralLink ? (
+                  <>
+                    {' '}
+                    · <code className="referral-link">{manageTarget.referralLink}</code>
+                  </>
+                ) : null}
+              </p>
+            ) : null}
             <DeskField label="Commission % (0–80)">
               <input
                 value={cutValue}
                 onChange={(e) => setCutValue(e.target.value)}
                 inputMode="numeric"
+              />
+            </DeskField>
+            <DeskField label="Min withdraw">
+              <input
+                value={limits.minWithdrawCoins}
+                onChange={(e) =>
+                  setLimits((l) => ({ ...l, minWithdrawCoins: e.target.value }))
+                }
+              />
+            </DeskField>
+            <DeskField label="Max withdraw">
+              <input
+                value={limits.maxWithdrawCoins}
+                onChange={(e) =>
+                  setLimits((l) => ({ ...l, maxWithdrawCoins: e.target.value }))
+                }
+              />
+            </DeskField>
+            <DeskField label="Daily cap">
+              <input
+                value={limits.dailyWithdrawCap}
+                onChange={(e) =>
+                  setLimits((l) => ({ ...l, dailyWithdrawCap: e.target.value }))
+                }
               />
             </DeskField>
             <p className="sub" style={{ marginTop: 12 }}>

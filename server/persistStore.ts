@@ -42,6 +42,10 @@ export type PersistedSnapshot = {
   welcomeBonusPaidIds?: string[];
   /** Luma home hero + swipe promo banners */
   homeBanners?: Record<string, unknown>;
+  /** Agency registry + host attribution + announcements */
+  agencies?: Array<Record<string, unknown>>;
+  hostAgency?: Array<{ hostId?: string; agencyId?: string }>;
+  announcements?: Array<Record<string, unknown>>;
 };
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;

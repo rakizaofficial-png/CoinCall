@@ -9,6 +9,7 @@ import {
   assertHostCanReceiveCalls,
   getHost,
   listHosts,
+  notifyHost,
   recordHostEarning,
   registerHostManagementRoutes,
 } from './hostManagement.ts';
@@ -20,6 +21,10 @@ import {
   linkDemoHostsIfEmpty,
   publicAgency,
   registerAgencyRoutes,
+  resolveStaffAuth,
+  getAgencyAuth,
+  dumpAgenciesForSnapshot,
+  loadAgenciesFromSnapshot,
 } from './agencyManagement.ts';
 import { registerVideoLibraryRoutes } from './videoLibrary.ts';
 import { registerHostAppUpdateRoutes } from './hostAppUpdate.ts';
@@ -369,10 +374,27 @@ function requireUserMatch(req: express.Request, res: express.Response, userId: s
   return false;
 }
 
+/** Platform master key only — never accept agency login keys here */
 function requireAdmin(req: express.Request, res: express.Response): boolean {
   const key = String(req.headers['x-admin-key'] || req.query.key || '');
   if (key !== ADMIN_KEY) {
     res.status(401).json({ error: 'Unauthorized admin' });
+    return false;
+  }
+  resolveStaffAuth(req, ADMIN_KEY);
+  return true;
+}
+
+function isPlatformAdmin(req: express.Request): boolean {
+  const key = String(req.headers['x-admin-key'] || req.query.key || '').trim();
+  return key === ADMIN_KEY;
+}
+
+/** Platform admin OR active agency — binds agency identity server-side */
+function requireStaff(req: express.Request, res: express.Response): boolean {
+  const auth = resolveStaffAuth(req, ADMIN_KEY);
+  if (!auth) {
+    res.status(401).json({ error: 'Unauthorized' });
     return false;
   }
   return true;
@@ -1343,8 +1365,16 @@ app.post('/api/admin/login', (req, res) => {
 
   if (roleWanted === 'agency' || String(key).startsWith('agency-')) {
     const agency = findAgencyByLoginKey(key);
-    if (!agency || agency.status === 'suspended') {
-      res.status(401).json({ ok: false, error: 'Invalid agency key' });
+    if (!agency || agency.status !== 'active') {
+      res.status(401).json({
+        ok: false,
+        error:
+          agency?.status === 'pending'
+            ? 'Agency pending activation by admin'
+            : agency?.status === 'suspended'
+              ? 'Agency suspended'
+              : 'Invalid agency key',
+      });
       return;
     }
     res.json({
@@ -2339,6 +2369,41 @@ app.post('/api/host/withdrawals', async (req, res) => {
   }
   if (!requireUserMatch(req, res, hostId)) return;
 
+  // Agency withdrawal rules when host is attributed
+  const linkedAgencyId = getAgencyIdForHost(hostId);
+  if (linkedAgencyId) {
+    const agency = getAgency(linkedAgencyId);
+    if (agency) {
+      if (amountCoins < agency.minWithdrawCoins) {
+        res.status(400).json({
+          error: `Minimum withdrawal is ${agency.minWithdrawCoins} coins`,
+        });
+        return;
+      }
+      if (amountCoins > agency.maxWithdrawCoins) {
+        res.status(400).json({
+          error: `Maximum withdrawal is ${agency.maxWithdrawCoins} coins`,
+        });
+        return;
+      }
+      const dayStart = Date.now() - 24 * 60 * 60 * 1000;
+      const dayTotal = withdrawals
+        .filter(
+          (w) =>
+            w.hostId === hostId &&
+            w.createdAt >= dayStart &&
+            w.status !== 'failed',
+        )
+        .reduce((s, w) => s + w.amountCoins, 0);
+      if (dayTotal + amountCoins > agency.dailyWithdrawCap) {
+        res.status(400).json({
+          error: `Daily withdrawal cap is ${agency.dailyWithdrawCap} coins`,
+        });
+        return;
+      }
+    }
+  }
+
   // Server balance is authoritative — never trust client knownBalance
   const row = ensureWallet(hostId, {
     role: 'host',
@@ -2631,20 +2696,18 @@ app.post('/api/admin/wallets/:userId/credit', (req, res) => {
 });
 
 app.get('/api/admin/withdrawals', (req, res) => {
-  const key = String(req.query.key || req.headers['x-admin-key'] || '');
-  if (key !== ADMIN_KEY) {
-    res.status(401).json({ error: 'Unauthorized' });
-    return;
+  if (!requireStaff(req, res)) return;
+  const auth = getAgencyAuth(req);
+  let rows = withdrawals.slice(0, 200);
+  if (auth?.kind === 'agency' && auth.agency) {
+    const hostSet = new Set(auth.agency.hostIds);
+    rows = rows.filter((w) => hostSet.has(w.hostId));
   }
-  res.json({ withdrawals: withdrawals.slice(0, 100) });
+  res.json({ withdrawals: rows.slice(0, 100) });
 });
 
 app.post('/api/admin/withdrawals/:id/status', (req, res) => {
-  const key = String(req.body?.key || req.headers['x-admin-key'] || '');
-  if (key !== ADMIN_KEY) {
-    res.status(401).json({ error: 'Unauthorized' });
-    return;
-  }
+  if (!requireAdmin(req, res)) return;
   const id = String(req.params.id || '');
   const status = String(req.body?.status || '') as WithdrawalRequest['status'];
   const allowed = ['pending', 'processing', 'paid', 'failed', 'admin_review'];
@@ -2726,7 +2789,7 @@ function broadcastWs(event: unknown) {
   }
 }
 
-registerHostManagementRoutes(app, { requireAdmin, broadcastWs });
+registerHostManagementRoutes(app, { requireAdmin: requireStaff, broadcastWs });
 
 registerAvatarRoutes(app, {
   onSaved: (hostId, avatarUrl) => {
@@ -2772,7 +2835,18 @@ app.put('/api/admin/banners/home', (req, res) => {
 });
 
 registerAgencyRoutes(app, {
-  requireAdmin,
+  isPlatformAdmin,
+  requireStaff,
+  onPersist: () => persist(),
+  notifyHosts: (hostIds, msg) => {
+    for (const hid of hostIds) {
+      notifyHost(hid, {
+        type: msg.kind || 'agency_message',
+        title: msg.title,
+        body: msg.body,
+      });
+    }
+  },
   getHostRevenueSnapshot: () => {
     const hosts = listHosts();
     linkDemoHostsIfEmpty(hosts.map((h) => h.id));
@@ -2984,6 +3058,7 @@ function buildSnapshot(): PersistedSnapshot {
     avatars: dumpAvatarsForSnapshot(),
     welcomeBonusPaidIds: [...welcomeBonusPaidIds],
     homeBanners: dumpHomeBannersForSnapshot() as unknown as Record<string, unknown>,
+    ...dumpAgenciesForSnapshot(),
   };
 }
 
@@ -3082,8 +3157,13 @@ function restoreFromDisk() {
   const restoredAvatars = restoreAvatarsFromSnapshot(
     snap.avatars as Parameters<typeof restoreAvatarsFromSnapshot>[0],
   );
+  loadAgenciesFromSnapshot({
+    agencies: snap.agencies,
+    hostAgency: snap.hostAgency,
+    announcements: snap.announcements,
+  });
   console.log(
-    `[persist] restored wallets=${wallets.size} withdrawals=${withdrawals.length} liveRooms=${liveRooms.size} dm=${dmThreads.size} calls=${callHistory.length} gifts=${giftHistory.length} liveSessions=${liveSessionHistory.length} avatars=${restoredAvatars}`,
+    `[persist] restored wallets=${wallets.size} withdrawals=${withdrawals.length} liveRooms=${liveRooms.size} dm=${dmThreads.size} calls=${callHistory.length} gifts=${giftHistory.length} liveSessions=${liveSessionHistory.length} avatars=${restoredAvatars} agencies=${snap.agencies?.length ?? 0}`,
   );
 }
 
@@ -3166,8 +3246,13 @@ async function applyMongoOrDisk() {
   const restoredAvatars = restoreAvatarsFromSnapshot(
     snap.avatars as Parameters<typeof restoreAvatarsFromSnapshot>[0],
   );
+  loadAgenciesFromSnapshot({
+    agencies: snap.agencies,
+    hostAgency: snap.hostAgency,
+    announcements: snap.announcements,
+  });
   console.log(
-    `[persist] restored from Mongo wallets=${wallets.size} withdrawals=${withdrawals.length} calls=${callHistory.length} gifts=${giftHistory.length} liveSessions=${liveSessionHistory.length} avatars=${restoredAvatars}`,
+    `[persist] restored from Mongo wallets=${wallets.size} withdrawals=${withdrawals.length} calls=${callHistory.length} gifts=${giftHistory.length} liveSessions=${liveSessionHistory.length} avatars=${restoredAvatars} agencies=${snap.agencies?.length ?? 0}`,
   );
 }
 

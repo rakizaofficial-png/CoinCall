@@ -24,6 +24,9 @@ import {
   type ReportAdminRow,
 } from './api';
 import { AgenciesPanel } from './components/AgenciesPanel';
+import { AgencyOverview } from './components/AgencyOverview';
+import { AgencyReferralsPanel } from './components/AgencyReferralsPanel';
+import { AgencyInboxPanel } from './components/AgencyInboxPanel';
 import { AnimatedPage } from './components/AnimatedPage';
 import { DashboardAnalytics } from './components/DashboardAnalytics';
 import { ForceUpdatePanel } from './components/ForceUpdatePanel';
@@ -76,6 +79,8 @@ const ICONS: Partial<Record<Tab, string>> = {
   hosts: 'M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75',
   users: 'M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 11a4 4 0 100-8 4 4 0 000 8z',
   revenue: 'M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6',
+  referrals: 'M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71',
+  inbox: 'M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2zM22 6l-10 7L2 6',
   calls: 'M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z',
   payouts: 'M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6',
   reports: 'M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z',
@@ -94,6 +99,8 @@ const LABELS: Record<Tab, string> = {
   hosts: 'Host List',
   users: 'User List',
   revenue: 'Revenue',
+  referrals: 'Referrals',
+  inbox: 'Inbox',
   calls: 'Live Monitor',
   control: 'Remote control',
   payouts: 'Financials',
@@ -112,6 +119,8 @@ const GROUPS: Record<Tab, string> = {
   hosts: 'Management',
   users: 'Management',
   revenue: 'Finance',
+  referrals: 'Growth',
+  inbox: 'Growth',
   payouts: 'Finance',
   reports: 'Finance',
   calls: 'Live',
@@ -660,16 +669,24 @@ export default function App() {
                   title={isAgency ? 'Agency dashboard' : 'Platform Overview'}
                   subtitle={
                     isAgency
-                      ? 'Your hosts · earnings · withdrawals'
+                      ? 'Your hosts · earnings · withdrawals · referrals'
                       : 'Real-time hosts · users · live · revenue'
                   }
                 />
-                <DashboardAnalytics
-                  isAgency={isAgency}
-                  hostOnline={stats.online}
-                  liveCalls={stats.liveCalls}
-                  openPayouts={stats.openPayouts}
-                />
+                {isAgency && agencyId ? (
+                  <AgencyOverview
+                    agencyId={agencyId}
+                    onlineCount={stats.online}
+                    pendingWithdrawals={stats.openPayouts}
+                  />
+                ) : (
+                  <DashboardAnalytics
+                    isAgency={isAgency}
+                    hostOnline={stats.online}
+                    liveCalls={stats.liveCalls}
+                    openPayouts={stats.openPayouts}
+                  />
+                )}
                 <div className="quick-grid">
                   {canAccess(adminRole, 'agencies', agencyPerms) ? (
                     <button
@@ -751,6 +768,30 @@ export default function App() {
                       <span>Agency vs individual earnings</span>
                     </button>
                   ) : null}
+                  {canAccess(adminRole, 'referrals', agencyPerms) ? (
+                    <button
+                      type="button"
+                      className="quick-card"
+                      onClick={() => setTab('referrals')}
+                    >
+                      <strong>Referrals</strong>
+                      <span>Invite code · link · conversions</span>
+                    </button>
+                  ) : null}
+                  {canAccess(adminRole, 'inbox', agencyPerms) ? (
+                    <button
+                      type="button"
+                      className="quick-card"
+                      onClick={() => setTab('inbox')}
+                    >
+                      <strong>Inbox</strong>
+                      <span>
+                        {isAgency
+                          ? 'Announcements · message hosts'
+                          : 'Broadcast to agencies'}
+                      </span>
+                    </button>
+                  ) : null}
                 </div>
               </>
             ) : null}
@@ -800,6 +841,15 @@ export default function App() {
             {tab === 'videos' ? <VideoLibraryPanel /> : null}
             {tab === 'banners' ? <HomeBannersPanel /> : null}
             {tab === 'revenue' ? <RevenuePanel agencyId={agencyId} /> : null}
+            {tab === 'referrals' ? (
+              <AgencyReferralsPanel agencyId={agencyId || ''} />
+            ) : null}
+            {tab === 'inbox' ? (
+              <AgencyInboxPanel
+                agencyId={agencyId}
+                isAdmin={!isAgency}
+              />
+            ) : null}
 
             {tab === 'calls' ? (
               <>
