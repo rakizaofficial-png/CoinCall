@@ -8,7 +8,7 @@ import {
   Users,
   Wallet,
 } from 'lucide-react-native';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Avatar } from '../../components/ui/Avatar';
@@ -31,17 +31,26 @@ export function DashboardScreen({ navigation }: { navigation: any }) {
     callsToday,
     myTodayMinutes,
     hostEarnings,
+    todayLiveSeconds,
+    refreshTodayStats,
   } = useApp();
-  const { todayLiveGiftCoins, monthlyEarn, liveSeconds, myLiveRoom } = useLiveStudio();
+  const { todayLiveGiftCoins, liveSeconds, myLiveRoom } = useLiveStudio();
   const [appIdQuery, setAppIdQuery] = useState('');
   const [searchBusy, setSearchBusy] = useState(false);
 
+  const giftCoinsToday = Math.max(hostEarnings.gift, todayLiveGiftCoins);
   const todayEarn =
     hostEarnings.call +
-    hostEarnings.gift +
+    giftCoinsToday +
     hostEarnings.task +
-    hostEarnings.invite +
-    todayLiveGiftCoins;
+    hostEarnings.invite;
+  const liveTimeMinutes = Math.floor(
+    Math.max(liveSeconds, todayLiveSeconds) / 60,
+  );
+
+  useEffect(() => {
+    void refreshTodayStats();
+  }, [refreshTodayStats]);
 
   const searchByAppId = async () => {
     const q = appIdQuery.trim().replace(/\D/g, '');
@@ -145,8 +154,8 @@ export function DashboardScreen({ navigation }: { navigation: any }) {
         <Text style={styles.heroLabel}>Today's earnings</Text>
         <Text style={styles.heroValue}>{todayEarn}</Text>
         <Text style={styles.heroSub}>
-          calls {hostEarnings.call} · gifts{' '}
-          {hostEarnings.gift + todayLiveGiftCoins} · wallet {user.coinBalance}
+          call coins {hostEarnings.call} · gifts {giftCoinsToday} · wallet{' '}
+          {user.coinBalance}
         </Text>
         <View style={styles.heroActions}>
           <PrimaryButton
@@ -175,8 +184,8 @@ export function DashboardScreen({ navigation }: { navigation: any }) {
         {[
           { icon: Radio, label: 'Calls today', value: callsToday },
           { icon: Clock, label: 'Minutes', value: myTodayMinutes },
-          { icon: Gift, label: 'Live gifts', value: todayLiveGiftCoins },
-          { icon: Heart, label: 'Live time', value: `${Math.floor(liveSeconds / 60)}m` },
+          { icon: Gift, label: 'Live gifts', value: giftCoinsToday },
+          { icon: Heart, label: 'Live time', value: `${liveTimeMinutes}m` },
         ].map((s) => (
           <GlassCard key={s.label} style={styles.stat}>
             <s.icon size={18} color={colors.primarySoft} />

@@ -31,6 +31,22 @@ export type HostGiftHistoryRow = {
   createdAt: number;
 };
 
+export type HostTodayStats = {
+  callCoins: number;
+  giftCoins: number;
+  liveGiftCoins: number;
+  totalCoins: number;
+  callsCount: number;
+  callMinutes: number;
+  giftCount: number;
+  liveSeconds: number;
+  liveSecondsCompleted?: number;
+  liveActiveStartedAt?: number | null;
+  liveSessions: number;
+  walletBalance?: number;
+  dayStartMs?: number;
+};
+
 export type HostEarningsPayload = {
   summary: {
     callCoins: number;
@@ -41,16 +57,24 @@ export type HostEarningsPayload = {
     totalGifts: number;
     walletBalance: number;
   };
+  today: HostTodayStats;
   calls: HostCallHistoryRow[];
   gifts: HostGiftHistoryRow[];
 };
+
+export function localDayStartMs(now = Date.now()) {
+  const d = new Date(now);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
 
 export async function fetchHostEarnings(
   hostId: string,
 ): Promise<HostEarningsPayload> {
   const api = env.apiBaseUrl.replace(/\/$/, '');
+  const dayStart = localDayStartMs();
   const res = await fetch(
-    `${api}/hosts/${encodeURIComponent(hostId)}/earnings?limit=50`,
+    `${api}/hosts/${encodeURIComponent(hostId)}/earnings?limit=100&dayStart=${dayStart}`,
     {
       headers: { 'X-User-Id': hostId },
       cache: 'no-store',
@@ -62,6 +86,17 @@ export async function fetchHostEarnings(
   if (!res.ok) {
     throw new Error(data.error || `Earnings failed (${res.status})`);
   }
+  const today: HostTodayStats = data.today || {
+    callCoins: 0,
+    giftCoins: 0,
+    liveGiftCoins: 0,
+    totalCoins: 0,
+    callsCount: 0,
+    callMinutes: 0,
+    giftCount: 0,
+    liveSeconds: 0,
+    liveSessions: 0,
+  };
   return {
     summary: data.summary || {
       callCoins: 0,
@@ -72,6 +107,7 @@ export async function fetchHostEarnings(
       totalGifts: 0,
       walletBalance: 0,
     },
+    today,
     calls: data.calls || [],
     gifts: data.gifts || [],
   };

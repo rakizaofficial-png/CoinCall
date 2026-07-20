@@ -31,9 +31,10 @@ export function MeScreen({ navigation }: { navigation: any }) {
   const { signOut } = useAuth();
   const { isDark, setScheme } = useTheme();
 
+  const giftCoinsToday = Math.max(hostEarnings.gift, todayLiveGiftCoins);
   const wallet =
     hostEarnings.call +
-    hostEarnings.gift +
+    giftCoinsToday +
     hostEarnings.task +
     hostEarnings.invite +
     (user.coinBalance || 0);
@@ -112,7 +113,7 @@ export function MeScreen({ navigation }: { navigation: any }) {
         <View style={styles.stats}>
           <StatChip label="Wallet" value={wallet} accent={premium.gold} />
           <StatChip label="Month" value={monthlyEarn} accent={premium.teal} />
-          <StatChip label="Gifts" value={todayLiveGiftCoins} accent={premium.rose} />
+          <StatChip label="Gifts" value={giftCoinsToday} accent={premium.rose} />
           <StatChip
             label="Live"
             value={`${Math.floor(liveSeconds / 60)}m`}
@@ -129,7 +130,7 @@ export function MeScreen({ navigation }: { navigation: any }) {
             </View>
             <View style={styles.earnRow}>
               <BodyText mute>Gift</BodyText>
-              <BodyText style={{ fontWeight: '800' }}>{hostEarnings.gift}</BodyText>
+              <BodyText style={{ fontWeight: '800' }}>{giftCoinsToday}</BodyText>
             </View>
             <View style={styles.earnRow}>
               <BodyText mute>Task</BodyText>

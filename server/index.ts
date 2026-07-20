@@ -150,6 +150,15 @@ type GiftHistoryRecord = {
   createdAt: number;
 };
 
+type LiveSessionRecord = {
+  id: string;
+  hostId: string;
+  startedAt: number;
+  endedAt: number;
+  durationSec: number;
+  giftCoins: number;
+};
+
 type GiftRequestStatus = 'pending' | 'accepted' | 'declined' | 'expired';
 
 type GiftRequestRecord = {
@@ -189,6 +198,8 @@ const calls = new Map<string, CallRecord>();
 const callHistory: CallHistoryRecord[] = [];
 /** Durable gift ledger for host revenue (capped) */
 const giftHistory: GiftHistoryRecord[] = [];
+/** Durable live session ledger for host live-time stats */
+const liveSessionHistory: LiveSessionRecord[] = [];
 
 function archiveCall(call: CallRecord, endReason: CallEndReason) {
   if (callHistory.some((c) => c.id === call.id)) return;
@@ -239,6 +250,15 @@ function pushGiftHistory(event: GiftHistoryRecord) {
   persist();
 }
 
+function pushLiveSession(session: LiveSessionRecord) {
+  if (liveSessionHistory.some((s) => s.id === session.id && s.endedAt === session.endedAt)) {
+    return;
+  }
+  liveSessionHistory.unshift(session);
+  if (liveSessionHistory.length > 800) liveSessionHistory.length = 800;
+  persist();
+}
+
 function hostEarningsSummary(hostId: string) {
   const hostCalls = callHistory.filter((c) => c.hostId === hostId);
   const hostGifts = giftHistory.filter((g) => g.toHostId === hostId);
@@ -255,6 +275,50 @@ function hostEarningsSummary(hostId: string) {
     totalCalls: answered.length,
     totalDurationSec,
     totalGifts: hostGifts.length,
+  };
+}
+
+/** Day-scoped dashboard stats (client passes local midnight as dayStartMs). */
+function hostTodayStats(hostId: string, dayStartMs: number) {
+  const start = Number.isFinite(dayStartMs) && dayStartMs > 0 ? dayStartMs : 0;
+  const todayCalls = callHistory.filter(
+    (c) =>
+      c.hostId === hostId &&
+      (c.endedAt || c.startedAt || 0) >= start &&
+      (c.status === 'ended' || c.status === 'accepted' || (c.billedMinutes || 0) > 0),
+  );
+  const todayGifts = giftHistory.filter(
+    (g) => g.toHostId === hostId && (g.createdAt || 0) >= start,
+  );
+  const todayLiveSessions = liveSessionHistory.filter(
+    (s) => s.hostId === hostId && (s.startedAt || 0) >= start,
+  );
+  const callCoins = todayCalls.reduce((s, c) => s + (c.coinsSpent || 0), 0);
+  const giftCoins = todayGifts.reduce((s, g) => s + (g.coins || 0), 0);
+  const liveGiftCoins = todayGifts
+    .filter((g) => Boolean(g.roomId))
+    .reduce((s, g) => s + (g.coins || 0), 0);
+  const callMinutes = todayCalls.reduce((s, c) => {
+    const billed = Math.max(0, Math.floor(c.billedMinutes || 0));
+    if (billed > 0) return s + billed;
+    return s + Math.max(0, Math.ceil((c.durationSec || 0) / 60));
+  }, 0);
+  let liveSeconds = todayLiveSessions.reduce(
+    (s, row) => s + Math.max(0, row.durationSec || 0),
+    0,
+  );
+  return {
+    callCoins,
+    giftCoins,
+    liveGiftCoins: liveGiftCoins || giftCoins,
+    totalCoins: callCoins + giftCoins,
+    callsCount: todayCalls.length,
+    callMinutes,
+    giftCount: todayGifts.length,
+    liveSeconds,
+    liveSecondsCompleted: liveSeconds,
+    liveActiveStartedAt: null as number | null,
+    liveSessions: todayLiveSessions.length,
   };
 }
 const hostStreams = new Map<string, Set<express.Response>>();
@@ -851,8 +915,10 @@ app.get('/api/hosts/:hostId/earnings', (req, res) => {
     return;
   }
   if (!requireUserMatch(req, res, hostId)) return;
-  const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 40));
+  const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 100));
+  const dayStartMs = Number(req.query.dayStart) || 0;
   const summary = hostEarningsSummary(hostId);
+  const today = hostTodayStats(hostId, dayStartMs);
   const callsForHost = callHistory.filter((c) => c.hostId === hostId).slice(0, limit);
   const giftsForHost = giftHistory.filter((g) => g.toHostId === hostId).slice(0, limit);
   const wallet = ensureWallet(hostId, { role: 'host' });
@@ -860,6 +926,11 @@ app.get('/api/hosts/:hostId/earnings', (req, res) => {
     summary: {
       ...summary,
       walletBalance: wallet.coinBalance,
+    },
+    today: {
+      ...today,
+      walletBalance: wallet.coinBalance,
+      dayStartMs: dayStartMs || undefined,
     },
     calls: callsForHost,
     gifts: giftsForHost,
@@ -2616,6 +2687,7 @@ function buildSnapshot(): PersistedSnapshot {
     })) as Array<Record<string, unknown>>,
     callHistory: callHistory as unknown as Array<Record<string, unknown>>,
     giftHistory: giftHistory as unknown as Array<Record<string, unknown>>,
+    liveSessionHistory: liveSessionHistory as unknown as Array<Record<string, unknown>>,
   };
 }
 
@@ -2689,8 +2761,14 @@ function restoreFromDisk() {
     giftHistory.length = 0;
     giftHistory.push(...(snap.giftHistory as unknown as GiftHistoryRecord[]));
   }
+  if (Array.isArray(snap.liveSessionHistory)) {
+    liveSessionHistory.length = 0;
+    liveSessionHistory.push(
+      ...(snap.liveSessionHistory as unknown as LiveSessionRecord[]),
+    );
+  }
   console.log(
-    `[persist] restored wallets=${wallets.size} withdrawals=${withdrawals.length} liveRooms=${liveRooms.size} dm=${dmThreads.size} calls=${callHistory.length} gifts=${giftHistory.length}`,
+    `[persist] restored wallets=${wallets.size} withdrawals=${withdrawals.length} liveRooms=${liveRooms.size} dm=${dmThreads.size} calls=${callHistory.length} gifts=${giftHistory.length} liveSessions=${liveSessionHistory.length}`,
   );
 }
 
@@ -2748,8 +2826,14 @@ async function applyMongoOrDisk() {
     giftHistory.length = 0;
     giftHistory.push(...(snap.giftHistory as unknown as GiftHistoryRecord[]));
   }
+  if (Array.isArray(snap.liveSessionHistory)) {
+    liveSessionHistory.length = 0;
+    liveSessionHistory.push(
+      ...(snap.liveSessionHistory as unknown as LiveSessionRecord[]),
+    );
+  }
   console.log(
-    `[persist] restored from Mongo wallets=${wallets.size} withdrawals=${withdrawals.length} calls=${callHistory.length} gifts=${giftHistory.length}`,
+    `[persist] restored from Mongo wallets=${wallets.size} withdrawals=${withdrawals.length} calls=${callHistory.length} gifts=${giftHistory.length} liveSessions=${liveSessionHistory.length}`,
   );
 }
 
@@ -2813,7 +2897,11 @@ app.post('/api/live/rooms', (req, res) => {
     room.hostAvatar = resolved;
     if (!room.thumbnailUrl) room.thumbnailUrl = resolved;
   }
-  liveRooms.set(id, { ...room, updatedAt: Date.now() });
+  liveRooms.set(id, {
+    ...room,
+    startedAt: Number(room.startedAt || room.createdAt || Date.now()),
+    updatedAt: Date.now(),
+  });
   if (hostId) {
     const existing = getPresence(hostId);
     if (existing) {
@@ -2994,12 +3082,28 @@ app.post('/api/live/rooms/:id/end', (req, res) => {
   const id = String(req.params.id || '');
   const room = liveRooms.get(id);
   if (room) {
-    room.isLive = false;
-    room.endedAt = Date.now();
-    liveRooms.set(id, room);
     const hostId = String(room.hostId || req.body?.hostId || '');
-    if (hostId && getPresence(hostId)) {
-      patchPresence(hostId, { isLive: false });
+    const startedAt = Number(
+      room.startedAt || room.createdAt || room.updatedAt || Date.now(),
+    );
+    const endedAt = Date.now();
+    room.isLive = false;
+    room.endedAt = endedAt;
+    liveRooms.set(id, room);
+    if (hostId) {
+      pushLiveSession({
+        id: String(room.id || id),
+        hostId,
+        startedAt,
+        endedAt,
+        durationSec: Math.max(0, Math.floor((endedAt - startedAt) / 1000)),
+        giftCoins: Math.max(0, Math.floor(Number(room.giftCoins) || 0)),
+      });
+      if (getPresence(hostId)) {
+        patchPresence(hostId, { isLive: false });
+      }
+    } else {
+      persist();
     }
   }
   broadcastWs({ type: 'live:ended', payload: { id } });

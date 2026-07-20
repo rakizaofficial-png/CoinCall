@@ -7,6 +7,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import { AppState, type AppStateStatus } from 'react-native';
 import { COIN_PACKAGES, MOCK_HOSTS, MOCK_NEWS, MOCK_ROOMS } from '../data/mockData';
 import {
   type BridgeCall,
@@ -104,6 +105,8 @@ type AppContextValue = {
   points: number;
   /** Your call minutes today (competition) */
   myTodayMinutes: number;
+  /** Accumulated live streaming seconds today (survives refresh via API) */
+  todayLiveSeconds: number;
   /** Your longest call today in seconds */
   myLongestCallSeconds: number;
   competition: CompetitionEntry[];
@@ -130,6 +133,10 @@ type AppContextValue = {
     withdrawalId: string,
     nextBalance: number,
   ) => void;
+  /** Re-fetch today's call/gift/live stats from API */
+  refreshTodayStats: () => Promise<void>;
+  /** Add seconds to today's completed live time (e.g. after ending a stream) */
+  bumpTodayLiveSeconds: (seconds: number) => void;
   runHostTool: (key: HostToolKey) => void;
   refreshList: () => void;
   getHost: (id: string) => Host | undefined;
@@ -279,7 +286,9 @@ export function AppProvider({
   });
   const [callsToday, setCallsToday] = useState(0);
   const [myTodayMinutes, setMyTodayMinutes] = useState(0);
+  const [todayLiveSeconds, setTodayLiveSeconds] = useState(0);
   const [myLongestCallSeconds, setMyLongestCallSeconds] = useState(0);
+  const hydratedDayRef = useRef<number>(0);
   const [incomingBridgeCall, setIncomingBridgeCall] = useState<BridgeCall | null>(
     null,
   );
@@ -653,53 +662,109 @@ export function AppProvider({
     return () => clearTimeout(t);
   }, [user.coinBalance, user.id, user.name]);
 
-  // Hydrate today's call/gift ledger from API so dashboard survives refresh
+  // Hydrate today's call/gift/live ledger from API so dashboard survives refresh
+  const refreshTodayStats = useCallback(async () => {
+    if (!user.id) return;
+    try {
+      const { fetchHostEarnings, localDayStartMs } = await import(
+        '../services/hostEarningsApi'
+      );
+      const dayStart = localDayStartMs();
+      if (hydratedDayRef.current && hydratedDayRef.current !== dayStart) {
+        // New local day — clear in-memory day counters before hydrate
+        setHostEarnings((e) => ({ ...e, call: 0, gift: 0 }));
+        setCallsToday(0);
+        setMyTodayMinutes(0);
+        setTodayLiveSeconds(0);
+      }
+      hydratedDayRef.current = dayStart;
+
+      const data = await fetchHostEarnings(user.id);
+      const today = data.today;
+
+      let callCoins = today.callCoins ?? 0;
+      let giftCoins = today.giftCoins ?? 0;
+      let callsCount = today.callsCount ?? 0;
+      let callMinutes = today.callMinutes ?? 0;
+      let liveSeconds = today.liveSeconds ?? 0;
+
+      // Older API without `today` — derive from history rows
+      if (
+        callCoins === 0 &&
+        giftCoins === 0 &&
+        callsCount === 0 &&
+        callMinutes === 0 &&
+        liveSeconds === 0
+      ) {
+        const todayCalls = (data.calls || []).filter(
+          (c) => (c.endedAt || c.startedAt || 0) >= dayStart,
+        );
+        const todayGifts = (data.gifts || []).filter(
+          (g) => (g.createdAt || 0) >= dayStart,
+        );
+        callCoins = todayCalls.reduce((s, c) => s + (c.coinsSpent || 0), 0);
+        giftCoins = todayGifts.reduce((s, g) => s + (g.coins || 0), 0);
+        callsCount = todayCalls.length;
+        callMinutes = todayCalls.reduce((s, c) => {
+          const billed = Math.max(0, Math.floor(c.billedMinutes || 0));
+          if (billed > 0) return s + billed;
+          return s + Math.max(0, Math.ceil((c.durationSec || 0) / 60));
+        }, 0);
+      }
+
+      setHostEarnings((e) => ({
+        ...e,
+        call: Math.max(e.call, callCoins),
+        gift: Math.max(e.gift, giftCoins),
+      }));
+      setCallsToday((n) => Math.max(n, callsCount));
+      setMyTodayMinutes((m) => Math.max(m, callMinutes));
+      // Store completed live seconds only; LiveStudio adds the active session timer
+      const completed =
+        today.liveSecondsCompleted ??
+        (today.liveActiveStartedAt
+          ? Math.max(
+              0,
+              liveSeconds -
+                Math.max(
+                  0,
+                  Math.floor((Date.now() - today.liveActiveStartedAt) / 1000),
+                ),
+            )
+          : liveSeconds);
+      setTodayLiveSeconds((s) => Math.max(s, completed));
+      if (typeof data.summary?.walletBalance === 'number') {
+        setUser((u) => ({
+          ...u,
+          coinBalance: Math.max(u.coinBalance, data.summary.walletBalance),
+        }));
+      }
+    } catch {
+      /* keep local counters if API is briefly unreachable */
+    }
+  }, [user.id]);
+
   useEffect(() => {
     if (!user.id) return;
-    let cancelled = false;
-    const dayStart = new Date();
-    dayStart.setHours(0, 0, 0, 0);
-    const startMs = dayStart.getTime();
-
-    void import('../services/hostEarningsApi').then(({ fetchHostEarnings }) => {
-      void fetchHostEarnings(user.id)
-        .then((data) => {
-          if (cancelled) return;
-          const todayCalls = (data.calls || []).filter(
-            (c) => (c.endedAt || c.startedAt || 0) >= startMs,
-          );
-          const todayGifts = (data.gifts || []).filter(
-            (g) => (g.createdAt || 0) >= startMs,
-          );
-          const callCoins = todayCalls.reduce(
-            (s, c) => s + (c.coinsSpent || 0),
-            0,
-          );
-          const giftCoins = todayGifts.reduce((s, g) => s + (g.coins || 0), 0);
-          const minutes = Math.round(
-            todayCalls.reduce((s, c) => s + (c.durationSec || 0), 0) / 60,
-          );
-          setHostEarnings((e) => ({
-            ...e,
-            call: Math.max(e.call, callCoins),
-            gift: Math.max(e.gift, giftCoins),
-          }));
-          setCallsToday((n) => Math.max(n, todayCalls.length));
-          setMyTodayMinutes((m) => Math.max(m, minutes));
-          if (typeof data.summary?.walletBalance === 'number') {
-            setUser((u) => ({
-              ...u,
-              coinBalance: Math.max(u.coinBalance, data.summary.walletBalance),
-            }));
-          }
-        })
-        .catch(() => undefined);
-    });
-
-    return () => {
-      cancelled = true;
+    void refreshTodayStats();
+    const poll = setInterval(() => {
+      void refreshTodayStats();
+    }, 20_000);
+    const onAppState = (state: AppStateStatus) => {
+      if (state === 'active') void refreshTodayStats();
     };
-  }, [user.id]);
+    const sub = AppState.addEventListener('change', onAppState);
+    return () => {
+      clearInterval(poll);
+      sub.remove();
+    };
+  }, [user.id, refreshTodayStats]);
+
+  const bumpTodayLiveSeconds = useCallback((seconds: number) => {
+    const n = Math.max(0, Math.floor(seconds));
+    if (n <= 0) return;
+    setTodayLiveSeconds((s) => s + n);
+  }, []);
 
   // Ensure local data:/blob: photos become public https for Luma
   useEffect(() => {
@@ -1053,9 +1118,6 @@ export function AppProvider({
           return { ...r, viewers: r.viewers + bump };
         }),
       );
-      if (Math.random() > 0.85) {
-        addEarn(setUser, setHostEarnings, setTransactions, 8, 'gift', 'Live gift received 🎁');
-      }
     }, 1000);
 
     return () => clearInterval(interval);
@@ -1064,7 +1126,7 @@ export function AppProvider({
   const applyPayout = useCallback(
     (amount: number, gateway: string, withdrawalId: string, nextBalance: number) => {
       setUser((u) => ({ ...u, coinBalance: nextBalance }));
-      setHostEarnings({ call: 0, gift: 0, task: 0, invite: 0, managed: 0 });
+      // Keep today's earnings counters — only wallet balance changes on withdraw
       setTransactions((txs) => [
         {
           id: `tx_${Date.now()}`,
@@ -1395,6 +1457,7 @@ export function AppProvider({
       beautyOn,
       points,
       myTodayMinutes,
+      todayLiveSeconds,
       myLongestCallSeconds,
       competition,
       myRank,
@@ -1415,6 +1478,8 @@ export function AppProvider({
       endPartyLive,
       requestPayout,
       applyPayout,
+      refreshTodayStats,
+      bumpTodayLiveSeconds,
       runHostTool,
       refreshList,
       getHost,
@@ -1460,6 +1525,7 @@ export function AppProvider({
       beautyOn,
       points,
       myTodayMinutes,
+      todayLiveSeconds,
       myLongestCallSeconds,
       competition,
       myRank,
@@ -1480,6 +1546,8 @@ export function AppProvider({
       endPartyLive,
       requestPayout,
       applyPayout,
+      refreshTodayStats,
+      bumpTodayLiveSeconds,
       runHostTool,
       refreshList,
       getHost,

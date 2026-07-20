@@ -29,6 +29,8 @@ export type PersistedSnapshot = {
   callHistory?: Array<Record<string, unknown>>;
   /** Gift send ledger for host revenue */
   giftHistory?: Array<Record<string, unknown>>;
+  /** Ended live sessions for host live-time stats */
+  liveSessionHistory?: Array<Record<string, unknown>>;
 };
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;

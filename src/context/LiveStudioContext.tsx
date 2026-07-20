@@ -104,7 +104,8 @@ function emptySeats(): PartySeatPublic[] {
 }
 
 export function LiveStudioProvider({ children }: { children: React.ReactNode }) {
-  const { user, setHostOnline, hostEarnings } = useApp();
+  const { user, setHostOnline, hostEarnings, todayLiveSeconds, bumpTodayLiveSeconds, refreshTodayStats } =
+    useApp();
   const [liveRooms, setLiveRooms] = useState<LiveRoom[]>([]);
   const [myLiveRoom, setMyLiveRoom] = useState<LiveRoom | null>(null);
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
@@ -120,7 +121,7 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
   const [rechargeUsers, setRechargeUsers] = useState<RechargeUserRow[]>([]);
   const [mutedUserIds, setMutedUserIds] = useState<string[]>([]);
   const [blockedInRoom, setBlockedInRoom] = useState<string[]>([]);
-  const [liveSeconds, setLiveSeconds] = useState(0);
+  const [sessionLiveSeconds, setSessionLiveSeconds] = useState(0);
   const [todayLiveGiftCoins, setTodayLiveGiftCoins] = useState(0);
   const [goLiveDraft, setDraft] = useState<GoLiveDraft>({
     title: `${user.name}'s Live`,
@@ -268,6 +269,10 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
           setGifts((prev) => [overlay, ...prev].slice(0, 50));
           setGiftOverlay(overlay);
           setTimeout(() => setGiftOverlay(null), 2800);
+          const coins = Number(p.coins) || 0;
+          if (coins > 0) {
+            setTodayLiveGiftCoins((c) => c + coins);
+          }
           return;
         }
         if (event.type !== 'recharge:updated') return;
@@ -311,12 +316,23 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
 
   useEffect(() => {
     if (!myLiveRoom?.isLive) {
-      setLiveSeconds(0);
+      setSessionLiveSeconds(0);
       return;
     }
-    const t = setInterval(() => setLiveSeconds((s) => s + 1), 1000);
+    const start = Number(myLiveRoom.startedAt || Date.now());
+    const tick = () =>
+      setSessionLiveSeconds(Math.max(0, Math.floor((Date.now() - start) / 1000)));
+    tick();
+    const t = setInterval(tick, 1000);
     return () => clearInterval(t);
-  }, [myLiveRoom?.isLive]);
+  }, [myLiveRoom?.isLive, myLiveRoom?.startedAt]);
+
+  // Keep live-gift tile in sync with today's hydrated gift coins
+  useEffect(() => {
+    setTodayLiveGiftCoins((c) => Math.max(c, hostEarnings.gift || 0));
+  }, [hostEarnings.gift]);
+
+  const liveSeconds = todayLiveSeconds + sessionLiveSeconds;
 
   /** Keep API live room + presence fresh so Luma can join the Agora channel */
   useEffect(() => {
@@ -516,6 +532,8 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
 
   const stopLive = useCallback(async () => {
     if (myLiveRoom) {
+      const startedAt = Number(myLiveRoom.startedAt || Date.now());
+      const sessionSec = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
       await endLiveRoom(myLiveRoom.id, user.id);
       await postRoomComment(myLiveRoom.id, {
         userId: 'system',
@@ -524,10 +542,13 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
         createdAt: Date.now(),
         kind: 'system',
       });
+      bumpTodayLiveSeconds(sessionSec);
+      void refreshTodayStats();
     }
     setMyLiveRoom(null);
     setActiveRoomId(null);
     setBridgeLive(false);
+    setSessionLiveSeconds(0);
     await syncHostPresence(user.id, {
       isLive: false,
       isOnCall: false,
@@ -545,7 +566,7 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
       workspaceMode: 'waiting_1v1',
     }).catch(() => undefined);
     notify('Live ended', 'Thanks for streaming!');
-  }, [myLiveRoom, user]);
+  }, [bumpTodayLiveSeconds, myLiveRoom, refreshTodayStats, user]);
 
   const openRoom = useCallback((roomId: string) => setActiveRoomId(roomId), []);
   const closeRoomView = useCallback(() => {
