@@ -194,6 +194,72 @@ function adminKeyHeader() {
   return localStorage.getItem('cc_admin_key') || adminKey;
 }
 
+export type SupportTicketRow = {
+  id: string;
+  hostId: string;
+  hostName: string;
+  text: string;
+  status: 'open' | 'answered' | 'closed';
+  createdAt: number;
+  updatedAt: number;
+  category?: string;
+  adminReply?: string;
+  repliedAt?: number;
+  repliedBy?: string;
+};
+
+export type HelpArticle = {
+  id: string;
+  title: string;
+  category: string;
+  body: string;
+};
+
+export async function fetchAdminSupportTickets(status?: string) {
+  const qs = new URLSearchParams({ key: adminKeyHeader() });
+  if (status) qs.set('status', status);
+  const res = await fetch(`${apiBaseUrl}/admin/support/tickets?${qs.toString()}`, {
+    headers: { 'x-admin-key': adminKeyHeader() },
+    cache: 'no-store',
+  });
+  if (!res.ok) throw new Error('Could not load support tickets');
+  return (await res.json()) as {
+    tickets: SupportTicketRow[];
+    counts?: { open: number; answered: number; closed: number; total: number };
+  };
+}
+
+export async function updateSupportTicketStatus(
+  id: string,
+  status: 'open' | 'answered' | 'closed',
+  reply?: string,
+) {
+  const res = await fetch(
+    `${apiBaseUrl}/admin/support/tickets/${encodeURIComponent(id)}/status`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-admin-key': adminKeyHeader(),
+      },
+      body: JSON.stringify({
+        key: adminKeyHeader(),
+        status,
+        reply,
+        adminId: localStorage.getItem('cc_admin_id') || 'admin',
+      }),
+    },
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<{ ok: boolean; ticket: SupportTicketRow }>;
+}
+
+export async function fetchHelpCenterArticles() {
+  const res = await fetch(`${apiBaseUrl}/help-center`, { cache: 'no-store' });
+  if (!res.ok) throw new Error('Could not load help articles');
+  return (await res.json()) as { articles: HelpArticle[] };
+}
+
 export async function fetchAdminWithdrawals() {
   const res = await fetch(
     `${apiBaseUrl}/admin/withdrawals?key=${encodeURIComponent(adminKeyHeader())}`,

@@ -181,6 +181,7 @@ export async function createAdminSupportTicket(input: {
   hostId: string;
   hostName: string;
   text: string;
+  category?: string;
 }): Promise<{ id: string }> {
   const text = input.text.trim();
   if (!text) throw new Error('Message required');
@@ -192,6 +193,7 @@ export async function createAdminSupportTicket(input: {
       hostId: input.hostId,
       hostName: input.hostName,
       text,
+      category: input.category || 'general',
     }),
   });
   const data = (await res.json().catch(() => ({}))) as {
@@ -209,6 +211,43 @@ export async function createAdminSupportTicket(input: {
   }).catch(() => undefined);
 
   return { id: data.ticket.id };
+}
+
+export type HelpArticle = {
+  id: string;
+  title: string;
+  category: string;
+  body: string;
+};
+
+export async function fetchHelpCenterArticles(): Promise<HelpArticle[]> {
+  const res = await fetch(`${apiBase()}/help-center`);
+  if (!res.ok) return [];
+  const data = (await res.json()) as { articles?: HelpArticle[] };
+  return data.articles || [];
+}
+
+export type HostSupportTicket = {
+  id: string;
+  hostId: string;
+  hostName: string;
+  text: string;
+  status: 'open' | 'answered' | 'closed';
+  category?: string;
+  adminReply?: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export async function fetchHostSupportTickets(
+  hostId: string,
+): Promise<HostSupportTicket[]> {
+  const res = await fetch(
+    `${apiBase()}/support/tickets?hostId=${encodeURIComponent(hostId)}`,
+  );
+  if (!res.ok) return [];
+  const data = (await res.json()) as { tickets?: HostSupportTicket[] };
+  return data.tickets || [];
 }
 
 export function listenRechargeBoard(

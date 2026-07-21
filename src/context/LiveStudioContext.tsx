@@ -74,7 +74,7 @@ type LiveStudioValue = {
   renameRoom: (title: string) => Promise<void>;
   updateSeats: (seats: PartySeatPublic[]) => Promise<void>;
   massTextAllActive: (text: string) => Promise<number>;
-  contactAdminSupport: (text: string) => Promise<void>;
+  contactAdminSupport: (text: string, category?: string) => Promise<void>;
   addGiftLockedPhoto: (url: string, caption?: string, unlockCoins?: number) => Promise<void>;
   unlockPhotoWithGift: (photoId: string) => Promise<void>;
   simulateViewerRecharge: () => Promise<void>;
@@ -760,11 +760,12 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
   );
 
   const contactAdminSupport = useCallback(
-    async (text: string) => {
+    async (text: string, category?: string) => {
       const ticket = await createAdminSupportTicket({
         hostId: user.id,
         hostName: user.name,
         text,
+        category,
       });
       notify('Admin support', `Ticket ${ticket.id} created`);
     },

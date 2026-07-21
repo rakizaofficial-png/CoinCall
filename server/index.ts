@@ -270,10 +270,19 @@ const GIFT_CATALOG_SERVER: Record<
   golden_throne: { name: 'Golden Throne', emoji: '🪑', coins: 12999 },
   diamond_rain: { name: 'Diamond Rain', emoji: '💎', coins: 15999 },
   millionaire_box: { name: 'Millionaire Box', emoji: '🎁', coins: 19999 },
+  // Adult / 18+ exclusive collection
+  silk_whisper: { name: 'Silk Whisper', emoji: '🖤', coins: 149 },
+  midnight_kiss: { name: 'Midnight Kiss', emoji: '💋', coins: 299 },
+  velvet_night: { name: 'Velvet Night', emoji: '🌙', coins: 599 },
+  spicy_rose: { name: 'Spicy Rose', emoji: '🔥', coins: 999 },
+  champagne_suite: { name: 'Champagne Suite', emoji: '🥂', coins: 1999 },
+  private_unlock: { name: 'Private Unlock', emoji: '🔓', coins: 2999 },
+  diamond_desire: { name: 'Diamond Desire', emoji: '💎', coins: 4999 },
+  vip_private_show: { name: 'VIP Private Show', emoji: '🎭', coins: 9999 },
   // Legacy aliases
   rose: { name: 'Rose Bouquet', emoji: '🌹', coins: 10 },
   heart: { name: 'Neon Heart', emoji: '💗', coins: 99 },
-  kiss: { name: 'Neon Heart', emoji: '💗', coins: 99 },
+  kiss: { name: 'Midnight Kiss', emoji: '💋', coins: 299 },
   star: { name: 'Golden Butterfly', emoji: '🦋', coins: 199 },
   diamond: { name: 'Diamond Ring', emoji: '💍', coins: 299 },
   crown: { name: 'Diamond Crown', emoji: '👑', coins: 1999 },
@@ -281,6 +290,9 @@ const GIFT_CATALOG_SERVER: Record<
   yacht: { name: 'Luxury Yacht', emoji: '🛥️', coins: 6999 },
   castle: { name: 'Royal Castle', emoji: '🏰', coins: 9999 },
   rocket: { name: 'Private Jet', emoji: '✈️', coins: 4999 },
+  adult: { name: 'Private Unlock', emoji: '🔓', coins: 2999 },
+  spicy: { name: 'Spicy Rose', emoji: '🔥', coins: 999 },
+  private: { name: 'Private Unlock', emoji: '🔓', coins: 2999 },
 };
 
 const calls = new Map<string, CallRecord>();
@@ -2146,6 +2158,10 @@ type SupportTicket = {
   status: 'open' | 'answered' | 'closed';
   createdAt: number;
   updatedAt: number;
+  category?: string;
+  adminReply?: string;
+  repliedAt?: number;
+  repliedBy?: string;
 };
 const supportTickets: SupportTicket[] = [];
 const massTextHistory: Array<{
@@ -4996,6 +5012,10 @@ app.post('/api/support/tickets', (req, res) => {
   const hostId = String(req.body?.hostId || '').trim();
   const hostName = String(req.body?.hostName || 'Host').slice(0, 40);
   const text = String(req.body?.text || '').trim().slice(0, 1000);
+  const category = String(req.body?.category || 'general')
+    .trim()
+    .slice(0, 40)
+    .toLowerCase();
   if (!hostId || !text) {
     res.status(400).json({ error: 'hostId and text required' });
     return;
@@ -5005,6 +5025,7 @@ app.post('/api/support/tickets', (req, res) => {
     hostId,
     hostName,
     text,
+    category: category || 'general',
     status: 'open',
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -5024,7 +5045,20 @@ app.get('/api/support/tickets', (req, res) => {
 
 app.get('/api/admin/support/tickets', (req, res) => {
   if (!requireAdmin(req, res)) return;
-  res.json({ tickets: supportTickets.slice(0, 200) });
+  const status = String(req.query.status || '').toLowerCase();
+  let list = supportTickets.slice(0, 200);
+  if (status && ['open', 'answered', 'closed'].includes(status)) {
+    list = list.filter((t) => t.status === status);
+  }
+  res.json({
+    tickets: list,
+    counts: {
+      open: supportTickets.filter((t) => t.status === 'open').length,
+      answered: supportTickets.filter((t) => t.status === 'answered').length,
+      closed: supportTickets.filter((t) => t.status === 'closed').length,
+      total: supportTickets.length,
+    },
+  });
 });
 
 app.post('/api/admin/support/tickets/:id/status', (req, res) => {
@@ -5040,10 +5074,90 @@ app.post('/api/admin/support/tickets/:id/status', (req, res) => {
     res.status(400).json({ error: 'status must be open|answered|closed' });
     return;
   }
+  const reply = String(req.body?.reply || '').trim().slice(0, 2000);
   ticket.status = status as SupportTicket['status'];
   ticket.updatedAt = Date.now();
+  if (reply) {
+    ticket.adminReply = reply;
+    ticket.repliedAt = Date.now();
+    ticket.repliedBy = String(req.body?.adminId || 'admin').slice(0, 60);
+  }
+  persist();
   broadcastWs({ type: 'support:ticket', payload: ticket });
+  // Notify host inbox when answered
+  if (status === 'answered' && reply) {
+    try {
+      pushToHost(ticket.hostId, 'support_reply', {
+        ticketId: ticket.id,
+        reply,
+        status,
+      });
+    } catch {
+      /* optional */
+    }
+  }
   res.json({ ok: true, ticket });
+});
+
+/** Static help-center articles for Android host app (admin-managed copy) */
+const HELP_CENTER_ARTICLES = [
+  {
+    id: 'go-online',
+    title: 'Go online for 1:1 calls',
+    category: 'Getting started',
+    body: 'Open Home → toggle Available for 1:1 ON. Keep the app open so fans can reach you. Android may pause background apps — disable battery optimization for CoinCall Host.',
+  },
+  {
+    id: 'go-live',
+    title: 'Start a live stream',
+    category: 'Live',
+    body: 'Tap Go Live, set your title, then Start. Use Lock Live to add gift-gated photos. Fans unlock them with gifts ≥ 99 coins (Adult gifts from 149).',
+  },
+  {
+    id: 'adult-gifts',
+    title: 'Adult gifting (18+)',
+    category: 'Gifts',
+    body: 'During a call tap Ask Gift → Adult tab. On live, open the gift panel → Adult. Adult gifts unlock locked photos and show a premium animation.',
+  },
+  {
+    id: 'mass-text',
+    title: 'Message online users',
+    category: 'Chat',
+    body: 'Messages tab shows Active fans. Tap a fan to DM, or use Mass Texting to reach everyone currently online.',
+  },
+  {
+    id: 'set-message',
+    title: 'Set a live pinned message',
+    category: 'Live',
+    body: 'While live, open Host tools → Set message. Your pinned note appears in the room for all viewers.',
+  },
+  {
+    id: 'android-tips',
+    title: 'Android performance tips',
+    category: 'Android',
+    body: 'Use a stable Wi‑Fi or 4G/5G. Allow Camera + Mic. Keep screen awake during live. If video freezes, toggle beauty filter off and restart the room.',
+  },
+  {
+    id: 'withdraw',
+    title: 'Withdraw earnings',
+    category: 'Wallet',
+    body: 'Home → Withdraw. Submit payout details and wait for Finance approval. Check Financials status in your profile notifications.',
+  },
+  {
+    id: 'contact-support',
+    title: 'Contact admin support',
+    category: 'Support',
+    body: 'Messages → Administrator → write your issue. Tickets appear in the admin Help Center. You get a reply notification when answered.',
+  },
+];
+
+app.get('/api/help-center', (_req, res) => {
+  res.json({ articles: HELP_CENTER_ARTICLES });
+});
+
+app.get('/api/admin/help-center', (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  res.json({ articles: HELP_CENTER_ARTICLES });
 });
 
 /** -------- Direct messages (Luma user ↔ Host) -------- */
