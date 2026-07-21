@@ -86,6 +86,9 @@ fun ProfileScreen(
     onReferral: () -> Unit,
     onHelp: () -> Unit,
     onSettings: () -> Unit,
+    onSchedule: () -> Unit = {},
+    onReviews: () -> Unit = {},
+    onStatus: () -> Unit = {},
     vm: ProfileViewModel = hiltViewModel(),
 ) {
     val state by vm.state.collectAsState()
@@ -116,6 +119,9 @@ fun ProfileScreen(
         listOf(
             "Edit profile" to onEdit,
             "KYC verification" to onKyc,
+            "Online / busy / vacation" to onStatus,
+            "Availability schedule" to onSchedule,
+            "Reviews & ranking" to onReviews,
             "Agency" to onAgency,
             "Referrals" to onReferral,
             "Help Center" to onHelp,

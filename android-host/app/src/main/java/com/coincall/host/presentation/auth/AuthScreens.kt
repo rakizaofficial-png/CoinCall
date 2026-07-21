@@ -38,6 +38,7 @@ fun LoginScreen(
     onLoggedIn: () -> Unit,
     onRegister: () -> Unit,
     onForgot: () -> Unit,
+    onOtp: () -> Unit,
     vm: AuthViewModel = hiltViewModel(),
 ) {
     val state by vm.state.collectAsState()
@@ -52,6 +53,7 @@ fun LoginScreen(
         Spacer(Modifier.height(12.dp))
         PrimaryButton(if (state.loading) "Signing in…" else "Login", onClick = vm::login, enabled = !state.loading)
         Spacer(Modifier.height(8.dp))
+        TextButton(onClick = onOtp) { Text("Login with OTP") }
         TextButton(onClick = onRegister) { Text("Create host account") }
     }
 }
@@ -102,7 +104,7 @@ fun ResetPasswordScreen(onDone: () -> Unit) {
 }
 
 @Composable
-private fun AuthScaffold(title: String, subtitle: String, content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+internal fun AuthScaffold(title: String, subtitle: String, content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxSize()

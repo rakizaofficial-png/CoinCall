@@ -8,11 +8,11 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AccountBalanceWallet
 import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.outlined.AccountBalanceWallet
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -25,7 +25,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Modifier.modifier
+import androidx.compose.ui.Modifier.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
@@ -45,6 +45,7 @@ import com.coincall.host.data.repository.HostRepository
 import com.coincall.host.presentation.agency.AgencyScreen
 import com.coincall.host.presentation.auth.ForgotPasswordScreen
 import com.coincall.host.presentation.auth.LoginScreen
+import com.coincall.host.presentation.auth.OtpScreen
 import com.coincall.host.presentation.auth.RegisterScreen
 import com.coincall.host.presentation.auth.ResetPasswordScreen
 import com.coincall.host.presentation.calling.ActiveCallScreen
@@ -61,6 +62,8 @@ import com.coincall.host.presentation.performance.PerformanceScreen
 import com.coincall.host.presentation.profile.EditProfileScreen
 import com.coincall.host.presentation.profile.ProfileScreen
 import com.coincall.host.presentation.referral.ReferralScreen
+import com.coincall.host.presentation.reviews.ReviewsScreen
+import com.coincall.host.presentation.schedule.ScheduleScreen
 import com.coincall.host.presentation.settings.DevicesScreen
 import com.coincall.host.presentation.settings.SettingsScreen
 import com.coincall.host.presentation.status.StatusScreen
@@ -80,7 +83,6 @@ class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        // FLAG_SECURE on sensitive money screens can be toggled per-route; keep call activity protected.
         setContent {
             val prefsVm: ThemeViewModel = hiltViewModel()
             val darkPref by prefsVm.darkTheme.collectAsState()
@@ -147,6 +149,7 @@ fun HostRoot(hasSession: Boolean, compromised: Boolean) {
             }
         },
     ) { padding ->
+        // Scaffold padding keeps content above bottom nav / system bars — never clipped.
         NavHost(
             navController = nav,
             startDestination = Routes.Splash,
@@ -168,6 +171,13 @@ fun HostRoot(hasSession: Boolean, compromised: Boolean) {
                     onLoggedIn = { nav.navigate(Routes.Home) { popUpTo(Routes.Login) { inclusive = true } } },
                     onRegister = { nav.navigate(Routes.Register) },
                     onForgot = { nav.navigate(Routes.ForgotPassword) },
+                    onOtp = { nav.navigate(Routes.Otp) },
+                )
+            }
+            composable(Routes.Otp) {
+                OtpScreen(
+                    onVerified = { nav.navigate(Routes.Home) { popUpTo(Routes.Login) { inclusive = true } } },
+                    onBack = { nav.popBackStack() },
                 )
             }
             composable(Routes.Register) {
@@ -192,6 +202,8 @@ fun HostRoot(hasSession: Boolean, compromised: Boolean) {
                     onSettings = { nav.navigate(Routes.Settings) },
                     onPerformance = { nav.navigate(Routes.Performance) },
                     onStatus = { nav.navigate(Routes.Status) },
+                    onSchedule = { nav.navigate(Routes.Schedule) },
+                    onReviews = { nav.navigate(Routes.Reviews) },
                 )
             }
             composable(Routes.Calls) { CallHistoryScreen() }
@@ -210,11 +222,16 @@ fun HostRoot(hasSession: Boolean, compromised: Boolean) {
                     onReferral = { nav.navigate(Routes.Referral) },
                     onHelp = { nav.navigate(Routes.Help) },
                     onSettings = { nav.navigate(Routes.Settings) },
+                    onSchedule = { nav.navigate(Routes.Schedule) },
+                    onReviews = { nav.navigate(Routes.Reviews) },
+                    onStatus = { nav.navigate(Routes.Status) },
                 )
             }
             composable(Routes.EditProfile) { EditProfileScreen(onBack = { nav.popBackStack() }) }
             composable(Routes.Kyc) { KycScreen(onBack = { nav.popBackStack() }) }
             composable(Routes.Status) { StatusScreen(onBack = { nav.popBackStack() }) }
+            composable(Routes.Schedule) { ScheduleScreen(onBack = { nav.popBackStack() }) }
+            composable(Routes.Reviews) { ReviewsScreen(onBack = { nav.popBackStack() }) }
             composable(Routes.Withdraw) { WithdrawScreen(onBack = { nav.popBackStack() }) }
             composable(Routes.Notifications) { NotificationsScreen(onBack = { nav.popBackStack() }) }
             composable(Routes.Performance) { PerformanceScreen(onBack = { nav.popBackStack() }) }
@@ -252,18 +269,24 @@ fun HostRoot(hasSession: Boolean, compromised: Boolean) {
                 IncomingCallScreen(
                     callId = callId,
                     onAccepted = {
-                        nav.navigate("active_call/$callId") { popUpTo(Routes.IncomingCall) { inclusive = true } }
+                        nav.navigate(Routes.activeCall(callId)) {
+                            popUpTo(Routes.IncomingCall) { inclusive = true }
+                        }
                     },
                     onRejected = { nav.popBackStack() },
                 )
             }
             composable(
-                "active_call/{callId}",
-                arguments = listOf(navArgument("callId") { type = NavType.StringType }),
+                Routes.ActiveCall,
+                arguments = listOf(
+                    navArgument("callId") { type = NavType.StringType },
+                    navArgument("audioOnly") { type = NavType.StringType; defaultValue = "0" },
+                ),
             ) { entry ->
                 ActiveCallScreen(
                     callId = entry.arguments?.getString("callId").orEmpty(),
                     peerName = "Fan",
+                    audioOnly = entry.arguments?.getString("audioOnly") == "1",
                     onHangup = { nav.popBackStack() },
                 )
             }

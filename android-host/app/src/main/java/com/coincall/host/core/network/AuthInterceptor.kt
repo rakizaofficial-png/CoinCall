@@ -1,5 +1,6 @@
 package com.coincall.host.core.network
 
+import com.coincall.host.core.security.JwtSession
 import com.coincall.host.core.security.SecureTokenStore
 import okhttp3.Interceptor
 import okhttp3.Response
@@ -16,8 +17,13 @@ class AuthInterceptor @Inject constructor(
             .header("Accept", "application/json")
             .header("X-App", "coincall-host-android")
             .header("X-App-Version", "1.0.0")
-        tokenStore.hostId?.let { builder.header("X-User-Id", it) }
-        tokenStore.accessToken?.let { builder.header("Authorization", "Bearer $it") }
+            .header("X-Client-Role", "host")
+        val hostId = tokenStore.hostId ?: JwtSession.hostId(tokenStore.accessToken)
+        hostId?.let { builder.header("X-User-Id", it) }
+        val access = tokenStore.accessToken
+        if (JwtSession.isValid(access)) {
+            builder.header("Authorization", "Bearer $access")
+        }
         return chain.proceed(builder.build())
     }
 }

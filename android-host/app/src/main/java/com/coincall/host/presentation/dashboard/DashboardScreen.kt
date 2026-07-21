@@ -53,6 +53,8 @@ fun DashboardScreen(
     onSettings: () -> Unit,
     onPerformance: () -> Unit,
     onStatus: () -> Unit,
+    onSchedule: () -> Unit = {},
+    onReviews: () -> Unit = {},
     vm: DashboardViewModel = hiltViewModel(),
 ) {
     val state by vm.state.collectAsState()
@@ -128,7 +130,9 @@ fun DashboardScreen(
 
         PrimaryButton("Withdraw earnings", onClick = onWithdraw)
         PrimaryButton("Presence & vacation mode", onClick = onStatus)
+        PrimaryButton("Availability schedule", onClick = onSchedule)
         PrimaryButton("Performance & leaderboard", onClick = onPerformance)
+        PrimaryButton("Reviews & ranking", onClick = onReviews)
     }
 }
 

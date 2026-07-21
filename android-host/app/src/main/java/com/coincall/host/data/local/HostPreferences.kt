@@ -19,16 +19,19 @@ class HostPreferences @Inject constructor(
     private val statusKey = stringPreferencesKey("presence_status")
     private val autoRejectKey = booleanPreferencesKey("auto_reject")
     private val notifKey = booleanPreferencesKey("push_enabled")
+    private val scheduleKey = stringPreferencesKey("schedule_json")
 
     val darkTheme: Flow<Boolean> = dataStore.data.map { it[darkKey] ?: false }
     val language: Flow<String> = dataStore.data.map { it[langKey] ?: "en" }
     val presenceStatus: Flow<String> = dataStore.data.map { it[statusKey] ?: "offline" }
     val autoReject: Flow<Boolean> = dataStore.data.map { it[autoRejectKey] ?: false }
     val pushEnabled: Flow<Boolean> = dataStore.data.map { it[notifKey] ?: true }
+    val scheduleJson: Flow<String> = dataStore.data.map { it[scheduleKey] ?: "" }
 
     suspend fun setDarkTheme(value: Boolean) = dataStore.edit { it[darkKey] = value }
     suspend fun setLanguage(value: String) = dataStore.edit { it[langKey] = value }
     suspend fun setPresenceStatus(value: String) = dataStore.edit { it[statusKey] = value }
     suspend fun setAutoReject(value: Boolean) = dataStore.edit { it[autoRejectKey] = value }
     suspend fun setPushEnabled(value: Boolean) = dataStore.edit { it[notifKey] = value }
+    suspend fun setScheduleJson(value: String) = dataStore.edit { it[scheduleKey] = value }
 }

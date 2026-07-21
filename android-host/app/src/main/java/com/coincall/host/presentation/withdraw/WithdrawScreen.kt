@@ -1,5 +1,6 @@
 package com.coincall.host.presentation.withdraw
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -58,7 +59,10 @@ fun WithdrawScreen(onBack: () -> Unit, vm: WithdrawViewModel = hiltViewModel()) 
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             HostTextField(state.amount, { vm.update { s -> s.copy(amount = it) } }, "Amount (coins, min 100)")
             Text("Gateway")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 listOf("easypaisa", "jazzcash", "bank", "crypto").forEach { g ->
                     FilterChip(selected = state.gateway == g, onClick = { vm.update { s -> s.copy(gateway = g) } }, label = { Text(g) })
                 }
@@ -69,8 +73,11 @@ fun WithdrawScreen(onBack: () -> Unit, vm: WithdrawViewModel = hiltViewModel()) 
             PrimaryButton(if (state.loading) "Submitting…" else "Request withdrawal", onClick = vm::submit, enabled = !state.loading)
         }
         Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("all", "pending", "paid", "failed", "admin_review").forEach { f ->
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            listOf("all", "pending", "approved", "paid", "failed", "admin_review").forEach { f ->
                 FilterChip(selected = state.filter == f, onClick = { vm.update { s -> s.copy(filter = f) } }, label = { Text(f) })
             }
         }

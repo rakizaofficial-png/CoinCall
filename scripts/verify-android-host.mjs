@@ -1,9 +1,11 @@
 /**
  * Structural verification for android-host module.
  * Run: node scripts/verify-android-host.mjs
+ * Full A–Z audit: node scripts/audit-android-host.mjs
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 const root = join(process.cwd(), 'android-host');
 function walk(dir, acc = []) {
@@ -22,12 +24,22 @@ const checks = [
   ['Hilt app', /@HiltAndroidApp/],
   ['Bottom nav', /NavigationBar/],
   ['Encrypted tokens', /EncryptedSharedPreferences/],
+  ['JWT session', /JwtSession/],
+  ['OTP screen', /OtpScreen/],
+  ['Schedule screen', /ScheduleScreen/],
+  ['Reviews screen', /ReviewsScreen/],
   ['Root detection', /isRooted/],
   ['Host API scoped', /interface HostApi/],
   ['No admin wallet edit API', /admin\/wallets/],
   ['Withdraw gateways', /easypaisa/],
   ['Help center API', /help-center/],
-  ['FLAG_SECURE', /FLAG_SECURE/],
+  ['FLAG_SECURE', /FLAG_SECURE|enableScreenshotProtection/],
+  ['Agora engine façade', /interface AgoraEngine/],
+  ['Push channels', /HostPush/],
+  ['Earnings calculator', /EarningsCalculator/],
+  ['Withdrawal validator', /WithdrawalValidator/],
+  ['Admin chat peer', /ADMIN_ID/],
+  ['Agency chat peer', /AGENCY_ID/],
 ];
 
 let failed = 0;
@@ -39,4 +51,8 @@ for (const [name, re] of checks) {
   if (!ok) failed += 1;
 }
 console.log(`\n${files.length} Kotlin files · ${failed === 0 ? 'ALL CHECKS PASSED' : failed + ' failed'}`);
-process.exit(failed ? 1 : 0);
+
+const audit = spawnSync(process.execPath, [join(process.cwd(), 'scripts/audit-android-host.mjs')], {
+  stdio: 'inherit',
+});
+process.exit(failed || audit.status ? 1 : 0);
