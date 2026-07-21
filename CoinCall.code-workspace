@@ -1,0 +1,18 @@
+{
+  "folders": [
+    {
+      "name": "CoinCall",
+      "path": "."
+    }
+  ],
+  "settings": {
+    "files.exclude": {
+      "**/.expo": true,
+      "**/.expo-home": true,
+      "**/node_modules": true,
+      "**/.next": true,
+      "**/dist": true,
+      "**/web-build": true
+    }
+  }
+}

@@ -35,8 +35,10 @@ The easiest way to deploy your Next.js app is to use the [Vercel Platform](https
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
 
-## Deploy via CoinCall monorepo
+## Canonical location
 
-This app is also vendored in `rakizaofficial-png/CoinCall` under `luma-user/`.
+This app’s home is the **CoinCall** monorepo (`rakizaofficial-png/CoinCall` → `luma-user/`).
+
+The old standalone repo `luma-coincall-user` is obsolete — archive it and deploy from here.
 On Render, set the service root directory to `luma-user` and connect the CoinCall repo
 (or sync the Blueprint) so production picks up host-bridge feed fixes.
