@@ -30,6 +30,7 @@ import {
 import type { User } from '../types/models';
 import { callPriceForLevel } from '../utils/hostPricing';
 import { Platform } from 'react-native';
+import { env } from '../config/env';
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -47,6 +48,39 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
         reject(e);
       });
   });
+}
+
+/** Push profile metadata (https URLs only) to CoinCall API → Mongo/disk for Luma */
+async function syncHostProfileToApi(
+  hostId: string,
+  payload: {
+    name: string;
+    bio: string;
+    country?: string;
+    photoUrl?: string;
+    photoUrls?: string[];
+    videoUrl?: string;
+    languages?: string[];
+    categories?: string[];
+    callPrice?: number;
+  },
+) {
+  const base = (env.apiBaseUrl || 'https://coincall-api.onrender.com/api').replace(
+    /\/$/,
+    '',
+  );
+  const res = await fetch(`${base}/hosts/${encodeURIComponent(hostId)}/profile`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-User-Id': hostId,
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(text || `Profile sync failed (${res.status})`);
+  }
 }
 
 type AuthMethod = 'email' | 'phone';
@@ -445,6 +479,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           ? uploaded.videoUrl
           : input.videoUrl?.trim() || user.videoUrl || '';
 
+      const callPrice =
+        user.callPrice || callPriceForLevel(user.level || 1);
+
       const patch: User = {
         ...user,
         name: input.name.trim(),
@@ -454,6 +491,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         photoUrls: photos,
         avatarUrl: mainPhoto,
         videoUrl: videoUrl || undefined,
+        callPrice,
         languages: input.languages?.length
           ? input.languages
           : user.languages || ['English'],
@@ -477,6 +515,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           console.warn('Profile Firebase sync failed', e);
         });
       }
+
+      // Central API (+ Mongo when configured) so Luma sees the same DP/bio/rate
+      try {
+        await syncHostProfileToApi(user.id, {
+          name: patch.name,
+          bio: patch.bio || '',
+          country: patch.country,
+          photoUrl: mainPhoto,
+          photoUrls: photos,
+          videoUrl: isPublicHttpAvatar(videoUrl) ? videoUrl : undefined,
+          languages: patch.languages,
+          categories: patch.categories,
+          callPrice,
+        });
+      } catch (e) {
+        console.warn('Profile API sync failed', e);
+      }
+
       setAuthUser(patch);
       return patch;
     },

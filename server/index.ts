@@ -7,8 +7,11 @@ import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import {
   assertHostCanReceiveCalls,
+  dumpManagedHostsForSnapshot,
+  ensureHostRecord,
   getHost,
   listHosts,
+  loadManagedHostsFromSnapshot,
   notifyHost,
   recordHostEarning,
   registerHostManagementRoutes,
@@ -445,7 +448,16 @@ app.get('/api/health', (_req, res) => {
       (c) => c.status === 'ringing' || c.status === 'accepted',
     ).length,
     realtime: 'ws',
-    stack: 'express+ws+agora+firebase-clients',
+    stack: 'express+ws+agora+firebase-storage+mongo-optional',
+    persistence: persistenceLabel(),
+    mongoConfigured: mongoConfigured(),
+    managedHosts: listHosts().length,
+    wallets: wallets.size,
+    media: {
+      hostPhotos: 'Firebase Storage (primary) → API disk avatar fallback',
+      storageBucket:
+        'Set EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET on host (project lovecall-2291e)',
+    },
   });
 });
 
@@ -673,11 +685,130 @@ app.get('/api/hosts/:hostId/profile', (req, res) => {
       isLive: Boolean(presence?.isLive),
       isOnCall: Boolean(presence?.isOnCall),
       readyToCall: Boolean(presence?.readyToCall),
-      bio: managed?.bio,
+      bio: managed?.bio || '',
       photoUrls: managed?.photoUrls || [],
+      languages: managed?.languages || [],
+      categories: managed?.categories || [],
+      videoUrl: managed?.videoUrl,
     },
   });
 });
+
+/**
+ * Host app: update public profile (DP URLs, name, bio, rates).
+ * Auth: X-User-Id must match hostId. Persists to managed registry (+ Mongo/disk).
+ * Binary photos stay in Firebase Storage — this route stores https URLs only.
+ */
+function handleHostProfileUpdate(req: express.Request, res: express.Response) {
+  const hostId = String(req.params.hostId || '').trim();
+  if (!hostId) {
+    res.status(400).json({ error: 'hostId required' });
+    return;
+  }
+  if (!requireUserMatch(req, res, hostId)) return;
+
+  const body = req.body || {};
+  const name = String(body.name || '').trim();
+  if (!name) {
+    res.status(400).json({ error: 'name is required' });
+    return;
+  }
+
+  const photoUrls = Array.isArray(body.photoUrls)
+    ? body.photoUrls.map(String).filter(Boolean).slice(0, 12)
+    : undefined;
+  const photoUrl = body.photoUrl ? String(body.photoUrl) : photoUrls?.[0];
+  let callPrice: number | undefined;
+  if (body.callPrice != null && body.callPrice !== '') {
+    const n = Math.round(Number(body.callPrice));
+    if (!Number.isFinite(n) || n < 20 || n > 500) {
+      res.status(400).json({ error: 'callPrice must be between 20 and 500' });
+      return;
+    }
+    callPrice = n;
+  }
+
+  const patch: Record<string, unknown> = { name };
+  if (body.bio != null) patch.bio = String(body.bio).trim();
+  if (body.country != null) patch.country = String(body.country).trim();
+  if (photoUrl) patch.photoUrl = photoUrl;
+  if (photoUrls) patch.photoUrls = photoUrls;
+  if (body.videoUrl != null) patch.videoUrl = String(body.videoUrl);
+  if (Array.isArray(body.languages)) patch.languages = body.languages.map(String);
+  if (Array.isArray(body.categories)) {
+    patch.categories = body.categories.map(String);
+  }
+  if (callPrice != null) patch.callPrice = callPrice;
+
+  const managed = ensureHostRecord(
+    hostId,
+    patch as Parameters<typeof ensureHostRecord>[1],
+  );
+  persist();
+
+  const presence = getPresence(hostId);
+  if (presence?.isOnline) {
+    const avatarUrl =
+      resolveStoredOrHttpAvatar(
+        hostId,
+        [managed.photoUrl, ...(managed.photoUrls || []), presence.avatarUrl],
+        req,
+      ) || presence.avatarUrl;
+    const next = {
+      ...presence,
+      name: managed.name,
+      avatarUrl,
+      country: managed.country || presence.country,
+      ratePerMinute: managed.callPrice || presence.ratePerMinute || 80,
+      lastSeen: Date.now(),
+    };
+    next.readyToCall = computeReadyToCall(next);
+    upsertPresence(next);
+    broadcastWs({
+      type: 'host:presence',
+      payload: {
+        id: next.id,
+        name: next.name,
+        avatarUrl: next.avatarUrl,
+        photoUrl: next.avatarUrl,
+        isOnline: next.isOnline,
+        isLive: next.isLive,
+        isOnCall: next.isOnCall,
+        readyToCall: next.readyToCall,
+        workspaceMode: next.workspaceMode,
+        ratePerMinute: next.ratePerMinute,
+        lastSeen: next.lastSeen,
+      },
+    });
+  }
+
+  const avatarUrl =
+    resolveStoredOrHttpAvatar(
+      hostId,
+      [managed.photoUrl, ...(managed.photoUrls || [])],
+      req,
+    ) || pickHostAvatarUrl({}, { hostId, name: managed.name });
+
+  res.json({
+    ok: true,
+    host: {
+      id: hostId,
+      name: managed.name,
+      avatarUrl,
+      country: managed.country,
+      ratePerMinute: managed.callPrice || 80,
+      bio: managed.bio || '',
+      photoUrls: managed.photoUrls || [],
+      languages: managed.languages || [],
+      categories: managed.categories || [],
+      videoUrl: managed.videoUrl,
+      isOnline: Boolean(presence?.isOnline),
+    },
+  });
+}
+
+app.put('/api/hosts/:hostId/profile', handleHostProfileUpdate);
+app.post('/api/hosts/:hostId/profile', handleHostProfileUpdate);
 
 /** Host SSE stream for incoming user calls */
 app.get('/api/hosts/:hostId/stream', (req, res) => {
@@ -3059,6 +3190,7 @@ function buildSnapshot(): PersistedSnapshot {
     welcomeBonusPaidIds: [...welcomeBonusPaidIds],
     homeBanners: dumpHomeBannersForSnapshot() as unknown as Record<string, unknown>,
     ...dumpAgenciesForSnapshot(),
+    ...dumpManagedHostsForSnapshot(),
   };
 }
 
@@ -3162,8 +3294,9 @@ function restoreFromDisk() {
     hostAgency: snap.hostAgency,
     announcements: snap.announcements,
   });
+  const restoredHosts = loadManagedHostsFromSnapshot(snap.managedHosts);
   console.log(
-    `[persist] restored wallets=${wallets.size} withdrawals=${withdrawals.length} liveRooms=${liveRooms.size} dm=${dmThreads.size} calls=${callHistory.length} gifts=${giftHistory.length} liveSessions=${liveSessionHistory.length} avatars=${restoredAvatars} agencies=${snap.agencies?.length ?? 0}`,
+    `[persist] restored wallets=${wallets.size} withdrawals=${withdrawals.length} liveRooms=${liveRooms.size} dm=${dmThreads.size} calls=${callHistory.length} gifts=${giftHistory.length} liveSessions=${liveSessionHistory.length} avatars=${restoredAvatars} agencies=${snap.agencies?.length ?? 0} hosts=${restoredHosts}`,
   );
 }
 
@@ -3174,7 +3307,13 @@ async function applyMongoOrDisk() {
   if (!ok) return;
   const snap = await loadMongoSnapshot();
   if (!snap) {
-    console.log('[persist] Mongo empty — keeping disk/in-memory state');
+    // First Atlas connect: push disk/RAM state so both apps share durable cloud data
+    console.log('[persist] Mongo empty — seeding from disk/in-memory snapshot');
+    try {
+      saveNow(buildSnapshot);
+    } catch (e) {
+      console.warn('[persist] Mongo seed failed', e);
+    }
     return;
   }
   for (const w of snap.wallets || []) {
@@ -3251,8 +3390,9 @@ async function applyMongoOrDisk() {
     hostAgency: snap.hostAgency,
     announcements: snap.announcements,
   });
+  const restoredHosts = loadManagedHostsFromSnapshot(snap.managedHosts);
   console.log(
-    `[persist] restored from Mongo wallets=${wallets.size} withdrawals=${withdrawals.length} calls=${callHistory.length} gifts=${giftHistory.length} liveSessions=${liveSessionHistory.length} avatars=${restoredAvatars} agencies=${snap.agencies?.length ?? 0}`,
+    `[persist] restored from Mongo wallets=${wallets.size} withdrawals=${withdrawals.length} calls=${callHistory.length} gifts=${giftHistory.length} liveSessions=${liveSessionHistory.length} avatars=${restoredAvatars} agencies=${snap.agencies?.length ?? 0} hosts=${restoredHosts}`,
   );
 }
 
@@ -3266,9 +3406,14 @@ app.get('/api/ready', (_req, res) => {
     wallets: wallets.size,
     liveRooms: [...liveRooms.values()].filter((r) => r.isLive).length,
     withdrawals: withdrawals.length,
+    managedHosts: listHosts().length,
     persistence: persistenceLabel(),
     mongoConfigured: mongoConfigured(),
     realtime: 'ws',
+    media: {
+      photos: 'firebase-storage+api-avatar-fallback',
+      database: 'mongodb-optional+disk-snapshot',
+    },
     iapStubAllowed:
       process.env.ALLOW_IAP_STUB === '1' || process.env.NODE_ENV !== 'production',
   });

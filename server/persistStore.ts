@@ -46,6 +46,8 @@ export type PersistedSnapshot = {
   agencies?: Array<Record<string, unknown>>;
   hostAgency?: Array<{ hostId?: string; agencyId?: string }>;
   announcements?: Array<Record<string, unknown>>;
+  /** Host management registry (profiles, bio, DP URLs, call rates, approval) */
+  managedHosts?: Array<Record<string, unknown>>;
 };
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;

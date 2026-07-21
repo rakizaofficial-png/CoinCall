@@ -210,6 +210,29 @@ export function getManagedHost(id: string) {
   return getHost(id);
 }
 
+/** Persist managed host profiles (bio, DP URLs, rates, approval) into disk/Mongo */
+export function dumpManagedHostsForSnapshot(): {
+  managedHosts: Array<Record<string, unknown>>;
+} {
+  return {
+    managedHosts: listHosts().map((h) => ({ ...h }) as Record<string, unknown>),
+  };
+}
+
+export function loadManagedHostsFromSnapshot(
+  hosts?: Array<Record<string, unknown>>,
+): number {
+  if (!Array.isArray(hosts) || !hosts.length) return 0;
+  let n = 0;
+  for (const raw of hosts) {
+    const id = String(raw?.id || '').trim();
+    if (!id) continue;
+    ensureHostRecord(id, raw as Partial<HostManagedRecord>);
+    n += 1;
+  }
+  return n;
+}
+
 /**
  * Credit live earnings from host app activity (calls, gifts, wallet host_earn).
  * Updates the managed ledger + linked agency totals for agency-panel isolation.
