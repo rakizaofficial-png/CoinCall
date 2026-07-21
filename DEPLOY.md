@@ -54,7 +54,16 @@ Luma now lives in this repo at `luma-user/` (host-bridge feed fix included).
 
 **If you still use the old `luma-coincall-user` repo:** reconnect that Render service to **CoinCall** with rootDir `luma-user`, or grant this agent push access to `luma-coincall-user` so we can update it directly.
 
-## 3) Test
+## 3) Luma Android (Google Play)
+Package name must be **`com.coincall.luma`**. Build from `luma-app/` — see [luma-app/PLAY_STORE.md](luma-app/PLAY_STORE.md).
+
+```bash
+cd luma-app && npm install && npx eas build --platform android --profile production
+```
+
+Do **not** upload the host app (`com.coincall.host`) to the Luma Play listing.
+
+## 4) Test
 1. Open host URL → log in → **Go Online**
 2. Open Luma → **1v1** → call the live host
 3. Accept on host → video connects (Agora)

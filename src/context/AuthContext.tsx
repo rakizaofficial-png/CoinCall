@@ -130,11 +130,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (usingFirebase) {
-      const unsub = listenAuth((profile) => {
-        setUser(profile);
+      try {
+        const unsub = listenAuth((profile) => {
+          setUser(profile);
+          setAuthReady(true);
+        });
+        // Never hang forever if auth listener never fires
+        const fallback = setTimeout(() => setAuthReady(true), 8_000);
+        return () => {
+          clearTimeout(fallback);
+          unsub();
+        };
+      } catch (e) {
+        console.warn('[auth] Firebase listen failed', e);
         setAuthReady(true);
-      });
-      return unsub;
+        return () => undefined;
+      }
     }
 
     let cancelled = false;
@@ -145,6 +156,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const parsed = JSON.parse(raw) as User;
           setUser({ ...parsed, hostStatus: parsed.hostStatus || 'none', role: 'host' });
         }
+      } catch (e) {
+        console.warn('[auth] local restore failed', e);
       } finally {
         if (!cancelled) setAuthReady(true);
       }

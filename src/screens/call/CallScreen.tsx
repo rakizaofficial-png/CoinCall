@@ -76,9 +76,9 @@ function formatTime(totalSeconds: number) {
 }
 
 function waitForEl(
-  getter: () => HTMLElement | null,
+  getter: () => any,
   tries = 30,
-): Promise<HTMLElement> {
+): Promise<any> {
   return new Promise((resolve, reject) => {
     let n = 0;
     const tick = () => {
@@ -143,8 +143,8 @@ export function CallScreen({ navigation, route }: Props) {
   const [giftBurst, setGiftBurst] = useState<string | null>(null);
   const agoraReady = isAgoraConfigured() && Platform.OS === 'web';
   const activeCallIdRef = useRef<string | null>(null);
-  const localRef = useRef<HTMLDivElement | null>(null);
-  const remoteRef = useRef<HTMLDivElement | null>(null);
+  const localRef = useRef<any>(null);
+  const remoteRef = useRef<any>(null);
 
   useEffect(() => {
     if (isBridge) return;
@@ -383,7 +383,7 @@ export function CallScreen({ navigation, route }: Props) {
 
   return (
     <View style={[styles.container, { backgroundColor: '#05070F' }]}>
-      {agoraReady ? (
+      {Platform.OS === 'web' && agoraReady ? (
         <div
           ref={(el: HTMLDivElement | null) => {
             remoteRef.current = el;
@@ -415,7 +415,11 @@ export function CallScreen({ navigation, route }: Props) {
           {minutesEarned ? ` · ~${minutesEarned}m` : ''}
         </Text>
         <Text style={[styles.videoStatus, { color: colors.primarySoft }]}>
-          {agoraReady ? videoStatus : 'Connecting video…'}
+          {agoraReady
+            ? videoStatus
+            : Platform.OS === 'web'
+              ? 'Connecting video…'
+              : 'Open coincall-host.onrender.com for live video on this device'}
         </Text>
       </View>
 
@@ -446,7 +450,7 @@ export function CallScreen({ navigation, route }: Props) {
           },
         ]}
       >
-        {agoraReady ? (
+        {Platform.OS === 'web' && agoraReady ? (
           <div
             ref={(el: HTMLDivElement | null) => {
               localRef.current = el;

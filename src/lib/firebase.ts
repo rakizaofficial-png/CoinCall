@@ -1,7 +1,13 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
-import { getAuth, type Auth } from 'firebase/auth';
+import {
+  getAuth,
+  initializeAuth,
+  type Auth,
+} from 'firebase/auth';
 import { getDatabase, type Database } from 'firebase/database';
 import { getStorage, type FirebaseStorage } from 'firebase/storage';
+import { Platform } from 'react-native';
 import { env } from '../config/env';
 
 let app: FirebaseApp | null = null;
@@ -40,8 +46,48 @@ export function getFirebaseApp() {
   return app;
 }
 
+/**
+ * Web can use default getAuth().
+ * Native MUST use initializeAuth + AsyncStorage persistence, or Firebase
+ * often crashes / asserts on Hermes (IndexedDB missing).
+ */
 export function getFirebaseAuth() {
-  if (!auth) auth = getAuth(getFirebaseApp());
+  if (auth) return auth;
+
+  const firebaseApp = getFirebaseApp();
+
+  if (Platform.OS === 'web') {
+    auth = getAuth(firebaseApp);
+    return auth;
+  }
+
+  try {
+    // getReactNativePersistence exists in the RN firebase auth bundle;
+    // public TS types often omit it.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getReactNativePersistence } = require('firebase/auth') as {
+      getReactNativePersistence: (storage: typeof AsyncStorage) => unknown;
+    };
+    auth = initializeAuth(firebaseApp, {
+      persistence: getReactNativePersistence(AsyncStorage) as never,
+    });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    // Already initialized (Fast Refresh / second call)
+    if (/already-initialized|already been initialized/i.test(message)) {
+      auth = getAuth(firebaseApp);
+    } else {
+      // Last resort — never throw at startup
+      console.warn('[firebase] initializeAuth failed, falling back to getAuth', message);
+      try {
+        auth = getAuth(firebaseApp);
+      } catch (fallbackErr) {
+        console.warn('[firebase] getAuth also failed', fallbackErr);
+        throw fallbackErr;
+      }
+    }
+  }
+
   return auth;
 }
 

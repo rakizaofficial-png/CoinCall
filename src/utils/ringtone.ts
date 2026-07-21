@@ -1,11 +1,15 @@
 /**
- * Soft ringtone + vibrate for incoming CoinCall (web + mobile browser).
+ * Soft ringtone + vibrate for incoming CoinCall (web + mobile).
+ * Never touches web-only APIs without guards — those crash native apps.
  */
+import { Platform, Vibration } from 'react-native';
+
 let audioCtx: AudioContext | null = null;
 let ringTimer: ReturnType<typeof setInterval> | null = null;
 let beepTimer: ReturnType<typeof setTimeout> | null = null;
 
 function ctx() {
+  if (Platform.OS !== 'web') return null;
   if (typeof window === 'undefined') return null;
   const AC =
     window.AudioContext ||
@@ -33,12 +37,24 @@ function tone(frequency: number, durationMs: number, when = 0) {
   osc.stop(t0 + durationMs / 1000 + 0.02);
 }
 
+function vibrateBurst() {
+  try {
+    if (Platform.OS === 'web') {
+      if (typeof navigator !== 'undefined' && navigator.vibrate) {
+        navigator.vibrate([180, 80, 180]);
+      }
+      return;
+    }
+    Vibration.vibrate([0, 180, 80, 180]);
+  } catch {
+    /* ignore vibration failures */
+  }
+}
+
 function ringBurst() {
   tone(880, 180, 0);
   tone(1174, 180, 0.2);
-  if (typeof navigator !== 'undefined' && navigator.vibrate) {
-    navigator.vibrate([180, 80, 180]);
-  }
+  vibrateBurst();
 }
 
 export function startIncomingRingtone() {
@@ -60,7 +76,15 @@ export function stopIncomingRingtone() {
     clearTimeout(beepTimer);
     beepTimer = null;
   }
-  if (typeof navigator !== 'undefined' && navigator.vibrate) {
-    navigator.vibrate(0);
+  try {
+    if (Platform.OS === 'web') {
+      if (typeof navigator !== 'undefined' && navigator.vibrate) {
+        navigator.vibrate(0);
+      }
+    } else {
+      Vibration.cancel();
+    }
+  } catch {
+    /* ignore */
   }
 }

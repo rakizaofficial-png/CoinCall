@@ -181,7 +181,9 @@ export async function startAgoraCall(options: {
   beauty?: BeautyPreset;
 }) {
   if (Platform.OS !== 'web') {
-    throw new Error('Phone video needs a Dev Build. Use web for live calls.');
+    // Native video needs react-native Agora wiring — do not throw (crashes call UI).
+    console.warn('[agora] Video calls are web-only in this build.');
+    return;
   }
   if (!apiRoot()) {
     throw new Error('Missing API base URL for Agora token');
@@ -252,7 +254,8 @@ export async function startAgoraSilentMonitor(options: {
   uid?: number;
 }) {
   if (Platform.OS !== 'web') {
-    throw new Error('Monitor works on web admin panel.');
+    console.warn('[agora] Monitor is web-only.');
+    return;
   }
   await stopAgoraCall();
 
@@ -355,7 +358,8 @@ export async function startAgoraLiveBroadcast(options: {
   beauty?: BeautyPreset;
 }) {
   if (Platform.OS !== 'web') {
-    throw new Error('Live broadcast runs on the web host studio. Open coincall-host in Chrome.');
+    console.warn('[agora] Live broadcast is web-only in this build.');
+    return null;
   }
   await stopAgoraCall();
   prepVideoEl(options.localVideoEl);
@@ -393,7 +397,8 @@ export async function startCameraPreview(
   facing: 'user' | 'environment' = 'user',
 ) {
   if (Platform.OS !== 'web') {
-    throw new Error('Camera preview is available on web host studio.');
+    console.warn('[agora] Camera preview is web-only.');
+    return;
   }
   stopCameraPreview(videoEl);
   const stream = await navigator.mediaDevices.getUserMedia({

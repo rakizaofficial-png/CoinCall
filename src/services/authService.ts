@@ -153,7 +153,15 @@ export function listenAuth(callback: (user: User | null) => void) {
     return () => undefined;
   }
 
-  const auth = getFirebaseAuth();
+  let auth;
+  try {
+    auth = getFirebaseAuth();
+  } catch (e) {
+    console.warn('[auth] getFirebaseAuth failed', e);
+    callback(null);
+    return () => undefined;
+  }
+
   let profileUnsub: Unsubscribe | null = null;
 
   const authUnsub = onAuthStateChanged(auth, (fbUser) => {
