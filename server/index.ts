@@ -41,12 +41,59 @@ import {
   avatarPublicUrl,
   dumpAvatarsForSnapshot,
   hasStoredAvatar,
+  hasStoredUserAvatar,
   isApiAvatarUrl,
   registerAvatarRoutes,
   resolveStoredOrHttpAvatar,
   restoreAvatarsFromSnapshot,
   saveHostAvatar,
+  userAvatarPublicUrl,
 } from './avatarStore.ts';
+import {
+  PLATFORM_TREASURY_ID,
+  auditConservation,
+  debitOnly,
+  dumpCoinTxns,
+  getCoinTxnByKey,
+  listCoinTxns,
+  loadCoinTxns,
+  mintCoins,
+  platformCommissionRate,
+  transferUserToHost,
+  type CoinTxn,
+} from './coinLedger.ts';
+import {
+  cancelPendingForUser,
+  createAutoInvite,
+  dumpAutoCallForSnapshot,
+  expireStaleInvites,
+  getAutoCallStatus,
+  getPendingInvite,
+  hostMayInviteUser,
+  listDueAutoCallUsers,
+  listAutoCallAnalytics,
+  loadAutoCallFromSnapshot,
+  markInvitePushed,
+  pickAutoCallHost,
+  respondAutoInvite,
+  setAutoCallPrefs,
+  touchAutoCallHeartbeat,
+  type CandidateHost,
+} from './autoCallInvites.ts';
+import {
+  claimDailyLogin,
+  claimReferralReward,
+  claimSpin,
+  dumpRewardsForSnapshot,
+  ENGAGEMENT_CREDIT_BLOCK,
+  getRewardStatus,
+  hasWelcomeClaimed,
+  loadRewardsFromSnapshot,
+  markWelcomeClaimed,
+  resolveWelcomeGrant,
+  welcomeBonusCoins,
+  withClaimLock,
+} from './rewards.ts';
 import {
   loadWalletSnapshot,
   saveWalletSnapshot,
@@ -90,7 +137,7 @@ const { RtcRole, RtcTokenBuilder } = agoraToken as {
 const app = express();
 app.use(cors());
 // Host presence / live rooms used to POST huge data: avatar URLs — allow 2mb
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '3mb' }));
 
 const APP_ID = process.env.AGORA_APP_ID || '';
 const APP_CERT = process.env.AGORA_APP_CERTIFICATE || '';
@@ -102,10 +149,13 @@ if (!process.env.ADMIN_API_KEY) {
   );
 }
 
-/** Non-admin client credits must match allowlist + per-request cap */
+/**
+ * Non-admin open credits are CLOSED for user rewards.
+ * Only host_earn:* (host app sync) may mint without admin key.
+ * Welcome / daily / spin / referral → /api/rewards/* or /wallet/me.
+ */
 const CLIENT_CREDIT_MAX = 500;
-const CLIENT_CREDIT_REASONS =
-  /^(check-?in|spin|lucky|referral|mission|vip|welcome|reward|daily|host_earn|call_earn|gift)/i;
+const CLIENT_CREDIT_REASONS = /^host_earn(:|$)/i;
 
 type CallStatus = 'ringing' | 'accepted' | 'rejected' | 'ended' | 'missed';
 
@@ -199,16 +249,38 @@ const GIFT_CATALOG_SERVER: Record<
   string,
   { name: string; emoji: string; coins: number }
 > = {
-  rose: { name: 'Rose', emoji: '🌹', coins: 1 },
-  heart: { name: 'Heart', emoji: '💖', coins: 5 },
-  kiss: { name: 'Kiss', emoji: '💋', coins: 10 },
-  star: { name: 'Star', emoji: '⭐', coins: 20 },
-  diamond: { name: 'Diamond', emoji: '💎', coins: 99 },
-  crown: { name: 'Crown', emoji: '👑', coins: 199 },
-  sports: { name: 'Sports Car', emoji: '🏎️', coins: 520 },
-  yacht: { name: 'Yacht', emoji: '🛥️', coins: 999 },
-  castle: { name: 'Castle', emoji: '🏰', coins: 1999 },
-  rocket: { name: 'Rocket', emoji: '🚀', coins: 2999 },
+  // Premium Glamour collection
+  rose_bouquet: { name: 'Rose Bouquet', emoji: '🌹', coins: 10 },
+  luxury_perfume: { name: 'Luxury Perfume', emoji: '🧴', coins: 50 },
+  neon_heart: { name: 'Neon Heart', emoji: '💗', coins: 99 },
+  golden_butterfly: { name: 'Golden Butterfly', emoji: '🦋', coins: 199 },
+  diamond_ring: { name: 'Diamond Ring', emoji: '💍', coins: 299 },
+  vip_champagne: { name: 'VIP Champagne', emoji: '🍾', coins: 399 },
+  luxury_watch: { name: 'Luxury Watch', emoji: '⌚', coins: 599 },
+  luxury_handbag: { name: 'Luxury Handbag', emoji: '👜', coins: 799 },
+  fireworks: { name: 'Fireworks Celebration', emoji: '🎆', coins: 999 },
+  sports_car: { name: 'Sports Car', emoji: '🏎️', coins: 1299 },
+  super_bike: { name: 'Super Bike', emoji: '🏍️', coins: 1599 },
+  diamond_crown: { name: 'Diamond Crown', emoji: '👑', coins: 1999 },
+  red_carpet: { name: 'Red Carpet Entrance', emoji: '🎬', coins: 2499 },
+  fashion_collection: { name: 'Fashion Collection', emoji: '👗', coins: 2999 },
+  private_jet: { name: 'Private Jet', emoji: '✈️', coins: 4999 },
+  luxury_yacht: { name: 'Luxury Yacht', emoji: '🛥️', coins: 6999 },
+  royal_castle: { name: 'Royal Castle', emoji: '🏰', coins: 9999 },
+  golden_throne: { name: 'Golden Throne', emoji: '🪑', coins: 12999 },
+  diamond_rain: { name: 'Diamond Rain', emoji: '💎', coins: 15999 },
+  millionaire_box: { name: 'Millionaire Box', emoji: '🎁', coins: 19999 },
+  // Legacy aliases
+  rose: { name: 'Rose Bouquet', emoji: '🌹', coins: 10 },
+  heart: { name: 'Neon Heart', emoji: '💗', coins: 99 },
+  kiss: { name: 'Neon Heart', emoji: '💗', coins: 99 },
+  star: { name: 'Golden Butterfly', emoji: '🦋', coins: 199 },
+  diamond: { name: 'Diamond Ring', emoji: '💍', coins: 299 },
+  crown: { name: 'Diamond Crown', emoji: '👑', coins: 1999 },
+  sports: { name: 'Sports Car', emoji: '🏎️', coins: 1299 },
+  yacht: { name: 'Luxury Yacht', emoji: '🛥️', coins: 6999 },
+  castle: { name: 'Royal Castle', emoji: '🏰', coins: 9999 },
+  rocket: { name: 'Private Jet', emoji: '✈️', coins: 4999 },
 };
 
 const calls = new Map<string, CallRecord>();
@@ -904,6 +976,12 @@ app.post('/api/calls', (req, res) => {
   calls.set(id, call);
   patchPresence(host.id, { isOnCall: true });
   pushToHost(host.id, 'incoming_call', call);
+  cancelPendingForUser(String(userId), 'user_started_call');
+  touchAutoCallHeartbeat({
+    userId: String(userId),
+    coinBalance: userWallet.coinBalance,
+    inCall: true,
+  });
 
   // Auto-miss after 45s
   setTimeout(() => {
@@ -988,8 +1066,8 @@ app.post('/api/calls/:id/end', (req, res) => {
 });
 
 /**
- * Bill one call minute: deduct rate from user wallet, credit host.
- * Returns 402 when the user cannot cover the next minute.
+ * Bill one call minute: deduct rate from user, credit host (net of platform cut).
+ * Idempotent via txnKey = callId:minuteN (or client Idempotency-Key).
  */
 app.post('/api/calls/:id/minute', (req, res) => {
   const call = calls.get(String(req.params.id));
@@ -1010,7 +1088,70 @@ app.post('/api/calls/:id/minute', (req, res) => {
   if (!assertUserAccountActive(userId, res)) return;
 
   const amount = Math.max(1, Math.floor(Number(call.ratePerMinute) || 80));
-  const userWallet = ensureWallet(userId, { role: 'user', displayName: call.userName });
+  const expectedMinute = (call.billedMinutes || 0) + 1;
+  const requestedMinute = Math.floor(Number(req.body?.minuteIndex) || 0);
+  const nextMinute =
+    requestedMinute > 0 ? requestedMinute : expectedMinute;
+
+  // Already billed this minute (retry after success) — return same result
+  if (nextMinute <= (call.billedMinutes || 0)) {
+    const userWallet = ensureWallet(userId);
+    const hostWallet = ensureWallet(call.hostId);
+    const priorKey = `call_minute:${call.id}:${nextMinute}`;
+    const prior = getCoinTxnByKey(priorKey);
+    res.json({
+      ok: true,
+      amount: prior?.coinsDeducted ?? amount,
+      hostCredited: prior?.coinsCreditedHost ?? 0,
+      platformCut: prior?.coinsCreditedPlatform ?? 0,
+      billedMinutes: call.billedMinutes,
+      duplicate: true,
+      txn: prior,
+      userWallet: walletPublic(userWallet),
+      hostWallet: walletPublic(hostWallet),
+    });
+    return;
+  }
+
+  // Only allow sequential minutes (no skip-ahead double-charge gaps)
+  if (nextMinute !== expectedMinute) {
+    res.status(409).json({
+      error: `Expected minute ${expectedMinute}, got ${nextMinute}`,
+      billedMinutes: call.billedMinutes,
+    });
+    return;
+  }
+
+  const txnKey =
+    String(req.headers['idempotency-key'] || req.body?.txnKey || '').trim() ||
+    `call_minute:${call.id}:${nextMinute}`;
+
+  const existing = getCoinTxnByKey(txnKey);
+  if (existing?.status === 'completed') {
+    const userWallet = ensureWallet(userId);
+    const hostWallet = ensureWallet(call.hostId);
+    if ((call.billedMinutes || 0) < nextMinute) {
+      call.billedMinutes = nextMinute;
+      calls.set(call.id, call);
+    }
+    res.json({
+      ok: true,
+      amount: existing.coinsDeducted,
+      hostCredited: existing.coinsCreditedHost,
+      platformCut: existing.coinsCreditedPlatform,
+      billedMinutes: call.billedMinutes,
+      duplicate: true,
+      txn: existing,
+      userWallet: walletPublic(userWallet),
+      hostWallet: walletPublic(hostWallet),
+    });
+    return;
+  }
+
+  const userWallet = ensureWallet(userId, {
+    role: 'user',
+    displayName: call.userName,
+  });
   if (userWallet.coinBalance < amount) {
     forceEndCall(call, 'exhausted');
     res.status(402).json({
@@ -1023,56 +1164,68 @@ app.post('/api/calls/:id/minute', (req, res) => {
     return;
   }
 
-  userWallet.coinBalance -= amount;
-  userWallet.xp += amount;
-  wallets.set(userId, userWallet);
-  pushLedger(userId, amount, `call_minute_${call.id}`, 'spend');
-
-  const hostWallet = ensureWallet(call.hostId, {
-    role: 'host',
-    displayName: call.hostName,
+  const result = transferUserToHost(coinDeps(), {
+    txnKey,
+    type: 'call_minute',
+    userId,
+    hostId: call.hostId,
+    gross: amount,
+    callId: call.id,
+    reason: `call_minute_${call.id}`,
+    meta: { billedMinute: nextMinute, ratePerMinute: amount },
   });
-  hostWallet.coinBalance += amount;
-  hostWallet.xp += amount;
-  wallets.set(call.hostId, hostWallet);
-  pushLedger(call.hostId, amount, `call_earn_${call.id}`, 'credit');
 
-  call.billedMinutes = (call.billedMinutes || 0) + 1;
+  if (!result.ok) {
+    if (result.code === 402) {
+      forceEndCall(call, 'exhausted');
+      res.status(402).json({
+        error: 'Coins exhausted',
+        wallet: walletPublic(ensureWallet(userId)),
+        userWallet: walletPublic(ensureWallet(userId)),
+        need: amount,
+        callEnded: true,
+        txn: result.txn,
+      });
+      return;
+    }
+    res.status(result.code).json({ error: result.txn.error || 'Billing failed', txn: result.txn });
+    return;
+  }
+
+  call.billedMinutes = nextMinute;
   call.updatedAt = Date.now();
   calls.set(call.id, call);
   persist();
 
-  recordHostEarning(call.hostId, amount, {
+  const hostWallet = ensureWallet(call.hostId);
+  recordHostEarning(call.hostId, result.txn.coinsCreditedHost, {
     kind: 'call',
     coinBalance: hostWallet.coinBalance,
     incrementCalls: call.billedMinutes === 1,
     broadcast: broadcastWs,
   });
 
-  broadcastWs({
-    type: 'wallet:updated',
-    payload: { userId, coinBalance: userWallet.coinBalance, xp: userWallet.xp },
-  });
-  broadcastWs({
-    type: 'wallet:updated',
-    payload: {
-      userId: call.hostId,
-      coinBalance: hostWallet.coinBalance,
-      xp: hostWallet.xp,
-    },
-  });
+  broadcastWallet(userId);
+  broadcastWallet(call.hostId);
   pushToHost(call.hostId, 'call_minute', {
     callId: call.id,
-    amount,
+    amount: result.txn.coinsCreditedHost,
+    gross: result.txn.coinsDeducted,
+    platformCut: result.txn.coinsCreditedPlatform,
     billedMinutes: call.billedMinutes,
     hostWallet: walletPublic(hostWallet),
+    txnId: result.txn.id,
   });
 
   res.json({
     ok: true,
-    amount,
+    amount: result.txn.coinsDeducted,
+    hostCredited: result.txn.coinsCreditedHost,
+    platformCut: result.txn.coinsCreditedPlatform,
+    commissionRate: result.txn.commissionRate,
     billedMinutes: call.billedMinutes,
-    userWallet: walletPublic(userWallet),
+    txn: result.txn,
+    userWallet: walletPublic(ensureWallet(userId)),
     hostWallet: walletPublic(hostWallet),
   });
 });
@@ -1154,24 +1307,61 @@ app.get('/api/hosts/:hostId/earnings', (req, res) => {
   if (!requireUserMatch(req, res, hostId)) return;
   const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 100));
   const dayStartMs = Number(req.query.dayStart) || 0;
+  const monthStartMs = Number(req.query.monthStart) || 0;
   const summary = hostEarningsSummary(hostId);
   const today = hostTodayStats(hostId, dayStartMs);
+  const month = hostMonthStats(hostId, monthStartMs);
   const callsForHost = callHistory.filter((c) => c.hostId === hostId).slice(0, limit);
   const giftsForHost = giftHistory.filter((g) => g.toHostId === hostId).slice(0, limit);
   const wallet = ensureWallet(hostId, { role: 'host' });
+  const liveAll = liveSessionHistory.filter((s) => s.hostId === hostId);
   res.json({
     summary: {
       ...summary,
       walletBalance: wallet.coinBalance,
+      followers: followerCount(hostId),
+      liveSessions: liveAll.length,
+      liveSeconds: liveAll.reduce((s, row) => s + Math.max(0, row.durationSec || 0), 0),
     },
     today: {
       ...today,
       walletBalance: wallet.coinBalance,
       dayStartMs: dayStartMs || undefined,
     },
+    month,
     calls: callsForHost,
     gifts: giftsForHost,
   });
+});
+
+/** Follow / unfollow a host (Luma users) */
+app.post('/api/hosts/:hostId/follow', (req, res) => {
+  const hostId = String(req.params.hostId || '').trim();
+  const userId = String(req.body?.userId || req.headers['x-user-id'] || '').trim();
+  const follow = req.body?.follow !== false;
+  if (!hostId || !userId) {
+    res.status(400).json({ error: 'hostId and userId required' });
+    return;
+  }
+  if (!requireUserMatch(req, res, userId)) return;
+  let set = hostFollowers.get(hostId);
+  if (!set) {
+    set = new Set();
+    hostFollowers.set(hostId, set);
+  }
+  if (follow) set.add(userId);
+  else set.delete(userId);
+  persist();
+  res.json({ ok: true, following: follow, followers: set.size });
+});
+
+app.get('/api/hosts/:hostId/followers', (req, res) => {
+  const hostId = String(req.params.hostId || '').trim();
+  if (!hostId) {
+    res.status(400).json({ error: 'hostId required' });
+    return;
+  }
+  res.json({ hostId, followers: followerCount(hostId) });
 });
 
 /** Token helper for a call participant */
@@ -1313,33 +1503,35 @@ app.post('/api/calls/:id/gift-requests/:reqId/respond', (req, res) => {
     return;
   }
 
-  // Deduct from user wallet
-  const userWallet = ensureWallet(userId, { displayName: call.userName, role: 'user' });
-  if (userWallet.coinBalance < gr.coins) {
-    res.status(402).json({
-      error: 'Insufficient coins',
+  // Deduct from user → host net + platform (idempotent)
+  const giftTxnKey =
+    String(req.headers['idempotency-key'] || req.body?.txnKey || '').trim() ||
+    `gift_req:${call.id}:${gr.id}`;
+  const xfer = transferUserToHost(coinDeps(), {
+    txnKey: giftTxnKey,
+    type: 'gift',
+    userId,
+    hostId: call.hostId,
+    gross: gr.coins,
+    callId: call.id,
+    giftId: gr.giftId,
+    reason: `gift_to_${call.hostId}_${gr.giftId}`,
+  });
+  if (!xfer.ok) {
+    res.status(xfer.code).json({
+      error: xfer.txn.error || 'Insufficient coins',
       need: gr.coins,
-      wallet: walletPublic(userWallet),
+      wallet: walletPublic(ensureWallet(userId)),
       giftRequest: gr,
+      txn: xfer.txn,
     });
     return;
   }
-  userWallet.coinBalance -= gr.coins;
-  userWallet.xp += gr.coins;
-  wallets.set(userId, userWallet);
-  pushLedger(userId, gr.coins, `gift_to_${call.hostId}_${gr.giftId}`, 'spend');
 
-  // Credit host
-  const hostWallet = ensureWallet(call.hostId, {
-    displayName: call.hostName,
-    role: 'host',
-  });
-  hostWallet.coinBalance += gr.coins;
-  hostWallet.xp += gr.coins;
-  wallets.set(call.hostId, hostWallet);
-  pushLedger(call.hostId, gr.coins, `gift_from_${userId}_${gr.giftId}`, 'credit');
+  const userWallet = ensureWallet(userId);
+  const hostWallet = ensureWallet(call.hostId);
 
-  recordHostEarning(call.hostId, gr.coins, {
+  recordHostEarning(call.hostId, xfer.txn.coinsCreditedHost, {
     kind: 'gift',
     coinBalance: hostWallet.coinBalance,
     broadcast: broadcastWs,
@@ -1355,8 +1547,11 @@ app.post('/api/calls/:id/gift-requests/:reqId/respond', (req, res) => {
     ...gr,
     fromUserId: userId,
     fromUserName: call.userName,
+    hostCredited: xfer.txn.coinsCreditedHost,
+    platformCut: xfer.txn.coinsCreditedPlatform,
     hostWallet: walletPublic(hostWallet),
     userWallet: walletPublic(userWallet),
+    txnId: xfer.txn.id,
   };
 
   pushGiftHistory({
@@ -1407,35 +1602,43 @@ app.post('/api/gifts/send', (req, res) => {
     return;
   }
 
-  const userWallet = ensureWallet(userId, { displayName: userName, role: 'user' });
-  if (userWallet.coinBalance < catalog.coins) {
-    res.status(402).json({
-      error: 'Insufficient coins',
+  const giftEventId = randomUUID().slice(0, 10);
+  const txnKey =
+    String(req.headers['idempotency-key'] || req.body?.txnKey || '').trim() ||
+    `gift_send:${userId}:${hostId}:${giftId}:${giftEventId}`;
+
+  const xfer = transferUserToHost(coinDeps(), {
+    txnKey,
+    type: 'gift',
+    userId,
+    hostId,
+    gross: catalog.coins,
+    callId: callId || undefined,
+    giftId,
+    reason: `gift_to_${hostId}_${giftId}`,
+    meta: { roomId, userName },
+  });
+  if (!xfer.ok) {
+    res.status(xfer.code).json({
+      error: xfer.txn.error || 'Insufficient coins',
       need: catalog.coins,
-      wallet: walletPublic(userWallet),
+      wallet: walletPublic(ensureWallet(userId)),
+      txn: xfer.txn,
     });
     return;
   }
 
-  userWallet.coinBalance -= catalog.coins;
-  userWallet.xp += catalog.coins;
-  wallets.set(userId, userWallet);
-  pushLedger(userId, catalog.coins, `gift_to_${hostId}_${giftId}`, 'spend');
+  const userWallet = ensureWallet(userId);
+  const hostWallet = ensureWallet(hostId);
 
-  const hostWallet = ensureWallet(hostId, { role: 'host' });
-  hostWallet.coinBalance += catalog.coins;
-  hostWallet.xp += catalog.coins;
-  wallets.set(hostId, hostWallet);
-  pushLedger(hostId, catalog.coins, `gift_from_${userId}_${giftId}`, 'credit');
-
-  recordHostEarning(hostId, catalog.coins, {
+  recordHostEarning(hostId, xfer.txn.coinsCreditedHost, {
     kind: 'gift',
     coinBalance: hostWallet.coinBalance,
     broadcast: broadcastWs,
   });
 
   const giftEvent = {
-    id: randomUUID().slice(0, 10),
+    id: giftEventId,
     roomId: roomId || null,
     callId: callId || null,
     fromUserId: userId,
@@ -1445,8 +1648,11 @@ app.post('/api/gifts/send', (req, res) => {
     giftName: catalog.name,
     giftEmoji: catalog.emoji,
     coins: catalog.coins,
+    hostCredited: xfer.txn.coinsCreditedHost,
+    platformCut: xfer.txn.coinsCreditedPlatform,
     combo: 1,
     createdAt: Date.now(),
+    txnId: xfer.txn.id,
   };
 
   const resolvedRoom = roomId ? findLiveRoom(roomId) : findLiveRoom(hostId);
@@ -1482,9 +1688,13 @@ app.post('/api/gifts/send', (req, res) => {
     createdAt: giftEvent.createdAt,
   });
 
+  broadcastWallet(userId);
+  broadcastWallet(hostId);
+
   res.status(201).json({
     ok: true,
     gift: giftEvent,
+    txn: xfer.txn,
     userWallet: walletPublic(userWallet),
     hostWallet: walletPublic(hostWallet),
   });
@@ -1730,14 +1940,18 @@ type WalletRow = {
   isPremium: boolean;
   displayName: string;
   avatarUrl?: string;
+  bio?: string;
   role: 'user' | 'host';
   /** Public 6-digit search id (e.g. "583920") */
   appId?: string;
   /** Account gate for Luma users / hosts mirrored in wallet */
   accountStatus?: 'active' | 'suspended' | 'banned';
-  /** One-time +100 welcome bonus already paid (survives wallet recreate) */
+  /** One-time welcome bonus already paid (survives wallet recreate) */
   welcomeBonusGranted?: boolean;
 };
+
+/** installId → canonical userId so profile survives WebView storage clears / reinstall */
+const installUserMap = new Map<string, string>();
 
 type WithdrawalRequest = {
   id: string;
@@ -1778,11 +1992,15 @@ const withdrawals: WithdrawalRequest[] = [];
 const reports: ReportRow[] = [];
 
 const iapReceipts = new Set<string>();
-/** Survives wallet map wipe: never grant +100 welcome twice for same userId */
+/** Survives wallet map wipe: never grant welcome twice for same userId */
 const welcomeBonusPaidIds = new Set<string>();
 
-function markWelcomeBonusPaid(userId: string) {
+/** Host follower graph: hostId → Set of userIds */
+const hostFollowers = new Map<string, Set<string>>();
+
+function markWelcomeBonusPaid(userId: string, installId?: string) {
   welcomeBonusPaidIds.add(userId);
+  markWelcomeClaimed(userId, installId);
   const row = wallets.get(userId);
   if (row) {
     row.welcomeBonusGranted = true;
@@ -1790,8 +2008,12 @@ function markWelcomeBonusPaid(userId: string) {
   }
 }
 
-function hasWelcomeBonusAlready(userId: string): boolean {
+function hasWelcomeBonusAlready(userId: string, installId?: string): boolean {
   if (welcomeBonusPaidIds.has(userId)) return true;
+  if (hasWelcomeClaimed(userId, installId)) {
+    welcomeBonusPaidIds.add(userId);
+    return true;
+  }
   const row = wallets.get(userId);
   if (row?.welcomeBonusGranted) {
     welcomeBonusPaidIds.add(userId);
@@ -1803,6 +2025,52 @@ function hasWelcomeBonusAlready(userId: string): boolean {
     return true;
   }
   return false;
+}
+
+function readInstallId(req: express.Request): string {
+  return String(
+    req.headers['x-install-id'] || req.body?.installId || '',
+  ).trim().slice(0, 80);
+}
+
+function hostMonthStats(hostId: string, monthStartMs: number) {
+  const start =
+    Number.isFinite(monthStartMs) && monthStartMs > 0
+      ? monthStartMs
+      : (() => {
+          const d = new Date();
+          d.setUTCDate(1);
+          d.setUTCHours(0, 0, 0, 0);
+          return d.getTime();
+        })();
+  const monthCalls = callHistory.filter(
+    (c) =>
+      c.hostId === hostId &&
+      (c.endedAt || c.startedAt || 0) >= start &&
+      (c.status === 'ended' || c.status === 'accepted' || (c.billedMinutes || 0) > 0),
+  );
+  const monthGifts = giftHistory.filter(
+    (g) => g.toHostId === hostId && (g.createdAt || 0) >= start,
+  );
+  const monthLive = liveSessionHistory.filter(
+    (s) => s.hostId === hostId && (s.startedAt || 0) >= start,
+  );
+  const callCoins = monthCalls.reduce((s, c) => s + (c.coinsSpent || 0), 0);
+  const giftCoins = monthGifts.reduce((s, g) => s + (g.coins || 0), 0);
+  return {
+    callCoins,
+    giftCoins,
+    totalCoins: callCoins + giftCoins,
+    callsCount: monthCalls.length,
+    giftCount: monthGifts.length,
+    liveSeconds: monthLive.reduce((s, row) => s + Math.max(0, row.durationSec || 0), 0),
+    liveSessions: monthLive.length,
+    monthStartMs: start,
+  };
+}
+
+function followerCount(hostId: string): number {
+  return hostFollowers.get(hostId)?.size || 0;
 }
 
 (function hydrateWalletsFromDisk() {
@@ -2038,6 +2306,72 @@ function pushLedger(
   return entry;
 }
 
+/** Shared deps for authoritative coinLedger mutations */
+function coinDeps() {
+  return {
+    getWallet: (userId: string) => {
+      const row = ensureWallet(userId);
+      return {
+        userId: row.userId,
+        coinBalance: row.coinBalance,
+        xp: row.xp,
+      };
+    },
+    setWallet: (w: { userId: string; coinBalance: number; xp: number }) => {
+      const row = ensureWallet(w.userId);
+      row.coinBalance = w.coinBalance;
+      row.xp = w.xp;
+      wallets.set(w.userId, row);
+    },
+    ensureWallet: (userId: string) => {
+      const row = ensureWallet(userId);
+      return {
+        userId: row.userId,
+        coinBalance: row.coinBalance,
+        xp: row.xp,
+      };
+    },
+    persist,
+    onTxn: (txn: CoinTxn) => {
+      if (txn.status !== 'completed') return;
+      if (txn.coinsDeducted > 0 && txn.userId !== PLATFORM_TREASURY_ID) {
+        pushLedger(txn.userId, txn.coinsDeducted, txn.reason, 'spend');
+      }
+      if (txn.coinsMinted > 0) {
+        pushLedger(txn.userId, txn.coinsMinted, txn.reason, 'credit');
+      }
+      if (txn.coinsCreditedHost > 0 && txn.hostId) {
+        pushLedger(
+          txn.hostId,
+          txn.coinsCreditedHost,
+          `${txn.reason}_host`,
+          'credit',
+        );
+      }
+      if (txn.coinsCreditedPlatform > 0) {
+        pushLedger(
+          PLATFORM_TREASURY_ID,
+          txn.coinsCreditedPlatform,
+          `${txn.reason}_platform`,
+          'credit',
+        );
+      }
+    },
+  };
+}
+
+function broadcastWallet(userId: string) {
+  const row = ensureWallet(userId);
+  broadcastWs({
+    type: 'wallet:updated',
+    payload: {
+      userId,
+      coinBalance: row.coinBalance,
+      xp: row.xp,
+    },
+  });
+}
+
 const IAP_PRODUCTS = [
   {
     productId: 'luma_coins_50',
@@ -2095,6 +2429,7 @@ function ensureWallet(userId: string, patch?: Partial<WalletRow>): WalletRow {
       isPremium: false,
       displayName: patch?.displayName || 'Luma Fan',
       avatarUrl: patch?.avatarUrl,
+      bio: patch?.bio || '',
       role: patch?.role || 'user',
       appId: patch?.appId || allocateAppId(),
     };
@@ -2108,6 +2443,7 @@ function ensureWallet(userId: string, patch?: Partial<WalletRow>): WalletRow {
   if (patch) {
     if (patch.displayName) row.displayName = patch.displayName;
     if (patch.avatarUrl !== undefined) row.avatarUrl = patch.avatarUrl;
+    if (patch.bio !== undefined) row.bio = patch.bio;
     if (patch.role) row.role = patch.role;
     if (patch.isPremium !== undefined) row.isPremium = patch.isPremium;
     if (patch.coinBalance !== undefined) row.coinBalance = patch.coinBalance;
@@ -2118,6 +2454,14 @@ function ensureWallet(userId: string, patch?: Partial<WalletRow>): WalletRow {
   return row;
 }
 
+/** Prefer durable on-disk user avatar over stale remote / dicebear URLs */
+function resolveWalletAvatar(row: WalletRow): string | undefined {
+  if (hasStoredUserAvatar(row.userId)) {
+    return userAvatarPublicUrl(row.userId);
+  }
+  return row.avatarUrl;
+}
+
 function walletPublic(row: WalletRow) {
   return {
     userId: row.userId,
@@ -2125,10 +2469,35 @@ function walletPublic(row: WalletRow) {
     xp: row.xp,
     isPremium: row.isPremium,
     displayName: row.displayName,
-    avatarUrl: row.avatarUrl,
+    avatarUrl: resolveWalletAvatar(row),
+    bio: row.bio || '',
     appId: row.appId,
     accountStatus: row.accountStatus || 'active',
   };
+}
+
+/**
+ * Same install → same wallet userId (survives localStorage wipe / reinstall
+ * when Expo shell re-injects the durable install id).
+ */
+function resolveWalletUserId(
+  requested: string,
+  installId: string,
+): { userId: string; restored: boolean } {
+  const req = String(requested || '').trim();
+  const inst = String(installId || '').trim();
+  if (inst) {
+    const mapped = installUserMap.get(inst);
+    if (mapped && wallets.has(mapped) && mapped !== req) {
+      return { userId: mapped, restored: true };
+    }
+    if (!mapped && req) {
+      installUserMap.set(inst, req);
+    } else if (mapped && !wallets.has(mapped) && req) {
+      installUserMap.set(inst, req);
+    }
+  }
+  return { userId: req, restored: false };
 }
 
 /** Block spend / calls when admin suspended or banned the user */
@@ -2150,14 +2519,22 @@ function assertUserAccountActive(
 }
 
 app.post('/api/wallet/me', (req, res) => {
-  const userId = String(req.body?.userId || req.headers['x-user-id'] || '').trim();
-  if (!userId) {
+  const requestedId = String(
+    req.body?.userId || req.headers['x-user-id'] || '',
+  ).trim();
+  if (!requestedId) {
     res.status(400).json({ error: 'userId required' });
     return;
+  }
+  const installId = readInstallId(req);
+  const { userId, restored } = resolveWalletUserId(requestedId, installId);
+  if (installId && !installUserMap.has(installId)) {
+    installUserMap.set(installId, userId);
   }
   const existed = wallets.has(userId);
   const displayName = String(req.body?.displayName || '').trim();
   const avatarUrl = String(req.body?.avatarUrl || '').trim();
+  const bio = req.body?.bio != null ? String(req.body.bio).trim().slice(0, 280) : undefined;
   const updateProfile = Boolean(req.body?.updateProfile);
   /** Client already claimed welcome on this device — never re-grant after API wipe */
   const clientWelcomeClaimed = Boolean(req.body?.welcomeAlreadyClaimed);
@@ -2168,37 +2545,57 @@ app.post('/api/wallet/me', (req, res) => {
     row = ensureWallet(userId, {
       displayName: displayName || 'Luma Fan',
       avatarUrl: avatarUrl || undefined,
+      bio: bio || '',
       role: req.body?.role === 'host' ? 'host' : 'user',
     });
-    const alreadyPaid =
-      hasWelcomeBonusAlready(userId) || clientWelcomeClaimed;
-    if (alreadyPaid) {
-      // Recreated after restart — do NOT add another +100
+    const grant = resolveWelcomeGrant({
+      userId,
+      installId: installId || undefined,
+      alreadyPaidUser: hasWelcomeBonusAlready(userId, installId || undefined),
+      clientClaimed: clientWelcomeClaimed,
+    });
+    if (!grant.granted) {
+      // Recreated after restart / reinstall abuse — do NOT add another welcome
       row.coinBalance = 0;
       row.xp = row.xp || 0;
-      markWelcomeBonusPaid(userId);
+      markWelcomeBonusPaid(userId, installId || undefined);
       wallets.set(userId, row);
       persist();
     } else {
-      row.coinBalance = 100;
-      row.xp = 10;
-      markWelcomeBonusPaid(userId);
-      wallets.set(userId, row);
-      pushLedger(userId, 100, 'Welcome bonus', 'credit');
-      welcomeBonusGrantedNow = true;
-      broadcastWs({
-        type: 'wallet:updated',
-        payload: { userId, coinBalance: row.coinBalance, xp: row.xp },
+      // Signup: ONLY welcome (≤100). Never daily/spin/referral here.
+      const welcomeAmt = Math.min(100, Math.max(0, grant.coins));
+      const minted = mintCoins(coinDeps(), {
+        txnKey: `welcome:${userId}`,
+        type: 'reward_welcome',
+        userId,
+        amount: welcomeAmt,
+        reason: 'Welcome bonus',
       });
+      if (minted.ok) {
+        markWelcomeBonusPaid(userId, installId || undefined);
+        row = ensureWallet(userId);
+        // Hard invariant: new wallet balance === welcome only
+        if (row.coinBalance !== welcomeAmt) {
+          row.coinBalance = welcomeAmt;
+          wallets.set(userId, row);
+          persist();
+        }
+        row.xp = Math.max(row.xp || 0, 10);
+        wallets.set(userId, row);
+        welcomeBonusGrantedNow = welcomeAmt > 0;
+        broadcastWallet(userId);
+      }
     }
   } else {
     row = ensureWallet(userId);
     if (row.welcomeBonusGranted || clientWelcomeClaimed) {
-      markWelcomeBonusPaid(userId);
+      markWelcomeBonusPaid(userId, installId || undefined);
     }
-    if (updateProfile || displayName) {
+    if (updateProfile || displayName || bio !== undefined) {
       if (displayName) row.displayName = displayName;
-      if (avatarUrl) row.avatarUrl = avatarUrl;
+      if (avatarUrl && !hasStoredUserAvatar(userId)) row.avatarUrl = avatarUrl;
+      else if (avatarUrl && /^https?:\/\//i.test(avatarUrl)) row.avatarUrl = avatarUrl;
+      if (bio !== undefined) row.bio = bio;
       wallets.set(userId, row);
       persist();
     }
@@ -2207,7 +2604,10 @@ app.post('/api/wallet/me', (req, res) => {
   res.json({
     wallet: walletPublic(row),
     created: !existed,
+    restored,
+    restoredUserId: restored ? userId : undefined,
     welcomeBonus: welcomeBonusGrantedNow,
+    welcomeAmount: welcomeBonusCoins(),
   });
 });
 
@@ -2254,6 +2654,14 @@ app.post('/api/wallet/credit', (req, res) => {
     String(req.headers['x-admin-key'] || req.query.key || '').trim() === ADMIN_KEY;
   const floored = Math.floor(amount);
   if (!adminOk) {
+    // User engagement must use /api/rewards/* — never forge via this path
+    if (ENGAGEMENT_CREDIT_BLOCK.test(reason)) {
+      res.status(403).json({
+        error:
+          'Engagement credits blocked. Use /api/rewards/daily, /spin, or /referral',
+      });
+      return;
+    }
     if (floored > CLIENT_CREDIT_MAX) {
       res.status(400).json({
         error: `Client credit capped at ${CLIENT_CREDIT_MAX} (use admin for larger)`,
@@ -2261,23 +2669,40 @@ app.post('/api/wallet/credit', (req, res) => {
       return;
     }
     if (!CLIENT_CREDIT_REASONS.test(reason)) {
-      res.status(400).json({
-        error: 'Credit reason not allowlisted',
-        hint: 'check-in, spin, referral, mission, VIP, welcome, reward, host_earn, …',
+      res.status(403).json({
+        error: 'Client coin mint denied',
+        hint: 'Only host_earn:* allowed without admin; rewards use /api/rewards/*',
       });
       return;
     }
   }
+
+  const txnKey =
+    String(req.headers['idempotency-key'] || req.body?.txnKey || '').trim() ||
+    (adminOk
+      ? `admin_credit:${userId}:${floored}:${randomUUID()}`
+      : `host_earn:${userId}:${reason}:${floored}:${randomUUID()}`);
+  const mintType = /iap|purchase|recharge|topup/i.test(reason)
+    ? ('purchase' as const)
+    : ('admin_credit' as const);
+
+  const result = mintCoins(coinDeps(), {
+    txnKey,
+    type: mintType,
+    userId,
+    amount: floored,
+    reason,
+  });
+  if (!result.ok) {
+    res.status(result.code).json({ error: result.txn.error || 'Credit failed', txn: result.txn });
+    return;
+  }
+
   const row = ensureWallet(userId, {
     displayName: String(req.body?.displayName || 'Host'),
     role: req.body?.role === 'host' ? 'host' : 'user',
   });
-  row.coinBalance += floored;
-  row.xp += floored;
-  wallets.set(userId, row);
-  pushLedger(userId, floored, reason, 'credit');
   const reasonLower = reason.toLowerCase();
-  // Live call/gift paths already call recordHostEarning — avoid double-count on call_end sync
   if (
     /host_earn/.test(reasonLower) &&
     !/call_end|call_earn_|gift_from_|call_minute/.test(reasonLower)
@@ -2301,11 +2726,212 @@ app.post('/api/wallet/credit', (req, res) => {
       roomId: String(req.body?.roomId || '').trim() || undefined,
     });
   }
-  broadcastWs({
-    type: 'wallet:updated',
-    payload: { userId, coinBalance: row.coinBalance, xp: row.xp, reason },
+  broadcastWallet(userId);
+  res.json({
+    ok: true,
+    reason,
+    txn: result.txn,
+    wallet: walletPublic(row),
+    balanceCheck: {
+      previous: result.txn.userBalanceBefore,
+      added: result.txn.coinsMinted,
+      deducted: result.txn.coinsDeducted,
+      current: result.txn.userBalanceAfter,
+    },
   });
-  res.json({ ok: true, reason, wallet: walletPublic(row) });
+});
+
+/** Authoritative daily login + spin rewards (amounts fixed server-side) */
+app.get('/api/rewards/status', (req, res) => {
+  const userId = String(req.query.userId || req.headers['x-user-id'] || '').trim();
+  if (!userId) {
+    res.status(400).json({ error: 'userId required' });
+    return;
+  }
+  const installId = readInstallId(req);
+  res.json({ status: getRewardStatus(userId, installId || undefined) });
+});
+
+app.post('/api/rewards/daily', (req, res) => {
+  const userId = String(req.body?.userId || req.headers['x-user-id'] || '').trim();
+  if (!userId) {
+    res.status(400).json({ error: 'userId required' });
+    return;
+  }
+  if (!requireUserMatch(req, res, userId)) return;
+  const installId = readInstallId(req);
+  const locked = withClaimLock(userId, () => {
+    const result = claimDailyLogin(userId, installId || undefined);
+    if (!result.ok) return { kind: 'fail' as const, result };
+    const minted = mintCoins(coinDeps(), {
+      txnKey: result.txnKey,
+      type: 'reward_daily',
+      userId,
+      amount: result.coins,
+      reason: result.reason,
+    });
+    if (!minted.ok) return { kind: 'mint_fail' as const, minted, result };
+    const row = ensureWallet(userId, { role: 'user' });
+    row.xp += 20;
+    wallets.set(userId, row);
+    persist();
+    broadcastWallet(userId);
+    return { kind: 'ok' as const, result, minted, row };
+  });
+  if (!locked.ok) {
+    res.status(429).json({ error: locked.error });
+    return;
+  }
+  const out = locked.value;
+  if (out.kind === 'fail') {
+    res.status(409).json({ error: out.result.error, status: out.result.status });
+    return;
+  }
+  if (out.kind === 'mint_fail') {
+    res.status(out.minted.code).json({
+      error: out.minted.txn.error,
+      txn: out.minted.txn,
+    });
+    return;
+  }
+  res.json({
+    ok: true,
+    coins: out.result.coins,
+    reason: out.result.reason,
+    status: out.result.status,
+    txn: out.minted.txn,
+    wallet: walletPublic(out.row),
+    balanceCheck: {
+      previous: out.minted.txn.userBalanceBefore,
+      added: out.minted.txn.coinsMinted,
+      deducted: out.minted.txn.coinsDeducted,
+      current: out.minted.txn.userBalanceAfter,
+    },
+  });
+});
+
+app.post('/api/rewards/spin', (req, res) => {
+  const userId = String(req.body?.userId || req.headers['x-user-id'] || '').trim();
+  if (!userId) {
+    res.status(400).json({ error: 'userId required' });
+    return;
+  }
+  if (!requireUserMatch(req, res, userId)) return;
+  const installId = readInstallId(req);
+  const locked = withClaimLock(userId, () => {
+    const result = claimSpin(userId, installId || undefined);
+    if (!result.ok) return { kind: 'fail' as const, result };
+    const minted = mintCoins(coinDeps(), {
+      txnKey: result.txnKey,
+      type: 'reward_spin',
+      userId,
+      amount: result.coins,
+      reason: result.reason,
+    });
+    if (!minted.ok) return { kind: 'mint_fail' as const, minted, result };
+    const row = ensureWallet(userId, { role: 'user' });
+    row.xp += 15;
+    wallets.set(userId, row);
+    persist();
+    broadcastWallet(userId);
+    return { kind: 'ok' as const, result, minted, row };
+  });
+  if (!locked.ok) {
+    res.status(429).json({ error: locked.error });
+    return;
+  }
+  const out = locked.value;
+  if (out.kind === 'fail') {
+    res.status(409).json({ error: out.result.error, status: out.result.status });
+    return;
+  }
+  if (out.kind === 'mint_fail') {
+    res.status(out.minted.code).json({
+      error: out.minted.txn.error,
+      txn: out.minted.txn,
+    });
+    return;
+  }
+  res.json({
+    ok: true,
+    coins: out.result.coins,
+    reason: out.result.reason,
+    status: out.result.status,
+    txn: out.minted.txn,
+    wallet: walletPublic(out.row),
+    prize: {
+      id: `c${out.result.coins}`,
+      label: String(out.result.coins),
+      coins: out.result.coins,
+      weight: 1,
+      color: '#ffb800',
+    },
+    balanceCheck: {
+      previous: out.minted.txn.userBalanceBefore,
+      added: out.minted.txn.coinsMinted,
+      deducted: out.minted.txn.coinsDeducted,
+      current: out.minted.txn.userBalanceAfter,
+    },
+  });
+});
+
+app.post('/api/rewards/referral', (req, res) => {
+  const userId = String(req.body?.userId || req.headers['x-user-id'] || '').trim();
+  const code = String(req.body?.code || '').trim();
+  if (!userId) {
+    res.status(400).json({ error: 'userId required' });
+    return;
+  }
+  if (!requireUserMatch(req, res, userId)) return;
+  const installId = readInstallId(req);
+  const locked = withClaimLock(userId, () => {
+    const result = claimReferralReward(userId, code, installId || undefined);
+    if (!result.ok) return { kind: 'fail' as const, result };
+    const minted = mintCoins(coinDeps(), {
+      txnKey: result.txnKey,
+      type: 'reward_referral',
+      userId,
+      amount: result.coins,
+      reason: result.reason,
+      meta: { code: String(code).trim().toUpperCase().slice(0, 32) },
+    });
+    if (!minted.ok) return { kind: 'mint_fail' as const, minted, result };
+    const row = ensureWallet(userId, { role: 'user' });
+    wallets.set(userId, row);
+    persist();
+    broadcastWallet(userId);
+    return { kind: 'ok' as const, result, minted, row };
+  });
+  if (!locked.ok) {
+    res.status(429).json({ error: locked.error });
+    return;
+  }
+  const out = locked.value;
+  if (out.kind === 'fail') {
+    res.status(409).json({ error: out.result.error, status: out.result.status });
+    return;
+  }
+  if (out.kind === 'mint_fail') {
+    res.status(out.minted.code).json({
+      error: out.minted.txn.error,
+      txn: out.minted.txn,
+    });
+    return;
+  }
+  res.json({
+    ok: true,
+    coins: out.result.coins,
+    reason: out.result.reason,
+    status: out.result.status,
+    txn: out.minted.txn,
+    wallet: walletPublic(out.row),
+    balanceCheck: {
+      previous: out.minted.txn.userBalanceBefore,
+      added: out.minted.txn.coinsMinted,
+      deducted: out.minted.txn.coinsDeducted,
+      current: out.minted.txn.userBalanceAfter,
+    },
+  });
 });
 
 app.get('/api/wallet/history/:userId', (req, res) => {
@@ -2316,6 +2942,40 @@ app.get('/api/wallet/history/:userId', (req, res) => {
   }
   ensureWallet(userId);
   res.json({ history: walletLedger.get(userId) || [] });
+});
+
+/** Full double-entry coin transactions (authoritative audit trail) */
+app.get('/api/wallet/transactions', (req, res) => {
+  const userId = String(req.query.userId || req.headers['x-user-id'] || '').trim();
+  const hostId = String(req.query.hostId || '').trim();
+  const callId = String(req.query.callId || '').trim();
+  const limit = Number(req.query.limit || 100);
+  res.json({
+    transactions: listCoinTxns({
+      userId: userId || undefined,
+      hostId: hostId || undefined,
+      callId: callId || undefined,
+      limit,
+    }),
+    commissionRate: platformCommissionRate(),
+    platformTreasuryId: PLATFORM_TREASURY_ID,
+  });
+});
+
+app.get('/api/admin/coin-audit', (req, res) => {
+  if (!requireStaff(req, res)) return;
+  const sample = dumpCoinTxns().slice(0, 500);
+  const conservation = auditConservation(sample);
+  const treasury = ensureWallet(PLATFORM_TREASURY_ID);
+  res.json({
+    ok: conservation.ok,
+    brokenCount: conservation.broken.length,
+    broken: conservation.broken.slice(0, 20),
+    commissionRate: platformCommissionRate(),
+    platformTreasury: walletPublic(treasury),
+    recent: sample.slice(0, 50),
+    totalTxns: sample.length,
+  });
 });
 
 app.get('/api/wallet/products', (_req, res) => {
@@ -2371,20 +3031,46 @@ app.post('/api/wallet/spend', (req, res) => {
   }
   if (!requireUserMatch(req, res, userId)) return;
   if (!assertUserAccountActive(userId, res)) return;
-  const row = ensureWallet(userId);
-  if (row.coinBalance < amount) {
-    res.status(402).json({ error: 'Insufficient coins', wallet: walletPublic(row) });
+
+  // Call/gift must use transfer endpoints so host + platform are credited
+  if (
+    /call_minute|gift_to_|gift_from_|call_earn|fb_mirror/i.test(reason)
+  ) {
+    res.status(400).json({
+      error:
+        'Use /api/calls/:id/minute or /api/gifts/send for call/gift charges (host must be credited)',
+    });
     return;
   }
-  row.coinBalance -= amount;
-  row.xp += amount;
-  wallets.set(userId, row);
-  pushLedger(userId, amount, reason, 'spend');
-  broadcastWs({
-    type: 'wallet:updated',
-    payload: { userId, coinBalance: row.coinBalance, xp: row.xp },
+
+  const floored = Math.floor(amount);
+  const txnKey =
+    String(req.headers['idempotency-key'] || req.body?.txnKey || '').trim() ||
+    `spend:${userId}:${reason}:${floored}:${Date.now()}`;
+
+  const result = debitOnly(coinDeps(), {
+    txnKey,
+    type: 'spend_misc',
+    userId,
+    amount: floored,
+    reason,
+    meta: req.body?.meta && typeof req.body.meta === 'object' ? req.body.meta : undefined,
   });
-  res.json({ ok: true, reason, wallet: walletPublic(row) });
+  if (!result.ok) {
+    res.status(result.code).json({
+      error: result.txn.error || 'Insufficient coins',
+      wallet: walletPublic(ensureWallet(userId)),
+      txn: result.txn,
+    });
+    return;
+  }
+  broadcastWallet(userId);
+  res.json({
+    ok: true,
+    reason,
+    txn: result.txn,
+    wallet: walletPublic(ensureWallet(userId)),
+  });
 });
 
 /**
@@ -2456,10 +3142,33 @@ app.post('/api/wallet/iap/verify', (req, res) => {
 
   iapReceipts.add(purchaseToken);
   const credited = product.coins + product.bonusCoins;
+  const minted = mintCoins(coinDeps(), {
+    txnKey: `iap:${purchaseToken}`,
+    type: 'purchase',
+    userId,
+    amount: credited,
+    reason: `IAP · ${product.title}`,
+    meta: { productId, platform },
+  });
+  if (!minted.ok) {
+    iapReceipts.delete(purchaseToken);
+    res.status(minted.code).json({
+      error: minted.txn.error || 'Credit failed',
+      txn: minted.txn,
+    });
+    return;
+  }
   const row = ensureWallet(userId);
-  row.coinBalance += credited;
-  wallets.set(userId, row);
-  pushLedger(userId, credited, `IAP · ${product.title}`, 'credit');
+  cancelPendingForUser(userId, 'iap_purchase');
+  touchAutoCallHeartbeat({
+    userId,
+    coinBalance: row.coinBalance,
+    inCall: false,
+  });
+  sendWsToUser(userId, {
+    type: 'auto_call:cancel',
+    payload: { reason: 'iap_purchase' },
+  });
   const userName = String(req.body?.userName || row.displayName || 'Viewer').slice(0, 40);
   const liveRoomId = String(req.body?.roomId || '').trim() || undefined;
   recordUserRecharge({
@@ -2468,15 +3177,13 @@ app.post('/api/wallet/iap/verify', (req, res) => {
     userName,
     roomId: liveRoomId,
   });
-  broadcastWs({
-    type: 'wallet:updated',
-    payload: { userId, coinBalance: row.coinBalance, xp: row.xp },
-  });
+  broadcastWallet(userId);
   res.json({
     ok: true,
     balance: row.coinBalance,
     credited,
-    transactionId: purchaseToken.slice(0, 24),
+    transactionId: minted.txn.id,
+    txn: minted.txn,
     wallet: walletPublic(row),
   });
 });
@@ -2541,14 +3248,22 @@ app.post('/api/host/withdrawals', async (req, res) => {
     displayName: String(req.body?.displayName || 'Host'),
   });
 
-  if (row.coinBalance < amountCoins) {
-    res.status(402).json({ error: 'Insufficient host balance', wallet: walletPublic(row) });
+  const wdKey = `withdrawal:${hostId}:${amountCoins}:${Date.now()}:${randomUUID().slice(0, 8)}`;
+  const debited = debitOnly(coinDeps(), {
+    txnKey: wdKey,
+    type: 'withdrawal',
+    userId: hostId,
+    amount: amountCoins,
+    reason: `withdrawal_${gateway}`,
+  });
+  if (!debited.ok) {
+    res.status(debited.code).json({
+      error: debited.txn.error || 'Insufficient host balance',
+      wallet: walletPublic(row),
+      txn: debited.txn,
+    });
     return;
   }
-
-  row.coinBalance -= amountCoins;
-  wallets.set(hostId, row);
-  pushLedger(hostId, amountCoins, `withdrawal_${gateway}`, 'spend');
 
   const request: WithdrawalRequest = {
     id: `wd_${randomUUID()}`,
@@ -2589,17 +3304,28 @@ app.post('/api/host/withdrawals', async (req, res) => {
   } catch (e: unknown) {
     request.status = 'failed';
     request.error = e instanceof Error ? e.message : 'Payout failed';
-    row.coinBalance += amountCoins;
-    wallets.set(hostId, row);
+    mintCoins(coinDeps(), {
+      txnKey: `withdrawal_refund:${request.id}`,
+      type: 'withdrawal_refund',
+      userId: hostId,
+      amount: amountCoins,
+      reason: `withdrawal_refund_${request.id}`,
+    });
   }
 
   persist();
+  broadcastWallet(hostId);
   broadcastWs({
     type: 'withdrawal:created',
     payload: request,
   });
 
-  res.json({ ok: request.status !== 'failed', withdrawal: request, wallet: walletPublic(row) });
+  res.json({
+    ok: request.status !== 'failed',
+    withdrawal: request,
+    txn: debited.txn,
+    wallet: walletPublic(ensureWallet(hostId)),
+  });
 });
 
 app.get('/api/host/withdrawals/:hostId', (req, res) => {
@@ -2813,17 +3539,61 @@ app.post('/api/admin/wallets/:userId/credit', (req, res) => {
     res.status(400).json({ error: 'userId and non-zero amount required' });
     return;
   }
-  const row = ensureWallet(userId);
   const delta = Math.floor(amount);
-  row.coinBalance = Math.max(0, row.coinBalance + delta);
-  if (delta > 0) row.xp += delta;
-  wallets.set(userId, row);
-  pushLedger(userId, Math.abs(delta), reason, delta > 0 ? 'credit' : 'spend');
-  broadcastWs({
-    type: 'wallet:updated',
-    payload: { userId, coinBalance: row.coinBalance, xp: row.xp },
+  const txnKey =
+    String(req.body?.txnKey || req.headers['idempotency-key'] || '').trim() ||
+    `admin:${userId}:${delta}:${randomUUID()}`;
+  if (delta > 0) {
+    const minted = mintCoins(coinDeps(), {
+      txnKey,
+      type: 'admin_credit',
+      userId,
+      amount: delta,
+      reason,
+    });
+    if (!minted.ok) {
+      res.status(minted.code).json({ error: minted.txn.error, txn: minted.txn });
+      return;
+    }
+    const row = ensureWallet(userId);
+    broadcastWallet(userId);
+    res.json({
+      ok: true,
+      wallet: walletPublic(row),
+      txn: minted.txn,
+      balanceCheck: {
+        previous: minted.txn.userBalanceBefore,
+        added: minted.txn.coinsMinted,
+        deducted: minted.txn.coinsDeducted,
+        current: minted.txn.userBalanceAfter,
+      },
+    });
+    return;
+  }
+  const debited = debitOnly(coinDeps(), {
+    txnKey,
+    type: 'admin_debit',
+    userId,
+    amount: Math.abs(delta),
+    reason,
   });
-  res.json({ ok: true, wallet: walletPublic(row) });
+  if (!debited.ok) {
+    res.status(debited.code).json({ error: debited.txn.error, txn: debited.txn });
+    return;
+  }
+  const row = ensureWallet(userId);
+  broadcastWallet(userId);
+  res.json({
+    ok: true,
+    wallet: walletPublic(row),
+    txn: debited.txn,
+    balanceCheck: {
+      previous: debited.txn.userBalanceBefore,
+      added: debited.txn.coinsMinted,
+      deducted: debited.txn.coinsDeducted,
+      current: debited.txn.userBalanceAfter,
+    },
+  });
 });
 
 app.get('/api/admin/withdrawals', (req, res) => {
@@ -2912,6 +3682,8 @@ app.post('/api/admin/reports/:id/resolve', (req, res) => {
 
 /* -------------------- WebSocket realtime -------------------- */
 const wsClients = new Set<WebSocket>();
+/** userId → open sockets (for targeted auto-call invites) */
+const wsByUser = new Map<string, Set<WebSocket>>();
 
 function broadcastWs(event: unknown) {
   const raw = JSON.stringify(event);
@@ -2920,21 +3692,272 @@ function broadcastWs(event: unknown) {
   }
 }
 
+function sendWsToUser(userId: string, event: unknown) {
+  const set = wsByUser.get(userId);
+  if (!set?.size) return false;
+  const raw = JSON.stringify(event);
+  let sent = false;
+  for (const client of set) {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(raw);
+      sent = true;
+    }
+  }
+  return sent;
+}
+
+function buildAutoCallCandidates(): CandidateHost[] {
+  pruneHosts();
+  const out: CandidateHost[] = [];
+  for (const p of listPresence()) {
+    if (!p.isOnline || !p.readyToCall) continue;
+    const managed = getHost(p.id);
+    const status = managed?.hostStatus || p.hostStatus || '';
+    const verified = Boolean(
+      managed?.isVerified || status === 'approved',
+    );
+    const callsEnabled = managed ? managed.callsEnabled !== false : true;
+    if (!verified || !callsEnabled) continue;
+    if (managed?.banned || managed?.suspended) continue;
+    out.push({
+      id: p.id,
+      name: managed?.name || p.name || 'Host',
+      avatarUrl: managed?.photoUrl || p.avatarUrl,
+      country: managed?.country || p.country,
+      language: managed?.languages?.[0],
+      categories: managed?.categories || [],
+      ratePerMinute: managed?.callPrice || p.ratePerMinute || 80,
+      isVerified: verified,
+      hostStatus: status || 'approved',
+      callsEnabled,
+      readyToCall: p.readyToCall,
+      isOnline: p.isOnline,
+    });
+  }
+  return out;
+}
+
+function runAutoCallSchedulerTick() {
+  expireStaleInvites();
+  const due = listDueAutoCallUsers();
+  if (!due.length) return;
+  const candidates = buildAutoCallCandidates();
+  if (!candidates.length) return;
+  for (const userId of due.slice(0, 20)) {
+    const picked = pickAutoCallHost(userId, candidates);
+    if (!picked) continue;
+    const created = createAutoInvite({
+      userId,
+      host: picked.host,
+      matchScore: picked.score,
+    });
+    if ('error' in created) continue;
+    markInvitePushed(created.id);
+    sendWsToUser(userId, {
+      type: 'auto_call:invite',
+      payload: created,
+    });
+    persist();
+  }
+}
+
 registerHostManagementRoutes(app, { requireAdmin: requireStaff, broadcastWs });
 
 registerAvatarRoutes(app, {
-  onSaved: (hostId, avatarUrl) => {
-    if (hostId && avatarUrl) {
-      const existing = getPresence(hostId);
+  onSaved: (id, avatarUrl) => {
+    if (id && avatarUrl) {
+      const row = wallets.get(id) || ensureWallet(id);
+      row.avatarUrl = avatarUrl;
+      wallets.set(id, row);
+      const existing = getPresence(id);
       if (existing) {
-        const next = patchPresence(hostId, { avatarUrl });
+        const next = patchPresence(id, { avatarUrl });
         if (next) {
           broadcastWs({ type: 'host:presence', payload: next });
         }
       }
+      broadcastWs({
+        type: 'wallet:updated',
+        payload: { userId: id, avatarUrl, displayName: row.displayName },
+      });
     }
     persist();
   },
+});
+
+/* -------------------- Smart Auto Call -------------------- */
+app.get('/api/auto-call/status', (req, res) => {
+  const userId = String(req.query.userId || req.headers['x-user-id'] || '').trim();
+  if (!userId) {
+    res.status(400).json({ error: 'userId required' });
+    return;
+  }
+  res.json({ status: getAutoCallStatus(userId) });
+});
+
+app.post('/api/auto-call/prefs', (req, res) => {
+  const userId = String(req.body?.userId || req.headers['x-user-id'] || '').trim();
+  if (!userId) {
+    res.status(400).json({ error: 'userId required' });
+    return;
+  }
+  if (!requireUserMatch(req, res, userId)) return;
+  const enabled = req.body?.enabled !== false && req.body?.enabled !== 'false';
+  const prefs = setAutoCallPrefs(userId, Boolean(enabled));
+  persist();
+  res.json({ ok: true, prefs, status: getAutoCallStatus(userId) });
+});
+
+app.post('/api/auto-call/heartbeat', (req, res) => {
+  const userId = String(req.body?.userId || req.headers['x-user-id'] || '').trim();
+  if (!userId) {
+    res.status(400).json({ error: 'userId required' });
+    return;
+  }
+  if (!requireUserMatch(req, res, userId)) return;
+  const wallet = wallets.get(userId);
+  const bodyBalance = Number(req.body?.coinBalance);
+  const coinBalance =
+    wallet && typeof wallet.coinBalance === 'number'
+      ? wallet.coinBalance
+      : Number.isFinite(bodyBalance)
+        ? Math.max(0, Math.floor(bodyBalance))
+        : 0;
+  const session = touchAutoCallHeartbeat({
+    userId,
+    coinBalance,
+    language: req.body?.language ? String(req.body.language) : undefined,
+    country: req.body?.country ? String(req.body.country) : undefined,
+    interests: Array.isArray(req.body?.interests)
+      ? req.body.interests.map(String)
+      : undefined,
+    following: Array.isArray(req.body?.following)
+      ? req.body.following.map(String)
+      : undefined,
+    recentHostIds: Array.isArray(req.body?.recentHostIds)
+      ? req.body.recentHostIds.map(String)
+      : undefined,
+    viewingHostId: req.body?.viewingHostId
+      ? String(req.body.viewingHostId)
+      : null,
+    inCall: Boolean(req.body?.inCall),
+  });
+  // If user gained coins mid-session, cancel pending invite client-side too
+  if (coinBalance > 0 || session.inCall) {
+    const pending = getPendingInvite(userId);
+    if (pending) cancelPendingForUser(userId, coinBalance > 0 ? 'has_coins' : 'in_call');
+  }
+  res.json({
+    ok: true,
+    status: getAutoCallStatus(userId),
+    pending: getPendingInvite(userId),
+  });
+});
+
+app.get('/api/auto-call/pending', (req, res) => {
+  const userId = String(req.query.userId || req.headers['x-user-id'] || '').trim();
+  if (!userId) {
+    res.status(400).json({ error: 'userId required' });
+    return;
+  }
+  res.json({ pending: getPendingInvite(userId), status: getAutoCallStatus(userId) });
+});
+
+app.post('/api/auto-call/respond', (req, res) => {
+  const userId = String(req.body?.userId || req.headers['x-user-id'] || '').trim();
+  const inviteId = String(req.body?.inviteId || '').trim();
+  const action = String(req.body?.action || '').trim() === 'accept' ? 'accept' : 'decline';
+  if (!userId || !inviteId) {
+    res.status(400).json({ error: 'userId and inviteId required' });
+    return;
+  }
+  if (!requireUserMatch(req, res, userId)) return;
+  const result = respondAutoInvite({ userId, inviteId, action });
+  if (!result.ok) {
+    res.status(409).json({ error: result.error });
+    return;
+  }
+  persist();
+  res.json({ ok: true, invite: result.invite, status: getAutoCallStatus(userId) });
+});
+
+/**
+ * Host-initiated invite — only when user has coins AND allowlisted
+ * (following / recent / currently viewing). Never used for zero-balance spam.
+ */
+app.post('/api/auto-call/host-invite', (req, res) => {
+  const hostId = String(req.body?.hostId || req.headers['x-user-id'] || '').trim();
+  const userId = String(req.body?.userId || '').trim();
+  if (!hostId || !userId) {
+    res.status(400).json({ error: 'hostId and userId required' });
+    return;
+  }
+  if (!requireUserMatch(req, res, hostId)) return;
+  const wallet = ensureWallet(userId);
+  if (wallet.coinBalance <= 0) {
+    res.status(409).json({
+      error: 'User has no coins — use zero-balance auto system instead',
+    });
+    return;
+  }
+  if (!hostMayInviteUser({ userId, hostId })) {
+    res.status(403).json({
+      error: 'User has not followed, viewed, or recently interacted with this host',
+    });
+    return;
+  }
+  const candidates = buildAutoCallCandidates().filter((h) => h.id === hostId);
+  const host =
+    candidates[0] ||
+    (() => {
+      const p = getPresence(hostId);
+      const managed = getHost(hostId);
+      if (!p?.isOnline || !p.readyToCall) return null;
+      if (managed && managed.hostStatus !== 'approved') return null;
+      return {
+        id: hostId,
+        name: managed?.name || p.name || 'Host',
+        avatarUrl: managed?.photoUrl || p.avatarUrl,
+        country: managed?.country || p.country,
+        language: managed?.languages?.[0],
+        categories: managed?.categories || [],
+        ratePerMinute: managed?.callPrice || p.ratePerMinute || 80,
+        isVerified: true,
+        hostStatus: 'approved',
+        callsEnabled: true,
+        readyToCall: true,
+        isOnline: true,
+      } satisfies CandidateHost;
+    })();
+  if (!host) {
+    res.status(409).json({ error: 'Host not online / ready' });
+    return;
+  }
+  // Ensure session knows balance > 0
+  touchAutoCallHeartbeat({
+    userId,
+    coinBalance: wallet.coinBalance,
+  });
+  const created = createAutoInvite({
+    userId,
+    host,
+    matchScore: 100,
+    reason: 'host_manual_allowed',
+  });
+  if ('error' in created) {
+    res.status(409).json({ error: created.error });
+    return;
+  }
+  markInvitePushed(created.id);
+  sendWsToUser(userId, { type: 'auto_call:invite', payload: created });
+  persist();
+  res.json({ ok: true, invite: created });
+});
+
+app.get('/api/auto-call/analytics', (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
+  res.json({ events: listAutoCallAnalytics(limit) });
 });
 
 registerVideoLibraryRoutes(app, { requireAdmin });
@@ -3186,9 +4209,20 @@ function buildSnapshot(): PersistedSnapshot {
     callHistory: callHistory as unknown as Array<Record<string, unknown>>,
     giftHistory: giftHistory as unknown as Array<Record<string, unknown>>,
     liveSessionHistory: liveSessionHistory as unknown as Array<Record<string, unknown>>,
-    avatars: dumpAvatarsForSnapshot(),
+    avatars: dumpAvatarsForSnapshot(2_500_000),
     welcomeBonusPaidIds: [...welcomeBonusPaidIds],
+    rewards: dumpRewardsForSnapshot() as unknown as PersistedSnapshot['rewards'],
+    autoCall: dumpAutoCallForSnapshot() as unknown as PersistedSnapshot['autoCall'],
+    hostFollowers: [...hostFollowers.entries()].map(([hostId, set]) => ({
+      hostId,
+      userIds: [...set],
+    })),
+    coinTxns: dumpCoinTxns() as unknown as Array<Record<string, unknown>>,
     homeBanners: dumpHomeBannersForSnapshot() as unknown as Record<string, unknown>,
+    installUserMap: [...installUserMap.entries()].map(([installId, userId]) => ({
+      installId,
+      userId,
+    })),
     ...dumpAgenciesForSnapshot(),
     ...dumpManagedHostsForSnapshot(),
   };
@@ -3224,6 +4258,49 @@ function restoreFromDisk() {
   }
   for (const id of snap.welcomeBonusPaidIds || []) {
     if (id) welcomeBonusPaidIds.add(String(id));
+  }
+  if (snap.rewards) {
+    loadRewardsFromSnapshot(
+      snap.rewards as {
+        claims?: Array<{ userId: string }>;
+        welcomeInstallIds?: string[];
+      },
+    );
+  }
+  if (snap.autoCall) {
+    loadAutoCallFromSnapshot(
+      snap.autoCall as {
+        prefs?: Array<{ userId: string; enabled: boolean; updatedAt: number }>;
+        analytics?: Array<{
+          id: string;
+          at: number;
+          userId: string;
+          type: string;
+        }>;
+      },
+    );
+  }
+  if (Array.isArray(snap.hostFollowers)) {
+    hostFollowers.clear();
+    for (const row of snap.hostFollowers) {
+      const hostId = String(row?.hostId || '').trim();
+      if (!hostId || !Array.isArray(row.userIds)) continue;
+      hostFollowers.set(
+        hostId,
+        new Set(row.userIds.map((u) => String(u)).filter(Boolean)),
+      );
+    }
+  }
+  if (Array.isArray(snap.installUserMap)) {
+    installUserMap.clear();
+    for (const row of snap.installUserMap) {
+      const installId = String(row?.installId || '').trim();
+      const userId = String(row?.userId || '').trim();
+      if (installId && userId) installUserMap.set(installId, userId);
+    }
+  }
+  if (Array.isArray(snap.coinTxns)) {
+    loadCoinTxns(snap.coinTxns as unknown as CoinTxn[]);
   }
   if (snap.homeBanners) loadHomeBannersFromSnapshot(snap.homeBanners);
   if (Array.isArray(snap.withdrawals)) {
@@ -3339,6 +4416,49 @@ async function applyMongoOrDisk() {
   }
   for (const id of snap.welcomeBonusPaidIds || []) {
     if (id) welcomeBonusPaidIds.add(String(id));
+  }
+  if (snap.rewards) {
+    loadRewardsFromSnapshot(
+      snap.rewards as {
+        claims?: Array<{ userId: string }>;
+        welcomeInstallIds?: string[];
+      },
+    );
+  }
+  if (snap.autoCall) {
+    loadAutoCallFromSnapshot(
+      snap.autoCall as {
+        prefs?: Array<{ userId: string; enabled: boolean; updatedAt: number }>;
+        analytics?: Array<{
+          id: string;
+          at: number;
+          userId: string;
+          type: string;
+        }>;
+      },
+    );
+  }
+  if (Array.isArray(snap.hostFollowers)) {
+    hostFollowers.clear();
+    for (const row of snap.hostFollowers) {
+      const hostId = String(row?.hostId || '').trim();
+      if (!hostId || !Array.isArray(row.userIds)) continue;
+      hostFollowers.set(
+        hostId,
+        new Set(row.userIds.map((u) => String(u)).filter(Boolean)),
+      );
+    }
+  }
+  if (Array.isArray(snap.installUserMap)) {
+    installUserMap.clear();
+    for (const row of snap.installUserMap) {
+      const installId = String(row?.installId || '').trim();
+      const userId = String(row?.userId || '').trim();
+      if (installId && userId) installUserMap.set(installId, userId);
+    }
+  }
+  if (Array.isArray(snap.coinTxns)) {
+    loadCoinTxns(snap.coinTxns as unknown as CoinTxn[]);
   }
   if (snap.homeBanners) loadHomeBannersFromSnapshot(snap.homeBanners);
   if (Array.isArray(snap.withdrawals)) {
@@ -4011,7 +5131,24 @@ wss.on('connection', (socket, req) => {
   const avatarUrl = url.searchParams.get('avatar') || undefined;
   const role = url.searchParams.get('role') === 'host' ? 'host' : 'user';
   touchActiveUser({ userId, userName, avatarUrl: avatarUrl || undefined, role });
+  if (userId && userId !== 'anon') {
+    let set = wsByUser.get(userId);
+    if (!set) {
+      set = new Set();
+      wsByUser.set(userId, set);
+    }
+    set.add(socket);
+  }
   socket.send(JSON.stringify({ type: 'connected', payload: { userId } }));
+
+  socket.on('close', () => {
+    wsClients.delete(socket);
+    const set = wsByUser.get(userId);
+    if (set) {
+      set.delete(socket);
+      if (!set.size) wsByUser.delete(userId);
+    }
+  });
 
   socket.on('message', (buf) => {
     try {
@@ -4138,8 +5275,6 @@ wss.on('connection', (socket, req) => {
       /* ignore */
     }
   });
-
-  socket.on('close', () => wsClients.delete(socket));
 });
 
 httpServer.listen(PORT, '0.0.0.0', () => {
@@ -4150,8 +5285,17 @@ httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`Payout: POST /api/host/withdrawals`);
   console.log(`Hosts:  GET /api/hosts`);
   console.log(`Calls:  POST /api/calls`);
+  console.log(`AutoCall: scheduler every 20s`);
   console.log(`Persist: ${persistenceLabel()}`);
 });
+
+setInterval(() => {
+  try {
+    runAutoCallSchedulerTick();
+  } catch (e) {
+    console.warn('[auto-call] tick failed', e);
+  }
+}, 20_000);
 
 void applyMongoOrDisk().catch((e) => {
   console.warn('[persist] mongo boot skipped', e);

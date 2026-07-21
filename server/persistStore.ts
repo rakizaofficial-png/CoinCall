@@ -38,8 +38,22 @@ export type PersistedSnapshot = {
     updatedAt: number;
     base64: string;
   }>;
-  /** User ids that already received the one-time +100 welcome bonus */
+  /** User ids that already received the one-time welcome bonus */
   welcomeBonusPaidIds?: string[];
+  /** Engagement reward claims (daily/spin) + install-id welcome lock */
+  rewards?: {
+    claims?: Array<Record<string, unknown>>;
+    welcomeInstallIds?: string[];
+  };
+  /** Smart auto-call prefs + analytics */
+  autoCall?: {
+    prefs?: Array<Record<string, unknown>>;
+    analytics?: Array<Record<string, unknown>>;
+  };
+  /** Host follower graph */
+  hostFollowers?: Array<{ hostId: string; userIds: string[] }>;
+  /** Double-entry coin transactions */
+  coinTxns?: Array<Record<string, unknown>>;
   /** Luma home hero + swipe promo banners */
   homeBanners?: Record<string, unknown>;
   /** Agency registry + host attribution + announcements */
@@ -48,6 +62,8 @@ export type PersistedSnapshot = {
   announcements?: Array<Record<string, unknown>>;
   /** Host management registry (profiles, bio, DP URLs, call rates, approval) */
   managedHosts?: Array<Record<string, unknown>>;
+  /** installId → userId so Luma profile survives WebView wipe / reinstall */
+  installUserMap?: Array<{ installId: string; userId: string }>;
 };
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;

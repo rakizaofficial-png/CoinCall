@@ -64,14 +64,44 @@ export function avatarPublicUrl(hostId: string, req?: Request, version?: number)
   return `${apiPublicBase(req)}/api/hosts/${encodeURIComponent(hostId)}/avatar?v=${v}`;
 }
 
+export function userAvatarPublicUrl(userId: string, req?: Request, version?: number) {
+  const key = userAvatarKey(userId);
+  const v = version || loadMeta()[key]?.updatedAt || Date.now();
+  return `${apiPublicBase(req)}/api/users/${encodeURIComponent(userId)}/avatar?v=${v}`;
+}
+
+function userAvatarKey(userId: string) {
+  return `user_${String(userId || '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 72)}`;
+}
+
 export function hasStoredAvatar(hostId: string) {
   return existsSync(filePath(hostId));
 }
 
-/** True when URL points at our /api/hosts/:id/avatar endpoint */
+export function saveUserAvatar(userId: string, raw: string): {
+  ok: boolean;
+  url?: string;
+  error?: string;
+} {
+  const id = String(userId || '').trim();
+  if (!id) return { ok: false, error: 'userId required' };
+  const key = userAvatarKey(id);
+  const saved = saveHostAvatar(key, raw);
+  if (!saved.ok) return saved;
+  return {
+    ok: true,
+    url: userAvatarPublicUrl(id, undefined, loadMeta()[key]?.updatedAt),
+  };
+}
+
+export function hasStoredUserAvatar(userId: string) {
+  return existsSync(filePath(userAvatarKey(userId)));
+}
+
+/** True when URL points at our /api/hosts/:id/avatar or /api/users/:id/avatar endpoint */
 export function isApiAvatarUrl(url?: string | null): boolean {
   if (!url || typeof url !== 'string') return false;
-  return /\/api\/hosts\/[^/]+\/avatar(?:\?|$)/i.test(url.trim());
+  return /\/api\/(?:hosts|users)\/[^/]+\/avatar(?:\?|$)/i.test(url.trim());
 }
 
 /** Decode data URL / raw base64 → jpeg buffer */
@@ -112,7 +142,7 @@ export function saveHostAvatar(hostId: string, raw: string): {
 }
 
 /** Embed avatars in the durable JSON snapshot (survives process restart). */
-export function dumpAvatarsForSnapshot(maxBytes = 400_000): AvatarSnapshotRow[] {
+export function dumpAvatarsForSnapshot(maxBytes = 2_500_000): AvatarSnapshotRow[] {
   ensureDir();
   const meta = loadMeta();
   const rows: AvatarSnapshotRow[] = [];
@@ -168,25 +198,28 @@ export function restoreAvatarsFromSnapshot(rows?: AvatarSnapshotRow[] | null) {
 }
 
 /**
- * Prefer explicit HTTPS/CDN avatars over a stale on-disk file.
- * Fall back to stored /api avatar when no public HTTPS candidate exists.
+ * Prefer durable on-disk avatar (embedded in snapshot) over remote HTTPS
+ * that may 404 after Storage misconfig. Fall back to public HTTPS candidates.
  */
 export function resolveStoredOrHttpAvatar(
   hostId: string,
   candidates: Array<string | null | undefined>,
   req?: Request,
 ): string {
+  if (hasStoredAvatar(hostId)) {
+    return avatarPublicUrl(hostId, req);
+  }
   for (const c of candidates) {
     const u = String(c || '').trim();
     if (!u) continue;
-    if (isApiAvatarUrl(u)) continue; // resolve via disk below if file exists
-    if (u.startsWith('http://') || u.startsWith('https://')) {
-      if (u.startsWith('data:') || u.startsWith('blob:')) continue;
+    if (isApiAvatarUrl(u)) continue;
+    if (
+      (u.startsWith('http://') || u.startsWith('https://')) &&
+      !u.startsWith('data:') &&
+      !u.startsWith('blob:')
+    ) {
       return u;
     }
-  }
-  if (hasStoredAvatar(hostId)) {
-    return avatarPublicUrl(hostId, req);
   }
   return '';
 }
@@ -220,6 +253,46 @@ export function registerAvatarRoutes(
   app.get('/api/hosts/:hostId/avatar', (req: Request, res: Response) => {
     const hostId = String(req.params.hostId || '').trim();
     const path = filePath(hostId);
+    if (!existsSync(path)) {
+      res.status(404).json({ error: 'No avatar' });
+      return;
+    }
+    const buf = readFileSync(path);
+    const etag = createHash('sha1').update(buf).digest('hex').slice(0, 16);
+    if (req.headers['if-none-match'] === etag) {
+      res.status(304).end();
+      return;
+    }
+    res.setHeader('Content-Type', 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=60');
+    res.setHeader('ETag', etag);
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.send(buf);
+  });
+
+  /** Luma user gallery upload → durable JPEG on disk (+ snapshot) */
+  app.post('/api/users/:userId/avatar', (req: Request, res: Response) => {
+    const userId = String(req.params.userId || '').trim();
+    const raw = String(
+      req.body?.image || req.body?.dataUrl || req.body?.avatarUrl || '',
+    );
+    const headerUser = String(req.headers['x-user-id'] || '').trim();
+    if (headerUser && headerUser !== userId) {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
+    const saved = saveUserAvatar(userId, raw);
+    if (!saved.ok) {
+      res.status(400).json({ error: saved.error });
+      return;
+    }
+    opts?.onSaved?.(userId, saved.url || '');
+    res.json({ ok: true, avatarUrl: saved.url });
+  });
+
+  app.get('/api/users/:userId/avatar', (req: Request, res: Response) => {
+    const userId = String(req.params.userId || '').trim();
+    const path = filePath(userAvatarKey(userId));
     if (!existsSync(path)) {
       res.status(404).json({ error: 'No avatar' });
       return;
