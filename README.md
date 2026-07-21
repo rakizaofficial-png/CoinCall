@@ -1,43 +1,46 @@
-# CoinCall
+# CoinCall-HostApp
 
-**This repository is the only CoinCall project.** Open this folder alone in Cursor — do not add sibling copies, old Luma clones, or empty starter apps to the same workspace.
+**LOCKED: single workspace. Host Application only.**
 
-## What’s inside (one monorepo)
+Open this repo via **`CoinCall-HostApp.code-workspace`** — one root, named `CoinCall-HostApp`. Do not add other folders, clones, or workspace files.
 
-| Path | Role |
-|------|------|
-| `/` (repo root) | Host Expo app (`com.coincall.host`) |
-| `luma-user/` | Luma fan web app (Next.js) |
-| `luma-app/` | Luma Android Play wrapper (`com.coincall.luma`) |
-| `admin/` | Admin web panel |
-| `server/` | API + WebSocket + Agora tokens |
+## Scope lock
 
-These subfolders are **parts of CoinCall**, not separate projects. Keep them.
+| In scope | Out of scope |
+|----------|--------------|
+| Host Expo app at repo root | User / Luma app (`luma-user/`, `luma-app/`) |
+| `src/components`, `src/screens`, `src/services` | Creating new workspaces or sibling project folders |
+| Host UI, states, Agora/Firebase host logic | Modifying User App files |
 
-## Open a clean workspace
+The workspace file hides `luma-user/`, `luma-app/`, and `admin/` from the editor sidebar so work stays on the Host App.
 
-1. In Cursor: **File → Open Folder…** → choose only `CoinCall` (or open `CoinCall.code-workspace`).
-2. If the sidebar shows extra roots (`myapp`, `my-mobile-app`, `luma-coincall-user`, a second `CoinCall`, etc.): right‑click each extra folder → **Remove Folder from Workspace**.
-3. Prefer one clone path, e.g. `~/CoinCall`. Delete or archive other local copies so you don’t open the wrong one later.
+## Host directory structure
 
-## Archive / stop using
+```
+CoinCall-HostApp/
+├── App.tsx
+├── app.config.ts
+├── src/
+│   ├── components/   # UI cards, dashboards, host chrome
+│   ├── screens/      # Host Home, call, party/live, auth, system
+│   ├── services/     # API, Agora, Firebase wrappers
+│   ├── context/
+│   ├── navigation/
+│   ├── theme/
+│   └── ...
+└── server/           # Host-facing API (shared backend; do not treat as a second app workspace)
+```
 
-| Item | Action |
-|------|--------|
-| GitHub `rakizaofficial-png/luma-coincall-user` | **Archive** on GitHub. Luma lives in `luma-user/` here. Point Render at this repo with root `luma-user`. |
-| Local folders like `myapp`, `my-mobile-app`, duplicate `CoinCall*` | Move to an Archive folder or delete after confirming this repo has the code you need. |
-| Old Cursor agent chats | Archive in the Agents UI; they are history, not your app source. |
-
-## Deploy & production
-
-See [DEPLOY.md](DEPLOY.md) and [PRODUCTION.md](PRODUCTION.md).
-
-## Quick local commands
+## Run (Host only)
 
 ```bash
 npm install
-npm start                 # Host app
-npm run server            # API
-npm run admin             # Admin panel
-npm --prefix luma-user run dev
+npm start
 ```
+
+## Mandate
+
+1. **One workspace** — `CoinCall-HostApp` only  
+2. **Host App only** — no User App edits  
+3. **No new workspace files** — do not create alternate `.code-workspace` files  
+4. **No redundancy** — extend existing `src/` paths; do not duplicate trees  

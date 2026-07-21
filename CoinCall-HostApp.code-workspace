@@ -1,18 +1,27 @@
 {
   "folders": [
     {
-      "name": "CoinCall",
+      "name": "CoinCall-HostApp",
       "path": "."
     }
   ],
   "settings": {
     "files.exclude": {
+      "luma-user": true,
+      "luma-app": true,
+      "admin": true,
       "**/.expo": true,
       "**/.expo-home": true,
       "**/node_modules": true,
       "**/.next": true,
       "**/dist": true,
       "**/web-build": true
+    },
+    "search.exclude": {
+      "luma-user": true,
+      "luma-app": true,
+      "admin": true,
+      "**/node_modules": true
     }
   }
 }
