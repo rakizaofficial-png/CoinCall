@@ -56,6 +56,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       'POST_NOTIFICATIONS',
       'READ_MEDIA_IMAGES',
       'READ_MEDIA_VIDEO',
+      'READ_EXTERNAL_STORAGE',
+      'WRITE_EXTERNAL_STORAGE',
     ],
     predictiveBackGestureEnabled: false,
   },
@@ -66,6 +68,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   plugins: [
     'expo-dev-client',
     'expo-font',
+    'expo-video',
     [
       'expo-image-picker',
       {
@@ -105,7 +108,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ],
   extra: {
     eas: {
-      projectId: '41647246-54f9-40e6-9d86-2a014cd96613',
+      projectId: '28dee9ee-23a0-4a69-948b-c153c5aa11c1',
     },
     appEnv: IS_PROD ? 'production' : 'development',
   },
