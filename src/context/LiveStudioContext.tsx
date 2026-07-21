@@ -109,6 +109,7 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
     setHostOnline,
     hostOnline,
     hostEarnings,
+    hostLifetime,
     todayLiveSeconds,
     bumpTodayLiveSeconds,
     refreshTodayStats,
@@ -824,18 +825,17 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
     notify('Blocked', 'User blocked from your live.');
   }, []);
 
-  const monthlyEarn = useMemo(
-    () =>
-      Math.max(
-        user.coinBalance,
-        (hostEarnings?.call || 0) +
-          (hostEarnings?.gift || 0) +
-          (hostEarnings?.task || 0) +
-          (hostEarnings?.invite || 0) +
-          todayLiveGiftCoins,
-      ),
-    [hostEarnings, todayLiveGiftCoins, user.coinBalance],
-  );
+  const monthlyEarn = useMemo(() => {
+    const fromApi = hostLifetime?.monthlyCoins;
+    if (typeof fromApi === 'number' && fromApi > 0) return fromApi;
+    return (
+      (hostEarnings?.call || 0) +
+      (hostEarnings?.gift || 0) +
+      (hostEarnings?.task || 0) +
+      (hostEarnings?.invite || 0) +
+      todayLiveGiftCoins
+    );
+  }, [hostEarnings, hostLifetime?.monthlyCoins, todayLiveGiftCoins]);
 
   const value = useMemo(
     () => ({

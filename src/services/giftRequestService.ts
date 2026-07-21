@@ -26,8 +26,9 @@ function apiBase() {
     '',
   );
   if (typeof window !== 'undefined') {
-    const host = window.location.hostname;
+    const host = window.location?.hostname ?? '';
     if (
+      host &&
       (host.includes('onrender.com') || host.includes('coincall-host')) &&
       raw.includes('localhost')
     ) {

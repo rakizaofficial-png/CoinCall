@@ -101,6 +101,17 @@ type AppContextValue = {
     invite: number;
     managed: number;
   };
+  /** Lifetime + month aggregates from earnings API */
+  hostLifetime: {
+    totalGifts: number;
+    coinsEarned: number;
+    walletBalance: number;
+    totalCalls: number;
+    followers: number;
+    liveSeconds: number;
+    liveSessions: number;
+    monthlyCoins: number;
+  };
   callsToday: number;
   beautyOn: boolean;
   points: number;
@@ -330,6 +341,16 @@ export function AppProvider({
     task: 0,
     invite: 0,
     managed: 0,
+  });
+  const [hostLifetime, setHostLifetime] = useState({
+    totalGifts: 0,
+    coinsEarned: 0,
+    walletBalance: 0,
+    totalCalls: 0,
+    followers: 0,
+    liveSeconds: 0,
+    liveSessions: 0,
+    monthlyCoins: 0,
   });
   const [callsToday, setCallsToday] = useState(0);
   const [myTodayMinutes, setMyTodayMinutes] = useState(0);
@@ -780,6 +801,18 @@ export function AppProvider({
             )
           : liveSeconds);
       setTodayLiveSeconds((s) => Math.max(s, completed));
+      const summary = data.summary;
+      const monthCoins = data.month?.totalCoins ?? 0;
+      setHostLifetime({
+        totalGifts: summary?.totalGifts ?? 0,
+        coinsEarned: summary?.totalCoins ?? 0,
+        walletBalance: summary?.walletBalance ?? 0,
+        totalCalls: summary?.totalCalls ?? 0,
+        followers: summary?.followers ?? 0,
+        liveSeconds: summary?.liveSeconds ?? 0,
+        liveSessions: summary?.liveSessions ?? 0,
+        monthlyCoins: monthCoins,
+      });
       if (typeof data.summary?.walletBalance === 'number') {
         setUser((u) => ({
           ...u,
@@ -889,34 +922,24 @@ export function AppProvider({
         if (event.type === 'gift:received' && event.payload?.coins) {
           const toHostId = String(event.payload.toHostId || '');
           if (toHostId !== user.id) return;
-          const coins = Number(event.payload.coins) || 0;
+          const coins = Number(
+            event.payload.hostCredited ?? event.payload.coins,
+          ) || 0;
+          const label = event.payload.giftName || event.payload.label || 'Gift';
+          const emoji = event.payload.giftEmoji || '🎁';
+          // Notify only — earnings applied once via SSE live_gift / wallet:updated
+          // (WS + SSE both fire; double addEarn caused host "60" on a 30 gift).
           if (coins > 0) {
-            const label = event.payload.giftName || event.payload.label || 'Gift';
-            const emoji = event.payload.giftEmoji || '🎁';
-            addEarn(
-              setUser,
-              setHostEarnings,
-              setTransactions,
-              coins,
-              'gift',
-              `${emoji} ${label} accepted`,
-            );
             notify('Gift received', `${emoji} ${label} · +${coins} coins`);
           }
         }
         if (event.type === 'gift:accepted' && event.payload?.coins) {
-          const coins = Number(event.payload.coins) || 0;
+          const coins = Number(
+            event.payload.hostCredited ?? event.payload.coins,
+          ) || 0;
           if (coins > 0) {
             const label = event.payload.giftName || 'Gift';
             const emoji = event.payload.giftEmoji || '🎁';
-            addEarn(
-              setUser,
-              setHostEarnings,
-              setTransactions,
-              coins,
-              'gift',
-              `${emoji} ${label} accepted`,
-            );
             notify('Gift received', `${emoji} ${label} · +${coins} coins`);
           }
         }
@@ -940,30 +963,51 @@ export function AppProvider({
     if (!user.id || !hostOnline) return;
     let stop: (() => void) | undefined;
     void import('../services/callBridge').then(({ listenHostBillingEvents }) => {
-      stop = listenHostBillingEvents(user.id, (payload) => {
-        const amount = Math.max(0, Math.floor(Number(payload.amount) || 0));
-        const bal = payload.hostWallet?.coinBalance;
-        if (typeof bal === 'number' && Number.isFinite(bal)) {
-          setUser((u) => ({ ...u, coinBalance: Math.max(0, bal) }));
-        } else if (amount > 0) {
-          setUser((u) => ({ ...u, coinBalance: u.coinBalance + amount }));
-        }
-        if (amount > 0) {
-          setHostEarnings((e) => ({ ...e, call: e.call + amount }));
-          setMyTodayMinutes((m) => m + 1);
-          setTransactions((txs) => [
-            {
-              id: `tx_call_${payload.callId}_${payload.billedMinutes}`,
-              type: 'earn',
-              amount,
-              label: '1v1 call minute',
-              timestamp: Date.now(),
-            },
-            ...txs,
-          ]);
-        }
-      });
-    });
+      stop = listenHostBillingEvents(
+        user.id,
+        (payload) => {
+          const amount = Math.max(0, Math.floor(Number(payload.amount) || 0));
+          const bal = payload.hostWallet?.coinBalance;
+          if (typeof bal === 'number' && Number.isFinite(bal)) {
+            setUser((u) => ({ ...u, coinBalance: Math.max(0, bal) }));
+          } else if (amount > 0) {
+            setUser((u) => ({ ...u, coinBalance: u.coinBalance + amount }));
+          }
+          if (amount > 0) {
+            setHostEarnings((e) => ({ ...e, call: e.call + amount }));
+            setMyTodayMinutes((m) => m + 1);
+            setTransactions((txs) => [
+              {
+                id: `tx_call_${payload.callId}_${payload.billedMinutes}`,
+                type: 'earn',
+                amount,
+                label: '1v1 call minute',
+                timestamp: Date.now(),
+              },
+              ...txs,
+            ]);
+          }
+        },
+        (gift) => {
+          const coins = Math.max(
+            0,
+            Math.floor(
+              Number(
+                (gift as { hostCredited?: number }).hostCredited ?? gift.coins,
+              ) || 0,
+            ),
+          );
+          if (coins > 0) {
+            setHostEarnings((e) => ({ ...e, gift: e.gift + coins }));
+            setHostLifetime((h) => ({
+              ...h,
+              totalGifts: h.totalGifts + 1,
+              coinsEarned: h.coinsEarned + coins,
+            }));
+            // coinBalance comes from wallet:updated (server absolute)
+          }
+        },
+      );    });
     return () => stop?.();
   }, [user.id, hostOnline]);
 
@@ -1537,6 +1581,7 @@ export function AppProvider({
       hostOnline,
       setHostOnline,
       hostEarnings,
+      hostLifetime,
       callsToday,
       beautyOn,
       points,
@@ -1605,6 +1650,7 @@ export function AppProvider({
       hostOnline,
       setHostOnline,
       hostEarnings,
+      hostLifetime,
       callsToday,
       beautyOn,
       points,

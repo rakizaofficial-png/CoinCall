@@ -100,8 +100,9 @@ function apiBase() {
     '',
   );
   if (typeof window !== 'undefined') {
-    const host = window.location.hostname;
+    const host = window.location?.hostname ?? '';
     if (
+      host &&
       (host.includes('onrender.com') || host.includes('coincall-host')) &&
       raw.includes('localhost')
     ) {
@@ -252,7 +253,13 @@ export function listenHostBillingEvents(
     billedMinutes: number;
     hostWallet?: { coinBalance?: number };
   }) => void,
-  onGift?: (payload: { coins: number; giftName?: string }) => void,
+  onGift?: (payload: {
+    coins: number;
+    giftName?: string;
+    giftEmoji?: string;
+    fromName?: string;
+    giftId?: string;
+  }) => void,
 ) {
   if (!hostId) return () => undefined;
   let stopped = false;
@@ -277,10 +284,16 @@ export function listenHostBillingEvents(
             const data = JSON.parse((ev as MessageEvent).data) as {
               coins?: number;
               giftName?: string;
+              giftEmoji?: string;
+              fromName?: string;
+              giftId?: string;
             };
             onGift({
               coins: Number(data.coins) || 0,
               giftName: data.giftName,
+              giftEmoji: data.giftEmoji,
+              fromName: data.fromName,
+              giftId: data.giftId,
             });
           } catch {
             /* ignore */

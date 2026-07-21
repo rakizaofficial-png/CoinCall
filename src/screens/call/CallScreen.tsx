@@ -5,6 +5,8 @@ import {
   PhoneOff,
   Signal,
   SwitchCamera,
+  Video,
+  VideoOff,
 } from 'lucide-react-native';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -20,11 +22,13 @@ import {
   AgoraCallSurfaces,
   getWebVideoElements,
 } from '../../components/call/AgoraCallSurfaces';
+import { GlamourGiftOverlay, type GlamourGiftPayload } from '../../components/gifts/GlamourGiftOverlay';
 import { useApp } from '../../context/AppContext';
 import type { RootStackParamList } from '../../navigation/types';
 import {
   type BeautyPreset,
   isAgoraConfigured,
+  setAgoraCameraOff,
   setAgoraMuted,
   startAgoraCall,
   stopAgoraCall,
@@ -96,13 +100,14 @@ export function CallScreen({ navigation, route }: Props) {
     route.params.channel || (peerHost ? `call_${peerHost.id}` : '');
 
   const [muted, setMuted] = useState(false);
+  const [cameraOff, setCameraOff] = useState(false);
   const [, setVideoStatus] = useState('Starting camera...');
   const [bridgeSeconds, setBridgeSeconds] = useState(0);
   const [bridgeCoins, setBridgeCoins] = useState(rate);
   const [surfacesReady, setSurfacesReady] = useState(false);
   const [netQuality] = useState<'Excellent' | 'Good' | 'Fair'>('Good');
   const [beautyPreset] = useState<BeautyPreset>(beautyOn ? 'snap' : 'off');
-  const [giftBurst, setGiftBurst] = useState<string | null>(null);
+  const [giftBurst, setGiftBurst] = useState<GlamourGiftPayload | null>(null);
   const [disconnected, setDisconnected] = useState(false);
   const agoraReady = isAgoraConfigured();
   const isWeb = Platform.OS === 'web';
@@ -319,8 +324,15 @@ export function CallScreen({ navigation, route }: Props) {
     if (!bridgeCallId) return;
     return listenGiftRequestEvents(bridgeCallId, (type, gift) => {
       if (type === 'gift:accepted') {
-        setGiftBurst(`${gift.giftEmoji} ${gift.giftName}`);
-        setTimeout(() => setGiftBurst(null), 2800);
+        setGiftBurst({
+          id: `gb_${Date.now()}`,
+          giftId: gift.giftId,
+          emoji: gift.giftEmoji || '🎁',
+          giftName: gift.giftName || 'Gift',
+          senderName: gift.fromUserName || peerName || 'Fan',
+          receiverName: user.name || 'You',
+          coins: gift.coins || 0,
+        });
       } else if (type === 'gift:declined') {
         notify('Gift declined', `${peerName} declined your request`);
       } else if (type === 'gift:expired') {
@@ -328,6 +340,25 @@ export function CallScreen({ navigation, route }: Props) {
       }
     });
   }, [bridgeCallId, peerName]);
+
+  useEffect(() => {
+    if (!bridgeCallId || !user.id) return;
+    let stop: (() => void) | undefined;
+    void import('../../services/callBridge').then(({ listenHostBillingEvents }) => {
+      stop = listenHostBillingEvents(user.id, () => undefined, (gift) => {
+        setGiftBurst({
+          id: `sse_${Date.now()}`,
+          giftId: gift.giftId,
+          emoji: gift.giftEmoji || '🎁',
+          giftName: gift.giftName || 'Gift',
+          senderName: gift.fromName || peerName || 'Fan',
+          receiverName: user.name || 'You',
+          coins: gift.coins || 0,
+        });
+      });
+    });
+    return () => stop?.();
+  }, [bridgeCallId, peerName, user.id, user.name]);
 
   useEffect(() => {
     if (!bridgeCallId || !user.id) return;
@@ -405,10 +436,7 @@ export function CallScreen({ navigation, route }: Props) {
       </View>
 
       {giftBurst ? (
-        <View style={styles.giftBurst} pointerEvents="none">
-          <Text style={styles.giftBurstEmoji}>{giftBurst.split(' ')[0]}</Text>
-          <Text style={styles.giftBurstText}>{giftBurst}</Text>
-        </View>
+        <GlamourGiftOverlay item={giftBurst} onDone={() => setGiftBurst(null)} />
       ) : null}
 
       {disconnected ? (
@@ -431,6 +459,18 @@ export function CallScreen({ navigation, route }: Props) {
           }}
         >
           {muted ? <MicOff size={20} color="#fff" /> : <Mic size={20} color="#fff" />}
+        </Pressable>
+        <Pressable
+          style={styles.fab}
+          onPress={() => {
+            setCameraOff((off) => {
+              const next = !off;
+              void setAgoraCameraOff(next);
+              return next;
+            });
+          }}
+        >
+          {cameraOff ? <VideoOff size={20} color="#fff" /> : <Video size={20} color="#fff" />}
         </Pressable>
         <Pressable style={styles.fab} onPress={() => void switchAgoraCamera()}>
           <SwitchCamera size={20} color="#fff" />

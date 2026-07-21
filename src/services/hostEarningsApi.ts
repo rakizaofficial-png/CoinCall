@@ -47,6 +47,17 @@ export type HostTodayStats = {
   dayStartMs?: number;
 };
 
+export type HostMonthStats = {
+  callCoins: number;
+  giftCoins: number;
+  totalCoins: number;
+  callsCount: number;
+  giftCount: number;
+  liveSeconds: number;
+  liveSessions: number;
+  monthStartMs: number;
+};
+
 export type HostEarningsPayload = {
   summary: {
     callCoins: number;
@@ -56,8 +67,12 @@ export type HostEarningsPayload = {
     totalDurationSec: number;
     totalGifts: number;
     walletBalance: number;
+    followers?: number;
+    liveSessions?: number;
+    liveSeconds?: number;
   };
   today: HostTodayStats;
+  month?: HostMonthStats;
   calls: HostCallHistoryRow[];
   gifts: HostGiftHistoryRow[];
 };
@@ -68,13 +83,21 @@ export function localDayStartMs(now = Date.now()) {
   return d.getTime();
 }
 
+export function localMonthStartMs(now = Date.now()) {
+  const d = new Date(now);
+  d.setDate(1);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
 export async function fetchHostEarnings(
   hostId: string,
 ): Promise<HostEarningsPayload> {
   const api = env.apiBaseUrl.replace(/\/$/, '');
   const dayStart = localDayStartMs();
+  const monthStart = localMonthStartMs();
   const res = await fetch(
-    `${api}/hosts/${encodeURIComponent(hostId)}/earnings?limit=100&dayStart=${dayStart}`,
+    `${api}/hosts/${encodeURIComponent(hostId)}/earnings?limit=100&dayStart=${dayStart}&monthStart=${monthStart}`,
     {
       headers: { 'X-User-Id': hostId },
       cache: 'no-store',
@@ -106,8 +129,10 @@ export async function fetchHostEarnings(
       totalDurationSec: 0,
       totalGifts: 0,
       walletBalance: 0,
+      followers: 0,
     },
     today,
+    month: data.month,
     calls: data.calls || [],
     gifts: data.gifts || [],
   };

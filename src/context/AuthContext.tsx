@@ -341,7 +341,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const published = await ensurePublicAvatarUrl(user.id, mainPhoto);
         if (published) mainPhoto = published;
       }
-      const videoUrl = uploaded.videoUrl || '';
+      if (!isPublicHttpAvatar(mainPhoto)) {
+        throw new Error(
+          'Could not upload profile photo. Check your connection and try again.',
+        );
+      }
+      const videoUrl =
+        uploaded.videoUrl && isPublicHttpAvatar(uploaded.videoUrl)
+          ? uploaded.videoUrl
+          : '';
 
       const patch: User = {
         ...user,
@@ -463,21 +471,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       let photos = uploaded.photoUrls.filter(Boolean);
       if (!photos.length) photos = input.photoUrls.slice(0, 1);
-      // Promote main photo to public https for Luma
-      let mainPhoto = photos[0];
-      if (!isPublicHttpAvatar(mainPhoto)) {
-        const published = await ensurePublicAvatarUrl(user.id, mainPhoto);
-        if (published) mainPhoto = published;
+      // Promote ALL photos to public https — never persist file:/blob:/data:
+      const publishedPhotos: string[] = [];
+      for (const photo of photos) {
+        if (isPublicHttpAvatar(photo)) {
+          publishedPhotos.push(photo);
+          continue;
+        }
+        const published = await ensurePublicAvatarUrl(user.id, photo);
+        if (published && isPublicHttpAvatar(published)) {
+          publishedPhotos.push(published);
+        }
       }
-      photos = [mainPhoto, ...photos.slice(1)];
+      if (!publishedPhotos.length) {
+        throw new Error(
+          'Could not upload profile photo. Check your connection and try again.',
+        );
+      }
+      const mainPhoto = publishedPhotos[0]!;
+      photos = publishedPhotos;
       const videoUrl =
-        uploaded.videoUrl &&
-        (uploaded.videoUrl.startsWith('http') ||
-          uploaded.videoUrl.startsWith('file:') ||
-          uploaded.videoUrl.startsWith('blob:') ||
-          uploaded.videoUrl.startsWith('data:'))
+        uploaded.videoUrl && isPublicHttpAvatar(uploaded.videoUrl)
           ? uploaded.videoUrl
-          : input.videoUrl?.trim() || user.videoUrl || '';
+          : input.videoUrl?.trim() && isPublicHttpAvatar(input.videoUrl.trim())
+            ? input.videoUrl.trim()
+            : user.videoUrl && isPublicHttpAvatar(user.videoUrl)
+              ? user.videoUrl
+              : '';
 
       const callPrice =
         user.callPrice || callPriceForLevel(user.level || 1);

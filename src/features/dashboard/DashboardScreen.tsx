@@ -31,6 +31,7 @@ export function DashboardScreen({ navigation }: { navigation: any }) {
     callsToday,
     myTodayMinutes,
     hostEarnings,
+    hostLifetime,
     todayLiveSeconds,
     refreshTodayStats,
   } = useApp();
@@ -45,8 +46,9 @@ export function DashboardScreen({ navigation }: { navigation: any }) {
     hostEarnings.task +
     hostEarnings.invite;
   const liveTimeMinutes = Math.floor(
-    Math.max(liveSeconds, todayLiveSeconds) / 60,
+    Math.max(liveSeconds, todayLiveSeconds, hostLifetime.liveSeconds) / 60,
   );
+  const walletBalance = Math.max(user.coinBalance, hostLifetime.walletBalance);
 
   useEffect(() => {
     void refreshTodayStats();
@@ -154,8 +156,8 @@ export function DashboardScreen({ navigation }: { navigation: any }) {
         <Text style={styles.heroLabel}>Today's earnings</Text>
         <Text style={styles.heroValue}>{todayEarn}</Text>
         <Text style={styles.heroSub}>
-          call coins {hostEarnings.call} · gifts {giftCoinsToday} · wallet{' '}
-          {user.coinBalance}
+          wallet {walletBalance} · month {hostLifetime.monthlyCoins} · lifetime{' '}
+          {hostLifetime.coinsEarned}
         </Text>
         <View style={styles.heroActions}>
           <PrimaryButton
@@ -182,10 +184,14 @@ export function DashboardScreen({ navigation }: { navigation: any }) {
 
       <View style={styles.grid}>
         {[
+          { icon: Gift, label: 'Total gifts', value: hostLifetime.totalGifts },
+          { icon: Wallet, label: 'Coins earned', value: hostLifetime.coinsEarned },
+          { icon: Heart, label: 'Wallet', value: walletBalance },
+          { icon: Radio, label: 'Total calls', value: hostLifetime.totalCalls },
+          { icon: Users, label: 'Followers', value: hostLifetime.followers },
+          { icon: Clock, label: 'Live time', value: `${liveTimeMinutes}m` },
           { icon: Radio, label: 'Calls today', value: callsToday },
-          { icon: Clock, label: 'Minutes', value: myTodayMinutes },
-          { icon: Gift, label: 'Live gifts', value: giftCoinsToday },
-          { icon: Heart, label: 'Live time', value: `${liveTimeMinutes}m` },
+          { icon: Gift, label: 'Gifts today', value: giftCoinsToday },
         ].map((s) => (
           <GlassCard key={s.label} style={styles.stat}>
             <s.icon size={18} color={colors.primarySoft} />

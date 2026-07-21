@@ -6,6 +6,8 @@ import {
   MicOff,
   Sparkles,
   Users,
+  Video,
+  VideoOff,
   X,
 } from 'lucide-react-native';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -19,9 +21,11 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { GlamourGiftOverlay } from '../../components/gifts/GlamourGiftOverlay';
 import { useLiveStudio } from '../../context/LiveStudioContext';
 import {
   setAgoraBeauty,
+  setAgoraCameraOff,
   setAgoraMuted,
   startAgoraLiveBroadcast,
   stopAgoraCall,
@@ -65,6 +69,7 @@ export function LiveRoomScreen({ navigation, route }: Props) {
     myLiveRoom;
 
   const [muted, setMuted] = useState(false);
+  const [cameraOff, setCameraOff] = useState(false);
   const [beauty, setBeauty] = useState(true);
   const [giftsOpen, setGiftsOpen] = useState(false);
   const localMountReady = useRef(false);
@@ -213,12 +218,18 @@ export function LiveRoomScreen({ navigation, route }: Props) {
       </View>
 
       {giftOverlay ? (
-        <View style={styles.giftBurst} pointerEvents="none">
-          <Text style={styles.giftEmoji}>{giftOverlay.giftEmoji}</Text>
-          <Text style={styles.giftLabel}>
-            {giftOverlay.fromName} sent {giftOverlay.giftName}
-          </Text>
-        </View>
+        <GlamourGiftOverlay
+          item={{
+            id: giftOverlay.id || `live_${Date.now()}`,
+            giftId: giftOverlay.giftId,
+            emoji: giftOverlay.giftEmoji || '🎁',
+            giftName: giftOverlay.giftName || 'Gift',
+            senderName: giftOverlay.fromName || 'Fan',
+            receiverName: room?.hostName || 'Host',
+            coins: giftOverlay.coins || 0,
+            combo: giftOverlay.combo,
+          }}
+        />
       ) : null}
 
       {/* Floating circular actions */}
@@ -233,6 +244,17 @@ export function LiveRoomScreen({ navigation, route }: Props) {
             }}
           >
             {muted ? <MicOff size={20} color="#fff" /> : <Mic size={20} color="#fff" />}
+          </Pressable>
+
+          <Pressable
+            style={styles.fab}
+            onPress={async () => {
+              const next = !cameraOff;
+              setCameraOff(next);
+              await setAgoraCameraOff(next);
+            }}
+          >
+            {cameraOff ? <VideoOff size={20} color="#fff" /> : <Video size={20} color="#fff" />}
           </Pressable>
 
           <Pressable style={styles.fab} onPress={() => void switchAgoraCamera()}>

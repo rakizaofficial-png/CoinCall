@@ -90,7 +90,7 @@ function apiRoot() {
   );
   if (
     typeof window !== 'undefined' &&
-    window.location.hostname.includes('onrender.com') &&
+    (window.location?.hostname ?? '').includes('onrender.com') &&
     raw.includes('localhost')
   ) {
     return 'https://coincall-api.onrender.com/api';
