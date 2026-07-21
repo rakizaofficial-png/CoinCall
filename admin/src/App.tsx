@@ -30,6 +30,7 @@ import { AgencyInboxPanel } from './components/AgencyInboxPanel';
 import { AnimatedPage } from './components/AnimatedPage';
 import { DashboardAnalytics } from './components/DashboardAnalytics';
 import { ForceUpdatePanel } from './components/ForceUpdatePanel';
+import { HelpCenterPanel } from './components/HelpCenterPanel';
 import { HostManagementPanel } from './components/HostManagement';
 import { HostTypePanel } from './components/HostTypePanel';
 import {
@@ -81,6 +82,7 @@ const ICONS: Partial<Record<Tab, string>> = {
   revenue: 'M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6',
   referrals: 'M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71',
   inbox: 'M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2zM22 6l-10 7L2 6',
+  help: 'M12 18h.01M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3M12 2a10 10 0 100 20 10 10 0 000-20z',
   calls: 'M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z',
   payouts: 'M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6',
   reports: 'M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z',
@@ -101,6 +103,7 @@ const LABELS: Record<Tab, string> = {
   revenue: 'Revenue',
   referrals: 'Referrals',
   inbox: 'Inbox',
+  help: 'Help Center',
   calls: 'Live Monitor',
   control: 'Remote control',
   payouts: 'Financials',
@@ -121,6 +124,7 @@ const GROUPS: Record<Tab, string> = {
   revenue: 'Finance',
   referrals: 'Growth',
   inbox: 'Growth',
+  help: 'Support',
   payouts: 'Finance',
   reports: 'Finance',
   calls: 'Live',
@@ -792,6 +796,16 @@ export default function App() {
                       </span>
                     </button>
                   ) : null}
+                  {canAccess(adminRole, 'help', agencyPerms) ? (
+                    <button
+                      type="button"
+                      className="quick-card"
+                      onClick={() => setTab('help')}
+                    >
+                      <strong>Help Center</strong>
+                      <span>Host tickets · Android guides · replies</span>
+                    </button>
+                  ) : null}
                 </div>
               </>
             ) : null}
@@ -844,6 +858,7 @@ export default function App() {
             {tab === 'referrals' ? (
               <AgencyReferralsPanel agencyId={agencyId || ''} />
             ) : null}
+            {tab === 'help' ? <HelpCenterPanel /> : null}
             {tab === 'inbox' ? (
               <AgencyInboxPanel
                 agencyId={agencyId}
