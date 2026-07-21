@@ -14,7 +14,6 @@
     "agora-rte-extension": "^1.2.4",
     "babel-preset-expo": "^57.0.3",
     "expo": "~57.0.7",
-    "expo-av": "^16.0.8",
     "expo-blur": "~57.0.2",
     "expo-build-properties": "^57.0.6",
     "expo-camera": "^57.0.3",
@@ -26,6 +25,7 @@
     "expo-linear-gradient": "^57.0.1",
     "expo-status-bar": "~57.0.1",
     "expo-system-ui": "~57.0.1",
+    "expo-video": "~57.0.1",
     "firebase": "^12.16.0",
     "lucide-react-native": "^1.25.0",
     "react": "19.2.3",
@@ -52,9 +52,6 @@
     },
     "doctor": {
       "reactNativeDirectoryCheck": {
-        "exclude": [
-          "expo-av"
-        ],
         "listUnknownPackages": false
       }
     }
@@ -77,5 +74,6 @@
     "admin": "npm --prefix admin run dev",
     "smoke": "node scripts/smoke-production.mjs",
     "build:all": "npm --prefix luma-user run build && npm run export:web && npm --prefix admin run build"
-  }
+  },
+  "packageManager": "npm@10.8.2"
 }
