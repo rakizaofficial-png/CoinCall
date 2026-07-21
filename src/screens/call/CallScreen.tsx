@@ -1,5 +1,6 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
+  Gift,
   Mic,
   MicOff,
   PhoneOff,
@@ -22,8 +23,10 @@ import {
   AgoraCallSurfaces,
   getWebVideoElements,
 } from '../../components/call/AgoraCallSurfaces';
+import { HostGiftPicker } from '../../components/gifts/HostGiftPicker';
 import { GlamourGiftOverlay, type GlamourGiftPayload } from '../../components/gifts/GlamourGiftOverlay';
 import { useApp } from '../../context/AppContext';
+import type { GiftItem } from '../../data/gifts';
 import type { RootStackParamList } from '../../navigation/types';
 import {
   type BeautyPreset,
@@ -35,7 +38,10 @@ import {
   switchAgoraCamera,
 } from '../../services/agoraService';
 import { endBridgeCall, fetchCallToken, watchBridgeCallEnd } from '../../services/callBridge';
-import { listenGiftRequestEvents } from '../../services/giftRequestService';
+import {
+  listenGiftRequestEvents,
+  requestGiftFromUser,
+} from '../../services/giftRequestService';
 import {
   endActiveCall,
   endCallSession,
@@ -108,6 +114,8 @@ export function CallScreen({ navigation, route }: Props) {
   const [netQuality] = useState<'Excellent' | 'Good' | 'Fair'>('Good');
   const [beautyPreset] = useState<BeautyPreset>(beautyOn ? 'snap' : 'off');
   const [giftBurst, setGiftBurst] = useState<GlamourGiftPayload | null>(null);
+  const [giftPickerOpen, setGiftPickerOpen] = useState(false);
+  const [giftBusy, setGiftBusy] = useState(false);
   const [disconnected, setDisconnected] = useState(false);
   const agoraReady = isAgoraConfigured();
   const isWeb = Platform.OS === 'web';
@@ -391,6 +399,32 @@ export function CallScreen({ navigation, route }: Props) {
     await leaveAfterDisconnect();
   };
 
+  const askGift = async (gift: GiftItem) => {
+    if (!bridgeCallId) {
+      notify('Gift', 'Gift requests work on live fan calls');
+      return;
+    }
+    setGiftBusy(true);
+    try {
+      await requestGiftFromUser({
+        callId: bridgeCallId,
+        giftId: gift.id,
+        message: gift.isAdult
+          ? `Send ${gift.name} to unlock adult exclusive ✨`
+          : `Send me ${gift.name}?`,
+      });
+      notify(
+        gift.isAdult ? 'Adult gift requested' : 'Gift requested',
+        `${gift.emoji} ${gift.name} · waiting for ${peerName}`,
+      );
+      setGiftPickerOpen(false);
+    } catch (e) {
+      notify('Gift request failed', e instanceof Error ? e.message : 'Try again');
+    } finally {
+      setGiftBusy(false);
+    }
+  };
+
   const netColor =
     netQuality === 'Excellent'
       ? colors.online
@@ -475,10 +509,27 @@ export function CallScreen({ navigation, route }: Props) {
         <Pressable style={styles.fab} onPress={() => void switchAgoraCamera()}>
           <SwitchCamera size={20} color="#fff" />
         </Pressable>
+        {bridgeCallId ? (
+          <Pressable
+            style={[styles.fab, styles.fabGift]}
+            onPress={() => setGiftPickerOpen(true)}
+          >
+            <Gift size={20} color="#F5C14C" />
+          </Pressable>
+        ) : null}
         <Pressable style={styles.fabEnd} onPress={hangUp}>
           <PhoneOff size={22} color="#fff" />
         </Pressable>
       </View>
+
+      <HostGiftPicker
+        visible={giftPickerOpen}
+        busy={giftBusy}
+        title="Ask for a gift"
+        subtitle="Glamour or Adult 18+ · sent to the fan on this call"
+        onClose={() => setGiftPickerOpen(false)}
+        onSelect={(gift) => void askGift(gift)}
+      />
     </View>
   );
 }
@@ -594,6 +645,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.14)',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.28)',
+  },
+  fabGift: {
+    backgroundColor: 'rgba(255,42,122,0.35)',
+    borderColor: 'rgba(255,180,208,0.55)',
   },
   fabEnd: {
     width: 56,

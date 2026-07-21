@@ -1,7 +1,10 @@
+import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   FlipHorizontal,
   Gift,
+  Lock,
+  MessageSquare,
   Mic,
   MicOff,
   Sparkles,
@@ -14,15 +17,23 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   Image,
+  Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GlamourGiftOverlay } from '../../components/gifts/GlamourGiftOverlay';
+import { useApp } from '../../context/AppContext';
 import { useLiveStudio } from '../../context/LiveStudioContext';
+import {
+  ADULT_PHOTO_UNLOCK_MIN_COINS,
+  PHOTO_UNLOCK_MIN_COINS,
+} from '../../data/gifts';
 import {
   setAgoraBeauty,
   setAgoraCameraOff,
@@ -31,6 +42,7 @@ import {
   stopAgoraCall,
   switchAgoraCamera,
 } from '../../services/agoraService';
+import { uploadHostMedia } from '../../services/mediaUploadService';
 import { useTheme } from '../../theme/ThemeContext';
 import { notify } from '../../utils/notify';
 
@@ -50,15 +62,19 @@ function formatLive(sec: number) {
 export function LiveRoomScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
+  const { user } = useApp();
   const {
     liveRooms,
     myLiveRoom,
     comments,
     gifts,
     giftOverlay,
+    lockedPhotos,
     liveSeconds,
     stopLive,
     openRoom,
+    setAnnouncement,
+    addGiftLockedPhoto,
   } = useLiveStudio();
 
   const roomId = route.params.roomId;
@@ -72,6 +88,13 @@ export function LiveRoomScreen({ navigation, route }: Props) {
   const [cameraOff, setCameraOff] = useState(false);
   const [beauty, setBeauty] = useState(true);
   const [giftsOpen, setGiftsOpen] = useState(false);
+  const [lockOpen, setLockOpen] = useState(false);
+  const [messageOpen, setMessageOpen] = useState(false);
+  const [pinText, setPinText] = useState('');
+  const [lockCaption, setLockCaption] = useState('');
+  const [lockCoins, setLockCoins] = useState(String(PHOTO_UNLOCK_MIN_COINS));
+  const [adultLock, setAdultLock] = useState(false);
+  const [busyLock, setBusyLock] = useState(false);
   const localMountReady = useRef(false);
 
   useEffect(() => {
@@ -134,7 +157,6 @@ export function LiveRoomScreen({ navigation, route }: Props) {
                 : `${c.userName}: ${c.text}`,
         kind: (c.kind === 'gift' ? 'gift' : 'chat') as 'gift' | 'chat',
       }));
-    // Newest last so inverted FlatList shows them at the bottom visually
     return [...giftLines, ...commentLines];
   }, [comments, gifts]);
 
@@ -142,6 +164,65 @@ export function LiveRoomScreen({ navigation, route }: Props) {
     await stopLive();
     await stopAgoraCall();
     navigation.goBack();
+  };
+
+  const savePinnedMessage = async () => {
+    const text = pinText.trim();
+    if (!text) {
+      notify('Set message', 'Write a pinned message first');
+      return;
+    }
+    try {
+      await setAnnouncement(text);
+      notify('Pinned', 'Live message set for viewers');
+      setMessageOpen(false);
+      setPinText('');
+    } catch (e) {
+      notify('Failed', e instanceof Error ? e.message : 'Try again');
+    }
+  };
+
+  const pickLockedPhoto = async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      notify('Photos', 'Allow photo access to lock live content');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.75,
+      allowsEditing: true,
+      aspect: [3, 4],
+    });
+    if (result.canceled || !result.assets[0]?.uri) return;
+
+    setBusyLock(true);
+    try {
+      const uri = result.assets[0].uri;
+      const uploaded = await uploadHostMedia({
+        hostUid: user.id,
+        uri,
+        kind: 'image',
+        folder: 'photos',
+      });
+      const url = uploaded || uri;
+      const coins = Math.max(
+        adultLock ? ADULT_PHOTO_UNLOCK_MIN_COINS : PHOTO_UNLOCK_MIN_COINS,
+        Number(lockCoins) || PHOTO_UNLOCK_MIN_COINS,
+      );
+      await addGiftLockedPhoto(
+        url,
+        lockCaption.trim() ||
+          (adultLock ? 'Adult exclusive · gift to unlock' : 'Gift to unlock'),
+        coins,
+      );
+      setLockCaption('');
+      setLockOpen(false);
+    } catch (e) {
+      notify('Lock live failed', e instanceof Error ? e.message : 'Try again');
+    } finally {
+      setBusyLock(false);
+    }
   };
 
   if (!room) {
@@ -169,7 +250,6 @@ export function LiveRoomScreen({ navigation, route }: Props) {
         pointerEvents="none"
       />
 
-      {/* Top bar — floating glass */}
       <View style={[styles.top, { paddingTop: insets.top + 8 }]}>
         <View style={styles.hostChip}>
           <Image source={{ uri: room.hostAvatar }} style={styles.hostAv} />
@@ -184,6 +264,12 @@ export function LiveRoomScreen({ navigation, route }: Props) {
           </View>
         </View>
         <View style={styles.topRight}>
+          {lockedPhotos.length > 0 ? (
+            <View style={[styles.statPill, styles.lockPill]}>
+              <Lock size={12} color="#FFB4D0" />
+              <Text style={styles.statText}>{lockedPhotos.length}</Text>
+            </View>
+          ) : null}
           <View style={styles.statPill}>
             <Text style={styles.statText}>💎 {Math.max(room.giftCoins || 0, 0)}</Text>
           </View>
@@ -197,7 +283,15 @@ export function LiveRoomScreen({ navigation, route }: Props) {
         </View>
       </View>
 
-      {/* Chat overlay — bottom left */}
+      {room.announcement ? (
+        <View style={[styles.pinBanner, { top: insets.top + 64 }]}>
+          <MessageSquare size={12} color="#F5C14C" />
+          <Text style={styles.pinText} numberOfLines={2}>
+            {room.announcement}
+          </Text>
+        </View>
+      ) : null}
+
       <View style={[styles.feed, { bottom: insets.bottom + 100 }]}>
         <FlatList
           data={feed}
@@ -232,7 +326,6 @@ export function LiveRoomScreen({ navigation, route }: Props) {
         />
       ) : null}
 
-      {/* Floating circular actions */}
       {hostMode ? (
         <View style={[styles.fabColumn, { paddingBottom: insets.bottom + 16 }]}>
           <Pressable
@@ -273,6 +366,14 @@ export function LiveRoomScreen({ navigation, route }: Props) {
             <Sparkles size={20} color="#fff" />
           </Pressable>
 
+          <Pressable style={[styles.fab, styles.fabLock]} onPress={() => setLockOpen(true)}>
+            <Lock size={20} color="#FFB4D0" />
+          </Pressable>
+
+          <Pressable style={styles.fab} onPress={() => setMessageOpen(true)}>
+            <MessageSquare size={20} color="#F5C14C" />
+          </Pressable>
+
           <Pressable style={styles.fab} onPress={() => setGiftsOpen(true)}>
             <Gift size={20} color="#F5C14C" />
           </Pressable>
@@ -308,6 +409,116 @@ export function LiveRoomScreen({ navigation, route }: Props) {
           </Pressable>
         </View>
       ) : null}
+
+      {/* Lock Live sheet */}
+      <Modal visible={lockOpen} animationType="slide" transparent>
+        <View style={styles.modalBg}>
+          <View style={[styles.toolSheet, { paddingBottom: insets.bottom + 18 }]}>
+            <View style={styles.sheetHead}>
+              <Text style={styles.sheetTitle}>Lock Live</Text>
+              <Pressable onPress={() => setLockOpen(false)} hitSlop={10}>
+                <X size={22} color="#fff" />
+              </Pressable>
+            </View>
+            <Text style={styles.sheetSub}>
+              Add gift-gated photos. Fans unlock with Glamour (≥{PHOTO_UNLOCK_MIN_COINS})
+              or Adult gifts (≥{ADULT_PHOTO_UNLOCK_MIN_COINS}).
+            </Text>
+
+            <View style={styles.lockToggleRow}>
+              <Pressable
+                style={[styles.lockToggle, !adultLock && styles.lockToggleOn]}
+                onPress={() => {
+                  setAdultLock(false);
+                  setLockCoins(String(PHOTO_UNLOCK_MIN_COINS));
+                }}
+              >
+                <Text style={styles.lockToggleText}>Standard</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.lockToggle, adultLock && styles.lockToggleAdult]}
+                onPress={() => {
+                  setAdultLock(true);
+                  setLockCoins(String(ADULT_PHOTO_UNLOCK_MIN_COINS));
+                }}
+              >
+                <Text style={styles.lockToggleText}>Adult 18+</Text>
+              </Pressable>
+            </View>
+
+            <TextInput
+              style={styles.input}
+              value={lockCaption}
+              onChangeText={setLockCaption}
+              placeholder="Caption (optional)"
+              placeholderTextColor="rgba(255,255,255,0.4)"
+              maxLength={80}
+            />
+            <TextInput
+              style={styles.input}
+              value={lockCoins}
+              onChangeText={setLockCoins}
+              placeholder="Unlock coins"
+              placeholderTextColor="rgba(255,255,255,0.4)"
+              keyboardType="number-pad"
+              maxLength={6}
+            />
+
+            {lockedPhotos.length > 0 ? (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+                {lockedPhotos.map((p) => (
+                  <View key={p.id} style={styles.lockThumbWrap}>
+                    <Image source={{ uri: p.url }} style={styles.lockThumb} />
+                    <Text style={styles.lockThumbCoins}>{p.unlockCoins}💎</Text>
+                  </View>
+                ))}
+              </ScrollView>
+            ) : null}
+
+            <Pressable
+              style={[styles.primaryBtn, busyLock && { opacity: 0.6 }]}
+              disabled={busyLock}
+              onPress={() => void pickLockedPhoto()}
+            >
+              <Lock size={16} color="#1a1200" />
+              <Text style={styles.primaryBtnText}>
+                {busyLock ? 'Adding…' : 'Add locked photo'}
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Set message sheet */}
+      <Modal visible={messageOpen} animationType="slide" transparent>
+        <View style={styles.modalBg}>
+          <View style={[styles.toolSheet, { paddingBottom: insets.bottom + 18 }]}>
+            <View style={styles.sheetHead}>
+              <Text style={styles.sheetTitle}>Set message</Text>
+              <Pressable onPress={() => setMessageOpen(false)} hitSlop={10}>
+                <X size={22} color="#fff" />
+              </Pressable>
+            </View>
+            <Text style={styles.sheetSub}>
+              Pin a message for everyone watching your live
+            </Text>
+            <TextInput
+              style={[styles.input, { minHeight: 90, textAlignVertical: 'top' }]}
+              value={pinText}
+              onChangeText={setPinText}
+              placeholder="Welcome · rules · gift goals…"
+              placeholderTextColor="rgba(255,255,255,0.4)"
+              multiline
+              maxLength={160}
+            />
+            <Pressable style={styles.primaryBtn} onPress={() => void savePinnedMessage()}>
+              <MessageSquare size={16} color="#1a1200" />
+              <Text style={styles.primaryBtnText}>Pin to live</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
     </View>
   );
 }
@@ -343,7 +554,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 8,
     borderRadius: 999,
-    maxWidth: '70%',
+    maxWidth: '58%',
   },
   hostAv: { width: 36, height: 36, borderRadius: 18 },
   hostName: { color: '#fff', fontWeight: '800', fontSize: 13 },
@@ -367,6 +578,10 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 999,
   },
+  lockPill: {
+    backgroundColor: 'rgba(255,42,122,0.35)',
+    borderColor: 'rgba(255,180,208,0.45)',
+  },
   statText: { color: '#fff', fontWeight: '800', fontSize: 12 },
   close: {
     width: 34,
@@ -378,6 +593,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  pinBanner: {
+    position: 'absolute',
+    left: 12,
+    right: 88,
+    zIndex: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(12,16,28,0.78)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(245,193,76,0.4)',
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  pinText: { color: '#fff', fontSize: 12, fontWeight: '600', flex: 1 },
   feed: {
     position: 'absolute',
     left: 12,
@@ -412,21 +643,6 @@ const styles = StyleSheet.create({
     textShadowRadius: 3,
   },
   feedEmpty: { color: 'rgba(255,255,255,0.5)', fontSize: 12, marginBottom: 8 },
-  giftBurst: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 25,
-  },
-  giftEmoji: { fontSize: 72 },
-  giftLabel: {
-    marginTop: 8,
-    color: '#fff',
-    fontWeight: '800',
-    fontSize: 16,
-    textShadowColor: '#000',
-    textShadowRadius: 8,
-  },
   fabColumn: {
     position: 'absolute',
     right: 14,
@@ -448,6 +664,10 @@ const styles = StyleSheet.create({
   fabOn: {
     backgroundColor: 'rgba(139,92,246,0.45)',
     borderColor: 'rgba(196,181,253,0.5)',
+  },
+  fabLock: {
+    backgroundColor: 'rgba(255,42,122,0.35)',
+    borderColor: 'rgba(255,180,208,0.5)',
   },
   fabGift: {
     width: 52,
@@ -478,13 +698,83 @@ const styles = StyleSheet.create({
     zIndex: 30,
     maxHeight: '50%',
   },
-  sheetTitle: { color: '#fff', fontSize: 18, fontWeight: '900', marginBottom: 8 },
-  sheetSub: { color: 'rgba(255,255,255,0.55)', marginBottom: 12, fontSize: 13 },
+  sheetTitle: { color: '#fff', fontSize: 18, fontWeight: '900' },
+  sheetSub: { color: 'rgba(255,255,255,0.55)', marginTop: 6, marginBottom: 12, fontSize: 12 },
   histLine: { color: 'rgba(255,255,255,0.85)', marginBottom: 8, fontWeight: '600' },
   closeSheet: {
     color: '#9B8CFF',
     textAlign: 'center',
     marginTop: 16,
     fontWeight: '800',
+  },
+  modalBg: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    justifyContent: 'flex-end',
+  },
+  toolSheet: {
+    backgroundColor: '#121826',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 18,
+  },
+  sheetHead: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  lockToggleRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
+  lockToggle: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 12,
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  lockToggleOn: {
+    backgroundColor: 'rgba(108,124,255,0.45)',
+    borderColor: '#9B8CFF',
+  },
+  lockToggleAdult: {
+    backgroundColor: 'rgba(255,42,122,0.45)',
+    borderColor: '#FF6BA8',
+  },
+  lockToggleText: { color: '#fff', fontWeight: '800', fontSize: 13 },
+  input: {
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,42,122,0.28)',
+    color: '#fff',
+    padding: 12,
+    marginBottom: 10,
+    fontSize: 14,
+  },
+  primaryBtn: {
+    marginTop: 4,
+    backgroundColor: '#F5C14C',
+    borderRadius: 14,
+    paddingVertical: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  primaryBtnText: { color: '#1a1200', fontWeight: '900', fontSize: 15 },
+  lockThumbWrap: { marginRight: 10, width: 72 },
+  lockThumb: {
+    width: 72,
+    height: 96,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  lockThumbCoins: {
+    color: '#F5C14C',
+    fontSize: 11,
+    fontWeight: '800',
+    marginTop: 4,
+    textAlign: 'center',
   },
 });

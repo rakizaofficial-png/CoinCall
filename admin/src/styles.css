@@ -2398,3 +2398,407 @@ html[data-theme='dark'] body {
   color: #6b7280 !important;
 }
 
+
+/* ——— Help Center (Android-friendly admin) ——— */
+.help-center .help-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.help-view-toggle {
+  display: inline-flex;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 14px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+}
+
+.help-view-toggle button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 700;
+  font-size: 13px;
+  padding: 10px 14px;
+  border-radius: 11px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+}
+
+.help-view-toggle button.on {
+  background: var(--nexus);
+  color: #fff;
+  box-shadow: 0 8px 20px var(--accent-glow);
+}
+
+.help-badge {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #e11d48;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.help-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 16px 0;
+}
+
+.help-stat {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 14px 12px;
+  text-align: center;
+  box-shadow: var(--shadow);
+}
+
+.help-stat strong {
+  display: block;
+  font-family: var(--display);
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--text);
+}
+
+.help-stat span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.help-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.help-filter {
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--muted);
+  font-weight: 700;
+  font-size: 12px;
+  text-transform: capitalize;
+  padding: 10px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  min-height: 40px;
+}
+
+.help-filter.on {
+  background: var(--nexus-soft);
+  border-color: var(--nexus);
+  color: var(--nexus-deep);
+}
+
+.help-ticket-list {
+  display: grid;
+  gap: 12px;
+}
+
+.help-ticket {
+  background: linear-gradient(165deg, var(--card), var(--panel));
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 16px;
+  box-shadow: var(--shadow);
+}
+
+.help-ticket.status-open {
+  border-color: rgba(37, 99, 235, 0.35);
+}
+
+.help-ticket.status-answered {
+  border-color: rgba(5, 150, 105, 0.35);
+}
+
+.help-ticket-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.help-ticket-top h3 {
+  margin: 6px 0 2px;
+  font-family: var(--display);
+  font-size: 17px;
+}
+
+.help-ticket-top time {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.help-ticket-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.help-id {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--gold);
+  font-weight: 700;
+}
+
+.help-status {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--blue-soft);
+  color: var(--blue);
+}
+
+.help-status.answered {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.help-status.closed {
+  background: var(--line);
+  color: var(--muted);
+}
+
+.help-cat {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--teal-soft);
+  color: var(--teal);
+  text-transform: capitalize;
+}
+
+.help-host-id {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-family: var(--mono);
+}
+
+.help-body {
+  margin: 12px 0;
+  line-height: 1.5;
+  color: var(--text);
+  font-size: 14px;
+}
+
+.help-reply-box {
+  background: var(--green-soft);
+  border: 1px solid rgba(5, 150, 105, 0.25);
+  border-radius: 14px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.help-reply-box strong {
+  display: block;
+  font-size: 12px;
+  color: var(--green);
+  margin-bottom: 4px;
+}
+
+.help-reply-box p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.help-actions textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 84px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.help-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.help-action-row .btn-primary,
+.help-center .btn-primary {
+  border: 0;
+  background: linear-gradient(135deg, var(--nexus), var(--nexus-deep));
+  color: #fff;
+  font-weight: 800;
+  font-size: 13px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  cursor: pointer;
+  min-height: 44px;
+}
+
+.help-action-row .btn-ghost,
+.help-center .btn-ghost {
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--text);
+  font-weight: 700;
+  font-size: 13px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  cursor: pointer;
+  min-height: 44px;
+}
+
+.help-guide-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.help-guide-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 16px;
+  box-shadow: var(--shadow);
+}
+
+.help-guide-card h3 {
+  margin: 8px 0;
+  font-family: var(--display);
+  font-size: 16px;
+}
+
+.help-guide-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* Android / phone admin console */
+@media (max-width: 720px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+
+  .side {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    height: auto;
+    max-height: none;
+    padding: 12px 12px 8px;
+    backdrop-filter: blur(16px);
+  }
+
+  .brand {
+    margin-bottom: 8px;
+  }
+
+  .side-role {
+    margin-bottom: 8px;
+  }
+
+  .nav-group {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 6px;
+    padding-bottom: 8px;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .nav-group::-webkit-scrollbar {
+    display: none;
+  }
+
+  .nav-label {
+    display: none;
+  }
+
+  .nav-btn {
+    flex: 0 0 auto;
+    width: auto;
+    min-height: 44px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    white-space: nowrap;
+  }
+
+  .nav-btn svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .side-footer {
+    flex-direction: row;
+    gap: 8px;
+  }
+
+  .theme-toggle,
+  .logout {
+    flex: 1;
+    min-height: 44px;
+  }
+
+  .main {
+    padding: 14px 12px 88px;
+  }
+
+  .page-head h2 {
+    font-size: 22px;
+  }
+
+  .quick-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .help-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .help-ticket-top {
+    flex-direction: column;
+  }
+
+  .help-action-row .btn-primary,
+  .help-action-row .btn-ghost {
+    flex: 1 1 100%;
+  }
+
+  .help-guide-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .login-card {
+    padding: 28px 20px;
+  }
+}

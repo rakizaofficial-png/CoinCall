@@ -8,6 +8,8 @@ export type GiftRarity =
 
 export type GiftEffectTier = 'banner' | 'burst' | 'cinematic' | 'spectacle';
 
+export type GiftCategory = 'standard' | 'adult';
+
 export type GiftItem = {
   id: string;
   name: string;
@@ -16,6 +18,9 @@ export type GiftItem = {
   rarity: GiftRarity;
   effect: GiftEffectTier;
   tier: 'basic' | 'luxury' | 'combo' | 'legendary';
+  category?: GiftCategory;
+  /** 18+ exclusive gift — unlocks locked live photos / private content */
+  isAdult?: boolean;
   unlocksPhotos?: boolean;
   animMs: number;
   particles: number;
@@ -320,12 +325,141 @@ export const GIFT_CATALOG: GiftItem[] = [
     gradient: ['#ffd700', '#1a1a2e'],
     glow: 'rgba(255,215,0,0.95)',
   },
+  // —— Adult / 18+ exclusive collection ——
+  {
+    id: 'silk_whisper',
+    name: 'Silk Whisper',
+    emoji: '🖤',
+    coins: 149,
+    rarity: 'rare',
+    effect: 'burst',
+    tier: 'luxury',
+    category: 'adult',
+    isAdult: true,
+    unlocksPhotos: true,
+    animMs: 3000,
+    particles: 2,
+    gradient: ['#1a1a2e', '#ff2a7a'],
+    glow: 'rgba(255,42,122,0.65)',
+  },
+  {
+    id: 'midnight_kiss',
+    name: 'Midnight Kiss',
+    emoji: '💋',
+    coins: 299,
+    rarity: 'rare',
+    effect: 'burst',
+    tier: 'luxury',
+    category: 'adult',
+    isAdult: true,
+    unlocksPhotos: true,
+    animMs: 3200,
+    particles: 3,
+    gradient: ['#9b1b30', '#ff4d6d'],
+    glow: 'rgba(255,77,109,0.7)',
+  },
+  {
+    id: 'velvet_night',
+    name: 'Velvet Night',
+    emoji: '🌙',
+    coins: 599,
+    rarity: 'epic',
+    effect: 'cinematic',
+    tier: 'combo',
+    category: 'adult',
+    isAdult: true,
+    unlocksPhotos: true,
+    animMs: 4000,
+    particles: 3,
+    gradient: ['#240046', '#e0aaff'],
+    glow: 'rgba(224,170,255,0.65)',
+  },
+  {
+    id: 'spicy_rose',
+    name: 'Spicy Rose',
+    emoji: '🔥',
+    coins: 999,
+    rarity: 'epic',
+    effect: 'cinematic',
+    tier: 'combo',
+    category: 'adult',
+    isAdult: true,
+    unlocksPhotos: true,
+    animMs: 4500,
+    particles: 4,
+    gradient: ['#ff006e', '#8338ec'],
+    glow: 'rgba(255,0,110,0.75)',
+  },
+  {
+    id: 'champagne_suite',
+    name: 'Champagne Suite',
+    emoji: '🥂',
+    coins: 1999,
+    rarity: 'legendary',
+    effect: 'spectacle',
+    tier: 'legendary',
+    category: 'adult',
+    isAdult: true,
+    unlocksPhotos: true,
+    animMs: 5600,
+    particles: 5,
+    gradient: ['#f8e7a0', '#ff2a7a'],
+    glow: 'rgba(248,231,160,0.8)',
+  },
+  {
+    id: 'private_unlock',
+    name: 'Private Unlock',
+    emoji: '🔓',
+    coins: 2999,
+    rarity: 'legendary',
+    effect: 'spectacle',
+    tier: 'legendary',
+    category: 'adult',
+    isAdult: true,
+    unlocksPhotos: true,
+    animMs: 5800,
+    particles: 5,
+    gradient: ['#ff2a7a', '#3a0ca3'],
+    glow: 'rgba(255,42,122,0.85)',
+  },
+  {
+    id: 'diamond_desire',
+    name: 'Diamond Desire',
+    emoji: '💎',
+    coins: 4999,
+    rarity: 'mythic',
+    effect: 'spectacle',
+    tier: 'legendary',
+    category: 'adult',
+    isAdult: true,
+    unlocksPhotos: true,
+    animMs: 6800,
+    particles: 5,
+    gradient: ['#ff006e', '#90e0ef'],
+    glow: 'rgba(255,0,110,0.9)',
+  },
+  {
+    id: 'vip_private_show',
+    name: 'VIP Private Show',
+    emoji: '🎭',
+    coins: 9999,
+    rarity: 'vip',
+    effect: 'spectacle',
+    tier: 'legendary',
+    category: 'adult',
+    isAdult: true,
+    unlocksPhotos: true,
+    animMs: 8200,
+    particles: 5,
+    gradient: ['#ffd60a', '#ff006e'],
+    glow: 'rgba(255,214,10,0.95)',
+  },
 ];
 
 const ALIASES: Record<string, string> = {
   rose: 'rose_bouquet',
   heart: 'neon_heart',
-  kiss: 'neon_heart',
+  kiss: 'midnight_kiss',
   star: 'golden_butterfly',
   diamond: 'diamond_ring',
   crown: 'diamond_crown',
@@ -333,6 +467,9 @@ const ALIASES: Record<string, string> = {
   yacht: 'luxury_yacht',
   castle: 'royal_castle',
   rocket: 'private_jet',
+  adult: 'private_unlock',
+  spicy: 'spicy_rose',
+  private: 'private_unlock',
 };
 
 export function resolveGift(giftId: string): GiftItem | undefined {
@@ -340,8 +477,20 @@ export function resolveGift(giftId: string): GiftItem | undefined {
   return GIFT_CATALOG.find((g) => g.id === id);
 }
 
+export function giftsByCategory(category: GiftCategory = 'standard'): GiftItem[] {
+  if (category === 'adult') {
+    return GIFT_CATALOG.filter((g) => g.isAdult || g.category === 'adult');
+  }
+  return GIFT_CATALOG.filter((g) => !g.isAdult && g.category !== 'adult');
+}
+
+export function adultGifts(): GiftItem[] {
+  return giftsByCategory('adult');
+}
+
 /** Min coins on a gift that unlocks locked live photos */
 export const PHOTO_UNLOCK_MIN_COINS = 99;
+export const ADULT_PHOTO_UNLOCK_MIN_COINS = 149;
 
 export const LIVE_CATEGORIES = [
   'Beauty',

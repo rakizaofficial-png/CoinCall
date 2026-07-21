@@ -1,8 +1,11 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import {
+  Circle,
   Clock,
   Gift,
   Heart,
+  Lock,
+  MessageSquare,
   Radio,
   Search,
   Users,
@@ -17,6 +20,7 @@ import { PrimaryButton } from '../../components/ui/PrimaryButton';
 import { useApp } from '../../context/AppContext';
 import { useLiveStudio } from '../../context/LiveStudioContext';
 import { env } from '../../config/env';
+import { fetchActiveUsers } from '../../services/hostOutreachService';
 import { radii } from '../../theme/colors';
 import { useTheme } from '../../theme/ThemeContext';
 import { notify } from '../../utils/notify';
@@ -38,6 +42,18 @@ export function DashboardScreen({ navigation }: { navigation: any }) {
   const { todayLiveGiftCoins, liveSeconds, myLiveRoom } = useLiveStudio();
   const [appIdQuery, setAppIdQuery] = useState('');
   const [searchBusy, setSearchBusy] = useState(false);
+  const [onlineFans, setOnlineFans] = useState(0);
+
+  useEffect(() => {
+    const load = () => {
+      void fetchActiveUsers().then((u) => {
+        setOnlineFans(u.filter((r) => r.role === 'user').length);
+      });
+    };
+    load();
+    const t = setInterval(load, 8_000);
+    return () => clearInterval(t);
+  }, []);
 
   const giftCoinsToday = Math.max(hostEarnings.gift, todayLiveGiftCoins);
   const todayEarn =
@@ -201,6 +217,39 @@ export function DashboardScreen({ navigation }: { navigation: any }) {
         ))}
       </View>
 
+      <View style={styles.quickTools}>
+        <Pressable
+          style={[styles.toolChip, { borderColor: colors.border, backgroundColor: colors.bgCard }]}
+          onPress={() => navigation.navigate('Chat')}
+        >
+          <Users size={16} color={colors.online} />
+          <Text style={[styles.toolChipText, { color: colors.text }]}>
+            {onlineFans} online
+          </Text>
+        </Pressable>
+        <Pressable
+          style={[styles.toolChip, { borderColor: colors.border, backgroundColor: colors.bgCard }]}
+          onPress={() => navigation.navigate('Chat')}
+        >
+          <MessageSquare size={16} color={colors.accent} />
+          <Text style={[styles.toolChipText, { color: colors.text }]}>Set message</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.toolChip, { borderColor: colors.border, backgroundColor: colors.bgCard }]}
+          onPress={() =>
+            myLiveRoom?.isLive
+              ? navigation.navigate('LiveRoom', {
+                  roomId: myLiveRoom.id,
+                  hostMode: true,
+                })
+              : navigation.navigate('GoLive')
+          }
+        >
+          <Lock size={16} color="#FF6BA8" />
+          <Text style={[styles.toolChipText, { color: colors.text }]}>Lock live</Text>
+        </Pressable>
+      </View>
+
       <Pressable onPress={() => navigation.navigate('Earnings')}>
         <GlassCard>
           <Text style={[styles.rowTitle, { color: colors.text }]}>Call Analytics & Revenue</Text>
@@ -216,9 +265,14 @@ export function DashboardScreen({ navigation }: { navigation: any }) {
             <Users size={20} color={colors.online} />
             <View>
               <Text style={[styles.rowTitle, { color: colors.text }]}>Available for 1:1</Text>
-              <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
-                Fans can call you while you wait
-              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                {hostOnline ? (
+                  <Circle size={8} color={colors.online} fill={colors.online} />
+                ) : null}
+                <Text style={[styles.rowSub, { color: colors.textSecondary, marginTop: 0 }]}>
+                  {hostOnline ? 'Online · fans can call' : 'Turn on so fans can reach you'}
+                </Text>
+              </View>
             </View>
           </View>
           <Pressable
@@ -291,4 +345,20 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   toggleText: { color: '#fff', fontWeight: '900' },
+  quickTools: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 12,
+  },
+  toolChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+  },
+  toolChipText: { fontWeight: '800', fontSize: 12 },
 });
