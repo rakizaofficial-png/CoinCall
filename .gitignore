@@ -52,3 +52,5 @@ server/.data/
 /android
 server/.data/
 .data/
+
+.tmp-test-data*
