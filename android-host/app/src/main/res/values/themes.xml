@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.CoinCallHost" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowBackground">#FFF7F4FF</item>
+    </style>
+    <style name="Theme.CoinCallHost.Call" parent="Theme.CoinCallHost">
+        <item name="android:windowBackground">#FF0B1020</item>
+        <item name="android:windowFullscreen">true</item>
+    </style>
+</resources>

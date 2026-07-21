@@ -1,0 +1,6 @@
+-keepattributes Signature
+-keepattributes *Annotation*
+-keep class com.coincall.host.data.dto.** { *; }
+-keep class com.squareup.moshi.** { *; }
+-dontwarn okhttp3.**
+-dontwarn retrofit2.**
