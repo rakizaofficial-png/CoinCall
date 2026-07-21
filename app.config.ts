@@ -67,19 +67,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     'expo-dev-client',
     'expo-font',
     [
-      'expo-build-properties',
-      {
-        android: {
-          minSdkVersion: 24,
-          compileSdkVersion: 35,
-          targetSdkVersion: 35,
-        },
-        ios: {
-          deploymentTarget: '16.4',
-        },
-      },
-    ],
-    [
       'expo-image-picker',
       {
         photosPermission:
@@ -98,6 +85,21 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         microphonePermission:
           'CoinCall Beauty needs microphone for intro video and calls.',
         recordAudioAndroid: true,
+      },
+    ],
+    // Last: force Android SDK for androidx.core 1.16+ (needs compileSdk ≥ 35)
+    [
+      'expo-build-properties',
+      {
+        android: {
+          minSdkVersion: 24,
+          compileSdkVersion: 36,
+          targetSdkVersion: 35,
+          buildToolsVersion: '36.0.0',
+        },
+        ios: {
+          deploymentTarget: '16.4',
+        },
       },
     ],
   ],

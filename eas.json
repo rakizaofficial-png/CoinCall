@@ -22,7 +22,8 @@
       "distribution": "internal",
       "channel": "preview",
       "android": {
-        "buildType": "apk"
+        "buildType": "apk",
+        "image": "latest"
       },
       "ios": {
         "simulator": false
@@ -36,7 +37,8 @@
       "autoIncrement": true,
       "distribution": "store",
       "android": {
-        "buildType": "app-bundle"
+        "buildType": "app-bundle",
+        "image": "latest"
       },
       "ios": {
         "resourceClass": "m-medium",
