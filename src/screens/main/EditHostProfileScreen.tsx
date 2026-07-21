@@ -1,5 +1,4 @@
 import * as ImagePicker from 'expo-image-picker';
-import { ResizeMode, Video as ExpoVideo } from 'expo-av';
 import { Camera, Check, Plus, Trash2, Video, X } from 'lucide-react-native';
 import { useMemo, useState } from 'react';
 import {
@@ -13,12 +12,17 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { IntroVideoPreview } from '../../components/ui/IntroVideoPreview';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { HOST_COUNTRIES } from '../../data/countries';
 import { radii } from '../../theme/colors';
 import { useTheme } from '../../theme/ThemeContext';
 import { notify } from '../../utils/notify';
+import {
+  ensureCameraPermission,
+  ensureMediaLibraryPermission,
+} from '../../utils/mediaPermissions';
 import { publishHostPresence } from '../../services/callBridge';
 import { isPublicHttpAvatar } from '../../utils/hostAvatar';
 
@@ -85,17 +89,14 @@ export function EditHostProfileScreen({ navigation }: { navigation: any }) {
       notify('Photos', `Up to ${MAX_PHOTOS} photos.`);
       return;
     }
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      notify('Permission', 'Allow photo library access.');
-      return;
-    }
+    if (!(await ensureMediaLibraryPermission('photos'))) return;
     const remaining = MAX_PHOTOS - photoUrls.length;
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
-      quality: 0.85,
+      quality: 0.72,
       allowsMultipleSelection: true,
       selectionLimit: remaining,
+      exif: false,
     });
     if (!result.canceled && result.assets.length) {
       setPhotoUrls(
@@ -105,14 +106,11 @@ export function EditHostProfileScreen({ navigation }: { navigation: any }) {
   };
 
   const pickMainCamera = async () => {
-    const perm = await ImagePicker.requestCameraPermissionsAsync();
-    if (!perm.granted) {
-      notify('Permission', 'Allow camera access.');
-      return;
-    }
+    if (!(await ensureCameraPermission())) return;
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: ['images'],
-      quality: 0.85,
+      quality: 0.72,
+      exif: false,
     });
     if (!result.canceled && result.assets[0]?.uri) {
       setPhotoUrls([result.assets[0].uri, ...photoUrls].slice(0, MAX_PHOTOS));
@@ -120,11 +118,7 @@ export function EditHostProfileScreen({ navigation }: { navigation: any }) {
   };
 
   const pickVideo = async () => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      notify('Permission', 'Allow video access.');
-      return;
-    }
+    if (!(await ensureMediaLibraryPermission('videos'))) return;
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['videos'],
       quality: 0.7,
@@ -369,13 +363,7 @@ export function EditHostProfileScreen({ navigation }: { navigation: any }) {
               { backgroundColor: colors.bgCard, borderColor: colors.border },
             ]}
           >
-            <ExpoVideo
-              source={{ uri: videoUrl }}
-              style={styles.video}
-              useNativeControls
-              resizeMode={ResizeMode.CONTAIN}
-              shouldPlay={false}
-            />
+            <IntroVideoPreview uri={videoUrl} style={styles.video} />
             <View style={styles.videoActions}>
               <Pressable
                 style={[styles.actionBtn, { backgroundColor: colors.bg, borderColor: colors.border }]}

@@ -1,4 +1,3 @@
-import { ResizeMode, Video } from 'expo-av';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   BadgeCheck,
@@ -18,6 +17,7 @@ import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Avatar } from '../../components/ui/Avatar';
 import { GlassCard } from '../../components/ui/GlassCard';
+import { IntroVideoPreview } from '../../components/ui/IntroVideoPreview';
 import { PrimaryButton } from '../../components/ui/PrimaryButton';
 import { Screen } from '../../components/ui/Screen';
 import { useApp } from '../../context/AppContext';
@@ -38,6 +38,7 @@ export function ProfileScreen({ navigation }: { navigation: any }) {
     beautyOn,
     runHostTool,
     blockedIds,
+    hostLifetime,
   } = useApp();
   const { todayLiveGiftCoins, liveSeconds } = useLiveStudio();
   const { signOut } = useAuth();
@@ -117,10 +118,10 @@ export function ProfileScreen({ navigation }: { navigation: any }) {
 
       <View style={styles.stats}>
         {[
-          { label: 'Followers', value: 1200 + callsToday * 3 },
-          { label: 'Visitors', value: 340 + Math.floor(liveSeconds / 10) },
-          { label: 'Gifts', value: todayLiveGiftCoins },
-          { label: 'Minutes', value: myTodayMinutes },
+          { label: 'Followers', value: hostLifetime.followers },
+          { label: 'Calls', value: hostLifetime.totalCalls || callsToday },
+          { label: 'Gifts', value: hostLifetime.totalGifts },
+          { label: 'Earned', value: hostLifetime.coinsEarned },
         ].map((s) => (
           <View key={s.label} style={styles.stat}>
             <Text style={[styles.statValue, { color: colors.text }]}>{s.value}</Text>
@@ -177,14 +178,7 @@ export function ProfileScreen({ navigation }: { navigation: any }) {
             { backgroundColor: colors.bgCard, borderColor: colors.border },
           ]}
         >
-          <Video
-            source={{ uri: user.videoUrl }}
-            style={styles.video}
-            useNativeControls
-            resizeMode={ResizeMode.CONTAIN}
-            isLooping
-            shouldPlay={false}
-          />
+          <IntroVideoPreview uri={user.videoUrl} style={styles.video} />
         </View>
       ) : (
         <Pressable

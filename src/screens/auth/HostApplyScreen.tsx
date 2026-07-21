@@ -1,5 +1,4 @@
 import * as ImagePicker from 'expo-image-picker';
-import { ResizeMode, Video as ExpoVideo } from 'expo-av';
 import { Plus, Video, X } from 'lucide-react-native';
 import { useMemo, useState } from 'react';
 import {
@@ -13,12 +12,16 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { IntroVideoPreview } from '../../components/ui/IntroVideoPreview';
 import { useAuth } from '../../context/AuthContext';
 import { HOST_COUNTRIES } from '../../data/countries';
 import { radii } from '../../theme/colors';
 import { useTheme } from '../../theme/ThemeContext';
 import { callPriceForLevel } from '../../utils/hostPricing';
 import { notify } from '../../utils/notify';
+import {
+  ensureMediaLibraryPermission,
+} from '../../utils/mediaPermissions';
 
 const MAX_PHOTOS = 8;
 const LANGUAGES = [
@@ -81,17 +84,14 @@ export function HostApplyScreen() {
       notify('Photos', `You can upload up to ${MAX_PHOTOS} photos.`);
       return;
     }
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      notify('Permission', 'Please allow photo access.');
-      return;
-    }
+    if (!(await ensureMediaLibraryPermission('photos'))) return;
     const remaining = MAX_PHOTOS - photoUrls.length;
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
-      quality: 0.8,
+      quality: 0.72,
       allowsMultipleSelection: true,
       selectionLimit: remaining,
+      exif: false,
     });
     if (!result.canceled && result.assets.length) {
       setPhotoUrls(
@@ -105,11 +105,7 @@ export function HostApplyScreen() {
   };
 
   const pickVideo = async () => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      notify('Permission', 'Please allow video access.');
-      return;
-    }
+    if (!(await ensureMediaLibraryPermission('videos'))) return;
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['videos'],
       quality: 0.7,
@@ -322,12 +318,10 @@ export function HostApplyScreen() {
       >
         {videoUrl ? (
           <View style={styles.videoPreviewWrap}>
-            <ExpoVideo
-              source={{ uri: videoUrl }}
+            <IntroVideoPreview
+              uri={videoUrl}
               style={styles.videoPreview}
-              useNativeControls
-              resizeMode={ResizeMode.COVER}
-              shouldPlay={false}
+              contentFit="cover"
             />
             <Text style={[styles.mediaText, { color: colors.online, marginTop: 8 }]}>
               Video ready · tap to replace
