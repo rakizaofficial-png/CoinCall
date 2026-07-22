@@ -18,6 +18,8 @@ import { HostApplyScreen } from '../screens/auth/HostApplyScreen';
 import { HostPendingScreen } from '../screens/auth/HostPendingScreen';
 import { CallScreen } from '../screens/call/CallScreen';
 import { ChatScreen } from '../screens/main/ChatScreen';
+import { CallHistoryScreen } from '../screens/main/CallHistoryScreen';
+import { CoinHistoryScreen } from '../screens/main/CoinHistoryScreen';
 import { EarningsScreen } from '../screens/main/EarningsScreen';
 import { EditHostProfileScreen } from '../screens/main/EditHostProfileScreen';
 import { FanProfileScreen } from '../screens/main/FanProfileScreen';
@@ -106,6 +108,8 @@ function AuthenticatedApp() {
           <Stack.Screen name="LiveRoom" component={LiveRoomScreen} />
           <Stack.Screen name="Withdraw" component={WithdrawScreen} />
           <Stack.Screen name="Earnings" component={EarningsScreen} />
+          <Stack.Screen name="CoinHistory" component={CoinHistoryScreen} />
+          <Stack.Screen name="CallHistory" component={CallHistoryScreen} />
           <Stack.Screen name="EditHostProfile" component={EditHostProfileScreen} />
           <Stack.Screen name="Calling" component={CallingScreen} />
         </Stack.Navigator>

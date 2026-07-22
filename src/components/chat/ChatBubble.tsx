@@ -1,4 +1,5 @@
 import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { font } from '../../theme/fonts';
 import { CHAT_THEME, type ChatMessageStatus } from './chatTheme';
 import { formatChatTime } from './formatChatTime';
 
@@ -43,16 +44,31 @@ export function ChatBubble({
           </Pressable>
         ) : null}
         {message.text ? (
-          <Text style={{ color: mine ? CHAT_THEME.mineText : CHAT_THEME.theirsText }}>
+          <Text
+            style={[
+              styles.body,
+              { color: mine ? CHAT_THEME.mineText : CHAT_THEME.theirsText },
+            ]}
+          >
             {message.text}
           </Text>
         ) : null}
         <View style={styles.meta}>
-          <Text style={styles.time}>{formatChatTime(message.createdAt)}</Text>
+          <Text style={[styles.time, !mine && styles.timeTheirs]}>
+            {formatChatTime(message.createdAt)}
+          </Text>
           {mine && message.status === 'sending' ? (
             <ActivityIndicator size="small" color="rgba(255,255,255,0.7)" />
           ) : receipt ? (
-            <Text style={styles.receipt}>{receipt}</Text>
+            <Text
+              style={[
+                styles.receipt,
+                message.status === 'read' && { color: CHAT_THEME.accent },
+                message.status === 'failed' && { color: '#FF8FA3' },
+              ]}
+            >
+              {receipt}
+            </Text>
           ) : null}
         </View>
       </View>
@@ -61,14 +77,15 @@ export function ChatBubble({
 }
 
 const styles = StyleSheet.create({
-  row: { marginBottom: 8, maxWidth: '100%' },
-  rowMine: { alignSelf: 'flex-end' },
-  rowTheirs: { alignSelf: 'flex-start' },
+  row: { marginBottom: 10, maxWidth: '100%' },
+  rowMine: { alignSelf: 'flex-end', alignItems: 'flex-end' },
+  rowTheirs: { alignSelf: 'flex-start', alignItems: 'flex-start' },
   bubble: {
     maxWidth: '78%',
     borderRadius: CHAT_THEME.bubbleRadius,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 14,
+    paddingTop: 10,
+    paddingBottom: 8,
   },
   mine: {
     borderBottomRightRadius: CHAT_THEME.bubbleRadiusTail,
@@ -78,19 +95,36 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: CHAT_THEME.border,
   },
+  body: {
+    fontFamily: font.medium,
+    fontSize: 15,
+    lineHeight: 21,
+    fontWeight: '500',
+  },
   image: {
-    width: 180,
-    height: 180,
-    borderRadius: 12,
+    width: 200,
+    height: 200,
+    borderRadius: 14,
     marginBottom: 6,
   },
   meta: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
-    gap: 6,
-    marginTop: 4,
+    gap: 5,
+    marginTop: 5,
   },
-  time: { fontSize: 10, color: 'rgba(255,255,255,0.55)', fontWeight: '600' },
-  receipt: { fontSize: 10, color: 'rgba(255,255,255,0.75)', fontWeight: '800' },
+  time: {
+    fontFamily: font.medium,
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.6)',
+    fontWeight: '500',
+  },
+  timeTheirs: { color: 'rgba(244,247,255,0.45)' },
+  receipt: {
+    fontFamily: font.bold,
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.75)',
+    fontWeight: '700',
+  },
 });

@@ -19,9 +19,7 @@ import { useApp } from '../../context/AppContext';
 import {
   fetchHostEarnings,
   formatDuration,
-  type HostCallHistoryRow,
   type HostEarningsPayload,
-  type HostGiftHistoryRow,
 } from '../../services/hostEarningsApi';
 import {
   fetchHostWeeklyEarnings,
@@ -73,8 +71,6 @@ export function EarningsScreen({ navigation }: { navigation: any }) {
   );
 
   const summary = payload?.summary;
-  const calls: HostCallHistoryRow[] = payload?.calls || [];
-  const gifts: HostGiftHistoryRow[] = payload?.gifts || [];
   const callCoins = Math.max(
     summary?.callCoins ?? 0,
     fbStats?.totalCallCoins ?? 0,
@@ -205,56 +201,31 @@ export function EarningsScreen({ navigation }: { navigation: any }) {
         <Wallet size={18} color={colors.primarySoft} />
       </Pressable>
 
-      <Text style={[styles.section, { color: colors.text, marginTop: 18 }]}>
-        Call Analytics
-      </Text>
-      {calls.length === 0 ? (
-        <Text style={{ color: colors.textSecondary, marginBottom: 12 }}>
-          No calls recorded yet.
-        </Text>
-      ) : (
-        calls.slice(0, 12).map((c) => (
-          <View
-            key={c.id}
-            style={[styles.tx, { borderColor: colors.border, backgroundColor: colors.bgCard }]}
-          >
-            <View style={{ flex: 1 }}>
-              <Text style={{ color: colors.text, fontWeight: '700' }}>
-                {c.userName || 'Caller'}
-              </Text>
-              <Text style={{ color: colors.textMuted, fontSize: 11 }}>
-                {new Date(c.startedAt).toLocaleString()} · {formatDuration(c.durationSec)}
-              </Text>
-            </View>
-            <Text style={{ color: colors.online, fontWeight: '900' }}>+{c.coinsSpent}</Text>
-          </View>
-        ))
-      )}
+      <Pressable
+        style={[styles.link, { borderColor: colors.border, backgroundColor: colors.bgCard }]}
+        onPress={() => navigation.navigate('CoinHistory')}
+      >
+        <Gift size={20} color={colors.primarySoft} />
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: colors.text, fontWeight: '800' }}>Coin History</Text>
+          <Text style={{ color: colors.textMuted, fontSize: 12 }}>
+            Ledger with tabs, filters, and pages
+          </Text>
+        </View>
+      </Pressable>
 
-      <Text style={[styles.section, { color: colors.text, marginTop: 10 }]}>
-        Gifts received
-      </Text>
-      {gifts.length === 0 ? (
-        <Text style={{ color: colors.textSecondary }}>No gifts yet.</Text>
-      ) : (
-        gifts.slice(0, 20).map((g) => (
-          <View
-            key={g.id}
-            style={[styles.tx, { borderColor: colors.border, backgroundColor: colors.bgCard }]}
-          >
-            <Text style={{ fontSize: 22, marginRight: 8 }}>{g.giftEmoji}</Text>
-            <View style={{ flex: 1 }}>
-              <Text style={{ color: colors.text, fontWeight: '700' }}>
-                {g.giftName} · from {g.fromName}
-              </Text>
-              <Text style={{ color: colors.textMuted, fontSize: 11 }}>
-                {new Date(g.createdAt).toLocaleString()}
-              </Text>
-            </View>
-            <Text style={{ color: colors.online, fontWeight: '900' }}>+{g.coins}</Text>
-          </View>
-        ))
-      )}
+      <Pressable
+        style={[styles.link, { borderColor: colors.border, backgroundColor: colors.bgCard }]}
+        onPress={() => navigation.navigate('CallHistory')}
+      >
+        <Phone size={20} color={colors.accent} />
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: colors.text, fontWeight: '800' }}>Call History</Text>
+          <Text style={{ color: colors.textMuted, fontSize: 12 }}>
+            {totalCalls} calls · {formatDuration(totalDurationSec)}
+          </Text>
+        </View>
+      </Pressable>
     </Screen>
   );
 }
@@ -285,13 +256,5 @@ const styles = StyleSheet.create({
     borderRadius: radii.lg,
     padding: 14,
     minHeight: 64,
-  },
-  tx: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderRadius: 14,
-    padding: 12,
-    marginBottom: 8,
   },
 });
