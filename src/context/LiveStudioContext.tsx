@@ -47,6 +47,8 @@ type GoLiveDraft = {
   thumbnailUrl: string;
   beautyOn: boolean;
   facing: 'user' | 'environment';
+  entryLocked: boolean;
+  entryFee: number;
 };
 
 type LiveStudioValue = {
@@ -138,6 +140,8 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
     thumbnailUrl: user.avatarUrl,
     beautyOn: true,
     facing: 'user',
+    entryLocked: false,
+    entryFee: 50,
   });
 
   const setGoLiveDraft = useCallback((patch: Partial<GoLiveDraft>) => {
@@ -249,6 +253,23 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
     let unsub: (() => void) | undefined;
     void import('../services/realtimeWs').then(({ subscribeRealtime }) => {
       unsub = subscribeRealtime((event) => {
+        if (event.type === 'live:ended') {
+          const p = event.payload as { id?: string; hostId?: string };
+          setLiveRooms((list) =>
+            list.filter((r) => r.id !== p?.id && r.hostId !== p?.hostId),
+          );
+          return;
+        }
+        if (event.type === 'live:room') {
+          const p = event.payload as LiveRoom;
+          if (p?.isLive && p.hostId) {
+            setLiveRooms((list) => {
+              const rest = list.filter((r) => r.hostId !== p.hostId);
+              return [p, ...rest];
+            });
+          }
+          return;
+        }
         if (event.type === 'live:comment') {
           const p = event.payload as {
             roomId?: string;
@@ -420,6 +441,9 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
     } catch {
       /* keep local — API may convert data: on receive */
     }
+    const entryFee = goLiveDraft.entryLocked
+      ? Math.max(10, Math.min(9999, Math.floor(goLiveDraft.entryFee) || 50))
+      : 0;
     const room: LiveRoom = {
       id,
       hostId: user.id,
@@ -439,6 +463,8 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
       level: user.level,
       badge: user.isVerified ? 'Verified Host' : 'Host',
       startedAt: Date.now(),
+      entryLocked: entryFee > 0,
+      entryFee,
     };
     await publishLiveRoom(room);
     setMyLiveRoom(room);
@@ -479,13 +505,20 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
     } catch {
       /* optional */
     }
-    notify('You are Live', 'Luma users can join your stream now.');
+    notify(
+      'You are Live',
+      entryFee > 0
+        ? `Room locked · ${entryFee} coins to enter`
+        : 'Luma users can join your stream now.',
+    );
     return room;
   }, [
     goLiveDraft.category,
     goLiveDraft.language,
     goLiveDraft.thumbnailUrl,
     goLiveDraft.title,
+    goLiveDraft.entryFee,
+    goLiveDraft.entryLocked,
     setHostOnline,
     user.avatarUrl,
     user.country,

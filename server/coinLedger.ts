@@ -14,6 +14,7 @@ import { randomUUID } from 'crypto';
 export type TxnType =
   | 'call_minute'
   | 'gift'
+  | 'live_entry'
   | 'purchase'
   | 'reward_daily'
   | 'reward_spin'
@@ -172,7 +173,7 @@ export function transferUserToHost(
   deps: LedgerDeps,
   input: {
     txnKey: string;
-    type: Extract<TxnType, 'call_minute' | 'gift'>;
+    type: Extract<TxnType, 'call_minute' | 'gift' | 'live_entry'>;
     userId: string;
     hostId: string;
     gross: number;

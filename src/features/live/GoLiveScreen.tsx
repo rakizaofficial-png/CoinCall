@@ -3,6 +3,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import {
   Camera,
   FlipHorizontal,
+  Lock,
   Mic,
   MicOff,
   Sparkles,
@@ -14,6 +15,7 @@ import {
   Platform,
   Pressable,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -280,6 +282,39 @@ export function GoLiveScreen({ navigation, mode = 'solo' }: Props) {
             Cover uses your profile photo. Language & category stay from last time.
           </Text>
 
+          <View style={[styles.lockRow, { borderColor: colors.border }]}>
+            <View style={styles.lockLeft}>
+              <Lock size={18} color={goLiveDraft.entryLocked ? '#F5C14C' : colors.textMuted} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.lockTitle, { color: colors.text }]}>Lock Live by Coins</Text>
+                <Text style={[styles.hint, { color: colors.textMuted, marginTop: 2 }]}>
+                  Fans pay coins before entering your room
+                </Text>
+              </View>
+            </View>
+            <Switch
+              value={goLiveDraft.entryLocked}
+              onValueChange={(entryLocked) => setGoLiveDraft({ entryLocked })}
+              trackColor={{ false: '#334155', true: '#FF4D8D' }}
+              thumbColor="#fff"
+            />
+          </View>
+
+          {goLiveDraft.entryLocked ? (
+            <View style={styles.feeRow}>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>Entry fee (coins)</Text>
+              <TextInput
+                style={[styles.feeInput, { color: colors.text, borderColor: colors.border }]}
+                keyboardType="number-pad"
+                value={String(goLiveDraft.entryFee || 50)}
+                onChangeText={(v) => {
+                  const n = Math.max(10, Math.min(9999, Number(v.replace(/\D/g, '')) || 0));
+                  setGoLiveDraft({ entryFee: n });
+                }}
+              />
+            </View>
+          ) : null}
+
           <PrimaryButton
             label={busy ? 'Starting…' : 'Start Live'}
             onPress={() => void onStart()}
@@ -379,5 +414,28 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     minHeight: 48,
     backgroundColor: 'rgba(255,255,255,0.04)',
+  },
+  lockRow: {
+    marginTop: 14,
+    padding: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+  },
+  lockLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
+  lockTitle: { fontWeight: '800', fontSize: 14 },
+  feeRow: { marginTop: 10 },
+  feeInput: {
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontWeight: '800',
+    fontSize: 18,
+    backgroundColor: 'rgba(245,193,76,0.08)',
   },
 });

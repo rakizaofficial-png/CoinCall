@@ -4074,6 +4074,45 @@ registerAgencyRoutes(app, {
 /** In-memory live rooms (Firebase is source of truth on clients; API mirrors for Luma) */
 const liveRooms = new Map<string, Record<string, unknown>>();
 
+/** Paid live entry entitlements — key: roomId:userId:sessionStartedAt */
+const liveEntryEntitlements = new Map<
+  string,
+  { roomId: string; userId: string; hostId: string; coins: number; paidAt: number; sessionStartedAt: number }
+>();
+
+function liveEntryKey(roomId: string, userId: string, sessionStartedAt: number) {
+  return `${roomId}:${userId}:${sessionStartedAt}`;
+}
+
+function clearLiveEntitlementsForRoom(roomId: string) {
+  for (const [key, ent] of liveEntryEntitlements) {
+    if (ent.roomId === roomId) liveEntryEntitlements.delete(key);
+  }
+}
+
+function roomEntryFee(room: Record<string, unknown>): number {
+  if (!room.entryLocked) return 0;
+  return Math.max(0, Math.floor(Number(room.entryFee) || 0));
+}
+
+function hasLiveEntryAccess(
+  room: Record<string, unknown>,
+  userId: string,
+): { allowed: boolean; entryFee: number; alreadyPaid: boolean; reason?: string } {
+  const entryFee = roomEntryFee(room);
+  if (entryFee <= 0) return { allowed: true, entryFee: 0, alreadyPaid: true };
+  const roomId = String(room.id || '');
+  const sessionStartedAt = Number(room.startedAt || room.createdAt || 0);
+  const key = liveEntryKey(roomId, userId, sessionStartedAt);
+  const paid = liveEntryEntitlements.has(key);
+  return {
+    allowed: paid,
+    entryFee,
+    alreadyPaid: paid,
+    reason: paid ? undefined : 'payment_required',
+  };
+}
+
 /** End all live rooms for a host (offline / TTL / force). */
 function endLiveRoomsForHost(hostId: string, reason = 'host_offline') {
   const hid = String(hostId || '').trim();
@@ -4099,6 +4138,7 @@ function endLiveRoomsForHost(hostId: string, reason = 'host_offline') {
       giftCoins: Math.max(0, Math.floor(Number(room.giftCoins) || 0)),
     });
     broadcastWs({ type: 'live:ended', payload: { id, reason } });
+    clearLiveEntitlementsForRoom(String(room.id || id));
     n += 1;
   }
   if (n) persist();
@@ -4684,8 +4724,8 @@ app.get('/api/live/rooms', (req, res) => {
       if (!r.isLive || String(r.mode || 'solo') === 'party') return false;
       const hostId = String(r.hostId || r.id || '');
       const presence = hostId ? getPresence(hostId) : undefined;
-      // Host must still be online — offline hosts never appear as live
-      return Boolean(presence?.isOnline && (presence.isLive || r.isLive));
+      // Host must still be online AND actively live — never show stale/cached live
+      return Boolean(presence?.isOnline && presence.isLive && r.isLive);
     })
     .map((r) => {
       const hostId = String(r.hostId || r.id || 'host');
@@ -4862,6 +4902,7 @@ app.post('/api/live/rooms/:id/end', (req, res) => {
     }
   }
   broadcastWs({ type: 'live:ended', payload: { id } });
+  clearLiveEntitlementsForRoom(id);
   res.json({ ok: true });
 });
 
@@ -4898,6 +4939,128 @@ app.post('/api/live/rooms/:id/recharge', (req, res) => {
   const event = recordUserRecharge({ userId, userName, coins, roomId: id });
   pushToHost(String(room.hostId || ''), 'viewer_recharge', event);
   res.json({ ok: true, recharge: event });
+});
+
+/** Check whether a viewer may enter a coin-locked live room */
+app.get('/api/live/rooms/:id/access', (req, res) => {
+  const found = findLiveRoom(req.params.id);
+  if (!found?.room?.isLive) {
+    res.status(404).json({ error: 'Live room not found', allowed: false });
+    return;
+  }
+  const userId = String(req.query.userId || '').trim();
+  if (!userId) {
+    res.status(400).json({ error: 'userId required' });
+    return;
+  }
+  const access = hasLiveEntryAccess(found.room, userId);
+  res.json({
+    roomId: found.id,
+    hostId: String(found.room.hostId || ''),
+    entryLocked: Boolean(found.room.entryLocked),
+    entryFee: access.entryFee,
+    allowed: access.allowed,
+    alreadyPaid: access.alreadyPaid,
+    reason: access.reason,
+  });
+});
+
+/** Pay coins to enter a locked live session (idempotent per session) */
+app.post('/api/live/rooms/:id/join', (req, res) => {
+  const found = findLiveRoom(req.params.id);
+  if (!found?.room?.isLive) {
+    res.status(404).json({ error: 'Live room not found' });
+    return;
+  }
+  const room = found.room;
+  const roomId = found.id;
+  const userId = String(req.body?.userId || '').trim();
+  const userName = String(req.body?.userName || 'Viewer').slice(0, 40);
+  if (!userId) {
+    res.status(400).json({ error: 'userId required' });
+    return;
+  }
+  const hostId = String(room.hostId || '');
+  const entryFee = roomEntryFee(room);
+  if (entryFee <= 0) {
+    res.json({
+      ok: true,
+      free: true,
+      entryFee: 0,
+      wallet: walletPublic(ensureWallet(userId)),
+    });
+    return;
+  }
+
+  const sessionStartedAt = Number(room.startedAt || room.createdAt || Date.now());
+  const key = liveEntryKey(roomId, userId, sessionStartedAt);
+  const existing = liveEntryEntitlements.get(key);
+  if (existing) {
+    res.json({
+      ok: true,
+      alreadyPaid: true,
+      entryFee,
+      entitlement: existing,
+      wallet: walletPublic(ensureWallet(userId)),
+    });
+    return;
+  }
+
+  const txnKey =
+    String(req.headers['idempotency-key'] || req.body?.txnKey || '').trim() ||
+    `live_entry:${roomId}:${userId}:${sessionStartedAt}`;
+  const xfer = transferUserToHost(coinDeps(), {
+    txnKey,
+    type: 'live_entry',
+    userId,
+    hostId,
+    gross: entryFee,
+    reason: `live_entry_${roomId}`,
+    meta: { roomId, sessionStartedAt },
+    userDisplayName: userName,
+    hostDisplayName: String(room.hostName || 'Host'),
+  });
+  if (!xfer.ok) {
+    res.status(xfer.code).json({
+      error: xfer.txn.error || 'Insufficient coins',
+      need: entryFee,
+      wallet: walletPublic(ensureWallet(userId)),
+      txn: xfer.txn,
+    });
+    return;
+  }
+
+  const hostWallet = ensureWallet(hostId);
+  recordHostEarning(hostId, xfer.txn.coinsCreditedHost, {
+    kind: 'live',
+    coinBalance: hostWallet.coinBalance,
+    broadcast: broadcastWs,
+  });
+
+  const entitlement = {
+    roomId,
+    userId,
+    hostId,
+    coins: entryFee,
+    paidAt: Date.now(),
+    sessionStartedAt,
+  };
+  liveEntryEntitlements.set(key, entitlement);
+
+  broadcastWs({
+    type: 'live:entry:paid',
+    payload: { roomId, userId, userName, coins: entryFee, hostId },
+  });
+
+  persist();
+  res.json({
+    ok: true,
+    entryFee,
+    entitlement,
+    txnId: xfer.txn.id,
+    wallet: walletPublic(ensureWallet(userId)),
+    hostWallet: walletPublic(hostWallet),
+  });
 });
 
 /** Active users (for mass text) */
@@ -5025,6 +5188,7 @@ app.get('/api/live/token', (req, res) => {
     const hostId = String(req.query.hostId || '').trim();
     const channelParam = String(req.query.channel || '').trim();
     const channel = channelParam || (hostId ? `live_${hostId}` : '');
+    const userId = String(req.query.userId || req.headers['x-user-id'] || '').trim();
     if (!channel) {
       res.status(400).json({ error: 'hostId or channel required' });
       return;
@@ -5039,6 +5203,24 @@ app.get('/api/live/token', (req, res) => {
       res.status(403).json({ error: 'Channel not allowed' });
       return;
     }
+
+    // Coin-locked live: require paid entry before issuing Agora token
+    if (!adminOk && channel.startsWith('live_') && userId) {
+      const found = findLiveRoom(hostId || channel);
+      if (found?.room?.isLive) {
+        const access = hasLiveEntryAccess(found.room, userId);
+        if (!access.allowed && access.entryFee > 0) {
+          res.status(402).json({
+            error: 'Payment required to enter live',
+            entryFee: access.entryFee,
+            entryLocked: true,
+            roomId: found.id,
+          });
+          return;
+        }
+      }
+    }
+
     const uid = Number(req.query.uid || Math.floor(100000 + Math.random() * 800000));
     // Publisher privilege so RTC subscribe works even if project role checks are strict
     res.json(mintToken(channel, uid, 'publisher'));

@@ -1,10 +1,25 @@
-import { Alert, Platform } from 'react-native';
+import { Platform } from 'react-native';
+import { getPremiumModal } from '../components/premium/premiumModalApi';
+
+function inferVariant(title: string): 'success' | 'error' | 'warning' | 'info' {
+  const t = title.toLowerCase();
+  if (t.includes('fail') || t.includes('error') || t.includes('could not')) return 'error';
+  if (t.includes('success') || t.includes('sent') || t.includes('live') || t.includes('thanks'))
+    return 'success';
+  if (t.includes('permission') || t.includes('warning') || t.includes('muted')) return 'warning';
+  return 'info';
+}
 
 /**
- * Non-blocking toast on web (never window.alert — that blocks Attend on incoming calls).
- * Native still uses Alert for important messages.
+ * Non-blocking premium toast on native + web.
  */
 export function notify(title: string, message?: string) {
+  const modal = getPremiumModal();
+  if (modal) {
+    modal.toast(title, message, { variant: inferVariant(title) });
+    return;
+  }
+
   const text = message ? `${title} · ${message}` : title;
 
   if (Platform.OS === 'web' && typeof document !== 'undefined') {
@@ -29,7 +44,8 @@ export function notify(title: string, message?: string) {
     return;
   }
 
-  Alert.alert(title, message);
+  // Fallback before provider mounts
+  console.log('[notify]', text);
 }
 
 export function confirmAction(
@@ -38,14 +54,16 @@ export function confirmAction(
   onConfirm: () => void,
   confirmLabel = 'OK',
 ) {
+  const modal = getPremiumModal();
+  if (modal) {
+    modal.confirm(title, message, onConfirm, confirmLabel);
+    return;
+  }
   if (Platform.OS === 'web') {
     if (window.confirm(`${title}\n\n${message}`)) onConfirm();
     return;
   }
-  Alert.alert(title, message, [
-    { text: 'Cancel', style: 'cancel' },
-    { text: confirmLabel, onPress: onConfirm },
-  ]);
+  onConfirm();
 }
 
 export function promptChoices(
@@ -53,6 +71,11 @@ export function promptChoices(
   message: string,
   choices: { label: string; onPress: () => void }[],
 ) {
+  const modal = getPremiumModal();
+  if (modal) {
+    modal.choices(title, message, choices);
+    return;
+  }
   if (Platform.OS === 'web') {
     const list = choices.map((c, i) => `${i + 1}. ${c.label}`).join('\n');
     const raw = window.prompt(`${title}\n\n${message}\n\n${list}\n\nEnter number:`);
@@ -60,44 +83,24 @@ export function promptChoices(
     if (idx >= 0 && idx < choices.length) choices[idx].onPress();
     return;
   }
-  Alert.alert(title, message, [
-    ...choices.map((c) => ({ text: c.label, onPress: c.onPress })),
-    { text: 'Cancel', style: 'cancel' as const },
-  ]);
+  choices[0]?.onPress();
 }
 
-/** Simple text prompt (web prompt / native Alert with default value). */
 export function promptText(
   title: string,
   message: string,
   onSubmit: (value: string) => void,
   defaultValue = '',
 ) {
+  const modal = getPremiumModal();
+  if (modal) {
+    modal.prompt(title, message, onSubmit, { defaultValue });
+    return;
+  }
   if (Platform.OS === 'web') {
     const raw = window.prompt(`${title}\n\n${message}`, defaultValue);
     if (raw != null && raw.trim()) onSubmit(raw.trim());
     return;
   }
-  if (typeof Alert.prompt === 'function') {
-    Alert.prompt(
-      title,
-      message,
-      (value) => {
-        if (value?.trim()) onSubmit(value.trim());
-      },
-      'plain-text',
-      defaultValue,
-    );
-    return;
-  }
-  // Android fallback
-  Alert.alert(title, `${message}${defaultValue ? `\n\nCurrent: ${defaultValue}` : ''}`, [
-    { text: 'Cancel', style: 'cancel' },
-    {
-      text: 'OK',
-      onPress: () => {
-        if (defaultValue.trim()) onSubmit(defaultValue.trim());
-      },
-    },
-  ]);
+  if (defaultValue.trim()) onSubmit(defaultValue.trim());
 }

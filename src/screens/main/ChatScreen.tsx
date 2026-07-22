@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChatBubble, type ChatBubbleMessage } from '../../components/chat/ChatBubble';
+import { ChatSystemProfileHeader } from '../../components/chat/ChatSystemProfileHeader';
 import { ChatComposer } from '../../components/chat/ChatComposer';
 import { ChatThreadLayout } from '../../components/chat/ChatThreadLayout';
 import { ImageViewerModal } from '../../components/chat/ImageViewerModal';
@@ -36,6 +37,12 @@ export function ChatScreen({ navigation, route }: Props) {
   const peerAvatar =
     route.params.peerAvatar || getHost(peerId)?.avatarUrl || '';
   const meId = authUser?.id || user.id;
+  const isSystemChat =
+    peerId === 'admin_support' ||
+    peerId.startsWith('admin') ||
+    peerId === 'system' ||
+    peerName.toLowerCase().includes('administrator') ||
+    peerName.toLowerCase().includes('system');
   const [text, setText] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [pending, setPending] = useState<ChatBubbleMessage[]>([]);
@@ -75,9 +82,16 @@ export function ChatScreen({ navigation, route }: Props) {
 
   useEffect(() => {
     if (!bubbles.length) return;
-    const t = setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 60);
+    requestAnimationFrame(() => {
+      listRef.current?.scrollToEnd({ animated: true });
+    });
+  }, [bubbles.length]);
+
+  useEffect(() => {
+    if (!text) return;
+    const t = setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 80);
     return () => clearTimeout(t);
-  }, [bubbles.length, text]);
+  }, [text]);
 
   const send = async (imageUrl?: string) => {
     if ((!text.trim() && !imageUrl) || sending) return;
@@ -187,6 +201,13 @@ export function ChatScreen({ navigation, route }: Props) {
     <>
       <ChatThreadLayout
         header={header}
+        listHeader={
+          isSystemChat ? (
+            <ChatSystemProfileHeader
+              onNavigate={(screen) => navigation.navigate(screen)}
+            />
+          ) : undefined
+        }
         composer={
           <ChatComposer
             value={text}

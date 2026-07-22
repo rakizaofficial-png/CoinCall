@@ -10,7 +10,7 @@ import { ArrowLeft, Eye, Gift, Heart, Video } from "lucide-react";
 import { creators } from "@/lib/data";
 import { useApp } from "@/lib/store";
 import { GiftSheet } from "@/components/GiftSheet";
-import { fetchLiveHosts, type LiveHost } from "@/lib/api";
+import { fetchLiveHosts, checkLiveAccess, joinLiveRoom, type LiveHost } from "@/lib/api";
 import { requireApiBase } from "@/config/apiConfig";
 import {
   startUserAgoraLiveAudience,
@@ -38,6 +38,8 @@ type RoomRow = {
   channel?: string;
   ratePerMinute?: number;
   viewers?: number;
+  entryLocked?: boolean;
+  entryFee?: number;
 };
 
 export default function LiveRoomPage({
@@ -47,7 +49,7 @@ export default function LiveRoomPage({
 }) {
   const { id } = use(params);
   const mock = creators.find((c) => c.id === id) ?? null;
-  const { coins, following, toggleFollow, pushToast } = useApp();
+  const { coins, following, toggleFollow, pushToast, userId, syncWallet } = useApp();
 
   const [host, setHost] = useState<LiveHost | null>(null);
   const [room, setRoom] = useState<RoomRow | null>(null);
@@ -59,6 +61,10 @@ export default function LiveRoomPage({
   const [error, setError] = useState<string | null>(null);
   const [videoStatus, setVideoStatus] = useState("Connecting live…");
   const [hasVideo, setHasVideo] = useState(false);
+  const [entryPaid, setEntryPaid] = useState(false);
+  const [paywallOpen, setPaywallOpen] = useState(false);
+  const [entryFee, setEntryFee] = useState(0);
+  const [paying, setPaying] = useState(false);
   const remoteRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -133,7 +139,31 @@ export default function LiveRoomPage({
   }, [host, room, mock, id]);
 
   useEffect(() => {
-    if (!ready || !display.channel) return;
+    if (!ready || !display.roomId || !userId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const access = await checkLiveAccess(display.roomId, userId);
+        if (cancelled) return;
+        if (access.entryFee > 0 && !access.allowed) {
+          setEntryFee(access.entryFee);
+          setPaywallOpen(true);
+          setEntryPaid(false);
+        } else {
+          setEntryPaid(true);
+          setPaywallOpen(false);
+        }
+      } catch {
+        if (!cancelled) setEntryPaid(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, display.roomId, userId]);
+
+  useEffect(() => {
+    if (!ready || !display.channel || !entryPaid) return;
     let active = true;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -170,7 +200,7 @@ export default function LiveRoomPage({
           if (!active) return;
           try {
             const res = await fetch(
-              `${requireApiBase()}/live/token?hostId=${encodeURIComponent(display.id)}&channel=${encodeURIComponent(channel)}`,
+              `${requireApiBase()}/live/token?hostId=${encodeURIComponent(display.id)}&channel=${encodeURIComponent(channel)}&userId=${encodeURIComponent(userId)}`,
               { cache: "no-store" },
             );
             const data = (await res.json()) as {
@@ -240,7 +270,29 @@ export default function LiveRoomPage({
     room?.id,
     room?.channel,
     pushToast,
+    userId,
+    entryPaid,
   ]);
+
+  const payEntry = async () => {
+    if (!display.roomId || !userId) return;
+    setPaying(true);
+    try {
+      const result = await joinLiveRoom(display.roomId, userId, "Fan");
+      await syncWallet();
+      setEntryPaid(true);
+      setPaywallOpen(false);
+      pushToast(
+        result.alreadyPaid
+          ? "Already unlocked"
+          : `Paid ${result.entryFee} coins · entering live`,
+      );
+    } catch (e) {
+      pushToast(e instanceof Error ? e.message : "Could not unlock live");
+    } finally {
+      setPaying(false);
+    }
+  };
 
   const like = () => {
     setLikes((l) => l + 1);
@@ -273,6 +325,40 @@ export default function LiveRoomPage({
         className="absolute inset-0 z-[1]"
       />
       <div className="pointer-events-none absolute inset-0 z-[2] bg-gradient-to-b from-black/50 via-transparent to-black/90" />
+
+      {paywallOpen ? (
+        <div className="absolute inset-0 z-[30] flex items-center justify-center bg-black/70 p-6 backdrop-blur-md">
+          <div className="w-full max-w-sm rounded-3xl border border-white/10 bg-[#121826]/95 p-6 text-center shadow-2xl">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-amber-400/20 text-2xl">
+              🔒
+            </div>
+            <h2 className="text-lg font-black text-white">Locked Live</h2>
+            <p className="mt-2 text-sm text-white/65">
+              {display.name} requires a coin entry fee to watch this stream.
+            </p>
+            <p className="mt-4 text-3xl font-black text-amber-300">
+              {entryFee} <span className="text-sm font-bold">coins</span>
+            </p>
+            <p className="mt-1 text-xs text-white/45">
+              Your balance: {coins.toLocaleString()} coins
+            </p>
+            <button
+              type="button"
+              disabled={paying || coins < entryFee}
+              onClick={() => void payEntry()}
+              className="mt-5 w-full rounded-2xl bg-gradient-to-r from-coral to-fuchsia-500 py-3.5 text-sm font-black text-white disabled:opacity-50"
+            >
+              {paying ? "Processing…" : `Pay ${entryFee} coins to enter`}
+            </button>
+            <Link
+              href="/live"
+              className="mt-3 inline-block text-xs font-semibold text-white/50"
+            >
+              Back to live list
+            </Link>
+          </div>
+        </div>
+      ) : null}
 
       <div className="relative z-10 flex min-h-dvh flex-col px-4 pb-24 pt-[max(0.75rem,env(safe-area-inset-top))]">
         <div className="flex items-start justify-between gap-2">

@@ -206,6 +206,11 @@ export function LiveRoomScreen({ navigation, route }: Props) {
           <View style={styles.livePill}>
             <Text style={styles.livePillText}>LIVE</Text>
           </View>
+          {room.entryLocked && (room.entryFee || 0) > 0 ? (
+            <View style={styles.lockPill}>
+              <Text style={styles.lockPillText}>🔒 {room.entryFee}</Text>
+            </View>
+          ) : null}
         </View>
         <View style={styles.topRight}>
           <View style={styles.statPill}>
@@ -384,6 +389,15 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   livePillText: { color: '#fff', fontSize: 10, fontWeight: '900' },
+  lockPill: {
+    backgroundColor: 'rgba(245,193,76,0.25)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(245,193,76,0.45)',
+  },
+  lockPillText: { color: '#F5C14C', fontSize: 10, fontWeight: '900' },
   topRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   statPill: {
     flexDirection: 'row',

@@ -31,6 +31,10 @@ export type LiveRoom = {
   badge: string;
   startedAt: number;
   seats?: PartySeatPublic[];
+  /** Coin paywall — viewers must pay entryFee before joining */
+  entryLocked?: boolean;
+  entryFee?: number;
+  endedAt?: number;
 };
 
 export type PartySeatPublic = {
@@ -121,6 +125,14 @@ export async function endLiveRoom(roomId: string, hostId: string) {
   }).catch(() => undefined);
 }
 
+function isValidLiveRoom(r: LiveRoom): boolean {
+  if (!r?.id || !r.hostId || !r.isLive || r.mode === 'party') return false;
+  if ((r as LiveRoom).endedAt) return false;
+  if (/^h\d+$/i.test(r.hostId)) return false;
+  if (r.hostId.startsWith('mock_') || r.hostId.startsWith('demo_')) return false;
+  return true;
+}
+
 export function listenLiveRooms(onRooms: (rooms: LiveRoom[]) => void): Unsubscribe {
   let dead = false;
   let fromFb: LiveRoom[] = [];
@@ -129,18 +141,23 @@ export function listenLiveRooms(onRooms: (rooms: LiveRoom[]) => void): Unsubscri
   const emit = () => {
     if (dead) return;
     const map = new Map<string, LiveRoom>();
-    for (const r of [...fromApi, ...fromFb]) {
-      if (!r?.id || !r.isLive) continue;
+    // API is authoritative for presence; prefer over Firebase stale cache
+    for (const r of fromApi) {
+      if (!isValidLiveRoom(r)) continue;
       map.set(r.id, r);
     }
-    onRooms([...map.values()].sort((a, b) => (b.viewers || 0) - (a.viewers || 0)));
+    for (const r of fromFb) {
+      if (!isValidLiveRoom(r)) continue;
+      if (!map.has(r.id)) map.set(r.id, r);
+    }
+    onRooms([...map.values()].sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0)));
   };
 
   const pollApi = async () => {
     try {
       const res = await fetch(`${api()}/live/rooms`);
       const data = (await res.json()) as { rooms?: LiveRoom[] };
-      fromApi = (data.rooms || []).filter((r) => r.isLive);
+      fromApi = (data.rooms || []).filter((r) => isValidLiveRoom(r));
       emit();
     } catch {
       // keep last
@@ -159,7 +176,7 @@ export function listenLiveRooms(onRooms: (rooms: LiveRoom[]) => void): Unsubscri
         return;
       }
       const val = snap.val() as Record<string, LiveRoom>;
-      fromFb = Object.values(val).filter((r) => r.isLive);
+      fromFb = Object.values(val).filter((r) => isValidLiveRoom(r));
       emit();
     });
   }

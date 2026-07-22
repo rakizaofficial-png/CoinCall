@@ -1,6 +1,7 @@
 import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { PremiumModalProvider } from './src/components/premium/PremiumModalProvider';
 import { AuthProvider } from './src/context/AuthContext';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { ThemeProvider, useTheme } from './src/theme/ThemeContext';
@@ -20,9 +21,11 @@ function AppShell() {
 export default function App() {
   return (
     <SafeAreaProvider>
-      <ThemeProvider>
-        <AppShell />
-      </ThemeProvider>
+      <PremiumModalProvider>
+        <ThemeProvider>
+          <AppShell />
+        </ThemeProvider>
+      </PremiumModalProvider>
     </SafeAreaProvider>
   );
 }

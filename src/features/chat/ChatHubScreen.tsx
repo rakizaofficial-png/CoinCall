@@ -124,7 +124,7 @@ export function ChatHubScreen({ navigation }: { navigation: any }) {
             setRechargeEvents((prev) => [p.event!, ...prev].slice(0, 50));
             void pushHostNotification(hostId, {
               type: 'recharge',
-              title: 'System information',
+              title: 'Wallet recharge',
               body: `ID ${p.event.userId} user, recharge ${p.event.coins} coins`,
               fromId: p.event.userId,
             });

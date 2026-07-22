@@ -239,3 +239,43 @@ export async function waitForAccept(
   }
   throw new Error("Host did not answer");
 }
+
+export type LiveAccess = {
+  roomId: string;
+  hostId: string;
+  entryLocked: boolean;
+  entryFee: number;
+  allowed: boolean;
+  alreadyPaid: boolean;
+  reason?: string;
+};
+
+export async function checkLiveAccess(roomId: string, userId: string) {
+  const res = await fetch(
+    `${requireApiBase()}/live/rooms/${encodeURIComponent(roomId)}/access?userId=${encodeURIComponent(userId)}`,
+    { cache: "no-store" },
+  );
+  return parse<LiveAccess>(res);
+}
+
+export async function joinLiveRoom(
+  roomId: string,
+  userId: string,
+  userName: string,
+) {
+  const res = await fetch(
+    `${requireApiBase()}/live/rooms/${encodeURIComponent(roomId)}/join`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId, userName }),
+    },
+  );
+  return parse<{
+    ok: boolean;
+    entryFee: number;
+    wallet?: { coinBalance: number };
+    alreadyPaid?: boolean;
+    free?: boolean;
+  }>(res);
+}
