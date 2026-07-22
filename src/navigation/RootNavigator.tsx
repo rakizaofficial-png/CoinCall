@@ -20,9 +20,11 @@ import { ChatScreen } from '../screens/main/ChatScreen';
 import { EarningsScreen } from '../screens/main/EarningsScreen';
 import { EditHostProfileScreen } from '../screens/main/EditHostProfileScreen';
 import { FanProfileScreen } from '../screens/main/FanProfileScreen';
+import { HelpCenterScreen } from '../screens/main/HelpCenterScreen';
 import { HostProfileScreen } from '../screens/main/HostProfileScreen';
 import { NotificationsScreen } from '../screens/main/NotificationsScreen';
 import { SettingsScreen } from '../screens/main/SettingsScreen';
+import { SystemInformationScreen } from '../screens/main/SystemInformationScreen';
 import { useTheme } from '../theme/ThemeContext';
 import { AuthNavigator } from './AuthNavigator';
 import { MainTabNavigator } from './MainTabNavigator';
@@ -76,6 +78,8 @@ function AuthenticatedApp() {
           <Stack.Screen name="DirectChat" component={ChatScreen} />
           <Stack.Screen name="Notifications" component={NotificationsScreen} />
           <Stack.Screen name="Settings" component={SettingsScreen} />
+          <Stack.Screen name="SystemInformation" component={SystemInformationScreen} />
+          <Stack.Screen name="HelpCenter" component={HelpCenterScreen} />
           <Stack.Screen name="GoLive" component={GoLiveRoute} />
           <Stack.Screen name="LiveRoom" component={LiveRoomScreen} />
           <Stack.Screen name="Withdraw" component={WithdrawScreen} />

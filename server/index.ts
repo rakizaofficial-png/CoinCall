@@ -2138,12 +2138,22 @@ type RechargeEvent = {
 const rechargeByUser = new Map<string, RechargeUserRow>();
 const recentRecharges: RechargeEvent[] = [];
 
+type SupportMessage = {
+  id: string;
+  from: 'host' | 'admin';
+  text: string;
+  imageUrl?: string;
+  createdAt: number;
+};
+
 type SupportTicket = {
   id: string;
   hostId: string;
   hostName: string;
   text: string;
+  imageUrl?: string;
   status: 'open' | 'answered' | 'closed';
+  messages: SupportMessage[];
   createdAt: number;
   updatedAt: number;
 };
@@ -4996,18 +5006,31 @@ app.post('/api/support/tickets', (req, res) => {
   const hostId = String(req.body?.hostId || '').trim();
   const hostName = String(req.body?.hostName || 'Host').slice(0, 40);
   const text = String(req.body?.text || '').trim().slice(0, 1000);
+  const imageUrl = req.body?.imageUrl
+    ? String(req.body.imageUrl).slice(0, 2000)
+    : undefined;
   if (!hostId || !text) {
     res.status(400).json({ error: 'hostId and text required' });
     return;
   }
+  const now = Date.now();
+  const firstMsg: SupportMessage = {
+    id: `msg_${randomUUID().slice(0, 8)}`,
+    from: 'host',
+    text,
+    imageUrl,
+    createdAt: now,
+  };
   const ticket: SupportTicket = {
     id: `sup_${randomUUID().slice(0, 8)}`,
     hostId,
     hostName,
     text,
+    imageUrl,
     status: 'open',
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
+    messages: [firstMsg],
+    createdAt: now,
+    updatedAt: now,
   };
   supportTickets.unshift(ticket);
   broadcastWs({ type: 'support:ticket', payload: ticket });
@@ -5019,7 +5042,84 @@ app.get('/api/support/tickets', (req, res) => {
   const list = hostId
     ? supportTickets.filter((t) => t.hostId === hostId)
     : supportTickets;
-  res.json({ tickets: list.slice(0, 100) });
+  // Backfill messages for older persisted tickets
+  const normalized = list.slice(0, 100).map((t) => ({
+    ...t,
+    messages:
+      Array.isArray(t.messages) && t.messages.length
+        ? t.messages
+        : [
+            {
+              id: `msg_${t.id}`,
+              from: 'host' as const,
+              text: t.text,
+              imageUrl: t.imageUrl,
+              createdAt: t.createdAt,
+            },
+          ],
+  }));
+  res.json({ tickets: normalized });
+});
+
+app.get('/api/support/tickets/:id', (req, res) => {
+  const id = String(req.params.id || '');
+  const hostId = String(req.query.hostId || '').trim();
+  const ticket = supportTickets.find((t) => t.id === id);
+  if (!ticket || (hostId && ticket.hostId !== hostId)) {
+    res.status(404).json({ error: 'Ticket not found' });
+    return;
+  }
+  if (!Array.isArray(ticket.messages) || !ticket.messages.length) {
+    ticket.messages = [
+      {
+        id: `msg_${ticket.id}`,
+        from: 'host',
+        text: ticket.text,
+        imageUrl: ticket.imageUrl,
+        createdAt: ticket.createdAt,
+      },
+    ];
+  }
+  res.json({ ok: true, ticket });
+});
+
+/** Host or admin posts a reply on a ticket */
+app.post('/api/support/tickets/:id/messages', (req, res) => {
+  const id = String(req.params.id || '');
+  const ticket = supportTickets.find((t) => t.id === id);
+  if (!ticket) {
+    res.status(404).json({ error: 'Ticket not found' });
+    return;
+  }
+  const fromRaw = String(req.body?.from || 'host').toLowerCase();
+  const from: 'host' | 'admin' = fromRaw === 'admin' ? 'admin' : 'host';
+  const hostId = String(req.body?.hostId || '').trim();
+  if (from === 'host' && hostId && ticket.hostId !== hostId) {
+    res.status(403).json({ error: 'Not your ticket' });
+    return;
+  }
+  const text = String(req.body?.text || '').trim().slice(0, 1000);
+  const imageUrl = req.body?.imageUrl
+    ? String(req.body.imageUrl).slice(0, 2000)
+    : undefined;
+  if (!text && !imageUrl) {
+    res.status(400).json({ error: 'text or imageUrl required' });
+    return;
+  }
+  if (!Array.isArray(ticket.messages)) ticket.messages = [];
+  const msg: SupportMessage = {
+    id: `msg_${randomUUID().slice(0, 8)}`,
+    from,
+    text: text || (imageUrl ? '📷 Screenshot' : ''),
+    imageUrl,
+    createdAt: Date.now(),
+  };
+  ticket.messages.push(msg);
+  ticket.updatedAt = Date.now();
+  if (from === 'admin') ticket.status = 'answered';
+  else if (ticket.status === 'closed') ticket.status = 'open';
+  broadcastWs({ type: 'support:ticket', payload: ticket });
+  res.status(201).json({ ok: true, ticket, message: msg });
 });
 
 app.get('/api/admin/support/tickets', (req, res) => {
@@ -5044,6 +5144,37 @@ app.post('/api/admin/support/tickets/:id/status', (req, res) => {
   ticket.updatedAt = Date.now();
   broadcastWs({ type: 'support:ticket', payload: ticket });
   res.json({ ok: true, ticket });
+});
+
+app.post('/api/admin/support/tickets/:id/reply', (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const id = String(req.params.id || '');
+  const ticket = supportTickets.find((t) => t.id === id);
+  if (!ticket) {
+    res.status(404).json({ error: 'Ticket not found' });
+    return;
+  }
+  const text = String(req.body?.text || '').trim().slice(0, 1000);
+  const imageUrl = req.body?.imageUrl
+    ? String(req.body.imageUrl).slice(0, 2000)
+    : undefined;
+  if (!text && !imageUrl) {
+    res.status(400).json({ error: 'text or imageUrl required' });
+    return;
+  }
+  if (!Array.isArray(ticket.messages)) ticket.messages = [];
+  const msg: SupportMessage = {
+    id: `msg_${randomUUID().slice(0, 8)}`,
+    from: 'admin',
+    text: text || (imageUrl ? '📷 Screenshot' : ''),
+    imageUrl,
+    createdAt: Date.now(),
+  };
+  ticket.messages.push(msg);
+  ticket.status = 'answered';
+  ticket.updatedAt = Date.now();
+  broadcastWs({ type: 'support:ticket', payload: ticket });
+  res.status(201).json({ ok: true, ticket, message: msg });
 });
 
 /** -------- Direct messages (Luma user ↔ Host) -------- */
@@ -5324,6 +5455,26 @@ app.get('/api/help-center', (_req, res) => {
 app.get('/api/admin/help-center', (req, res) => {
   if (!requireAdmin(req, res)) return;
   res.json({ ok: true, articles: HELP_CENTER_ARTICLES });
+});
+
+app.get('/terms', (_req, res) => {
+  res.type('html').send(`<!doctype html><html><head><meta charset="utf-8"/><title>Terms</title>
+  <style>body{font-family:system-ui;max-width:720px;margin:40px auto;padding:0 16px;line-height:1.55;color:#111}
+  h1{font-size:28px} p{color:#333}</style></head><body>
+  <h1>CoinCall Terms of Service</h1>
+  <p>By using CoinCall Host you agree to follow community guidelines, respect fans, and comply with applicable laws. Live streams and calls must not include illegal content. CoinCall may suspend accounts that violate these terms. Earnings and withdrawals are subject to platform review and fees.</p>
+  <p>Contact support from the Host Help Center for account issues.</p>
+  </body></html>`);
+});
+
+app.get('/privacy', (_req, res) => {
+  res.type('html').send(`<!doctype html><html><head><meta charset="utf-8"/><title>Privacy</title>
+  <style>body{font-family:system-ui;max-width:720px;margin:40px auto;padding:0 16px;line-height:1.55;color:#111}
+  h1{font-size:28px} p{color:#333}</style></head><body>
+  <h1>CoinCall Privacy Policy</h1>
+  <p>We collect account profile data, device information, call/live metadata, and wallet activity needed to operate Host features. Media you upload (profile photos, intro video, live camera) is processed to deliver the service. Support tickets and screenshots are visible to administrators.</p>
+  <p>We do not sell personal data. Contact admin support to request account data review.</p>
+  </body></html>`);
 });
 
 httpServer.listen(PORT, '0.0.0.0', () => {

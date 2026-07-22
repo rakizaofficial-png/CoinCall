@@ -2,17 +2,25 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { BlurView } from 'expo-blur';
 import { Home, MessageSquare, Radio, UserRound } from 'lucide-react-native';
 import { Platform, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChatHubScreen } from '../features/chat/ChatHubScreen';
 import { DashboardScreen } from '../features/dashboard/DashboardScreen';
 import { LiveDiscoverScreen } from '../features/live/LiveDiscoverScreen';
 import { ProfileScreen } from '../screens/main/ProfileScreen';
 import { useTheme } from '../theme/ThemeContext';
+import {
+  TAB_BAR_BASE_PADDING,
+  TAB_BAR_CONTENT_HEIGHT,
+  tabBarTotalHeight,
+} from './layout';
 import type { MainTabParamList } from './types';
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
 
 export function MainTabNavigator() {
   const { colors, isDark } = useTheme();
+  const insets = useSafeAreaInsets();
+  const barHeight = tabBarTotalHeight(insets.bottom);
 
   return (
     <Tab.Navigator
@@ -27,8 +35,8 @@ export function MainTabNavigator() {
           backgroundColor: Platform.OS === 'ios' ? 'transparent' : colors.bgElevated,
           borderTopColor: colors.border,
           borderTopWidth: StyleSheet.hairlineWidth,
-          height: 72,
-          paddingBottom: 12,
+          height: barHeight,
+          paddingBottom: Math.max(insets.bottom, 8) + TAB_BAR_BASE_PADDING - 4,
           paddingTop: 8,
           elevation: 0,
         },
@@ -56,6 +64,7 @@ export function MainTabNavigator() {
               style={[
                 styles.iconWrap,
                 focused && { backgroundColor: `${colors.primary}33` },
+                { height: TAB_BAR_CONTENT_HEIGHT - 28 },
               ]}
             >
               <Icon size={size} color={color} strokeWidth={2.2} />
@@ -77,5 +86,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 4,
     borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

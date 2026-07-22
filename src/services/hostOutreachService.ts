@@ -181,6 +181,7 @@ export async function createAdminSupportTicket(input: {
   hostId: string;
   hostName: string;
   text: string;
+  imageUrl?: string;
 }): Promise<{ id: string }> {
   const text = input.text.trim();
   if (!text) throw new Error('Message required');
@@ -192,6 +193,7 @@ export async function createAdminSupportTicket(input: {
       hostId: input.hostId,
       hostName: input.hostName,
       text,
+      imageUrl: input.imageUrl,
     }),
   });
   const data = (await res.json().catch(() => ({}))) as {
@@ -209,6 +211,90 @@ export async function createAdminSupportTicket(input: {
   }).catch(() => undefined);
 
   return { id: data.ticket.id };
+}
+
+export type SupportTicketMessage = {
+  id: string;
+  from: 'host' | 'admin';
+  text: string;
+  imageUrl?: string;
+  createdAt: number;
+};
+
+export type SupportTicketRow = {
+  id: string;
+  hostId: string;
+  hostName: string;
+  text: string;
+  imageUrl?: string;
+  status: 'open' | 'answered' | 'closed';
+  messages: SupportTicketMessage[];
+  createdAt: number;
+  updatedAt: number;
+};
+
+export async function fetchSupportTickets(hostId: string): Promise<SupportTicketRow[]> {
+  const res = await fetch(
+    `${apiBase()}/support/tickets?hostId=${encodeURIComponent(hostId)}`,
+  );
+  const data = (await res.json().catch(() => ({}))) as {
+    tickets?: SupportTicketRow[];
+  };
+  return data.tickets || [];
+}
+
+export async function fetchSupportTicket(
+  ticketId: string,
+  hostId: string,
+): Promise<SupportTicketRow | null> {
+  const res = await fetch(
+    `${apiBase()}/support/tickets/${encodeURIComponent(ticketId)}?hostId=${encodeURIComponent(hostId)}`,
+  );
+  if (!res.ok) return null;
+  const data = (await res.json().catch(() => ({}))) as { ticket?: SupportTicketRow };
+  return data.ticket || null;
+}
+
+export async function replySupportTicket(input: {
+  ticketId: string;
+  hostId: string;
+  text: string;
+  imageUrl?: string;
+}): Promise<SupportTicketRow> {
+  const res = await fetch(
+    `${apiBase()}/support/tickets/${encodeURIComponent(input.ticketId)}/messages`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        hostId: input.hostId,
+        from: 'host',
+        text: input.text,
+        imageUrl: input.imageUrl,
+      }),
+    },
+  );
+  const data = (await res.json().catch(() => ({}))) as {
+    ticket?: SupportTicketRow;
+    error?: string;
+  };
+  if (!res.ok || !data.ticket) {
+    throw new Error(data.error || 'Could not send reply');
+  }
+  return data.ticket;
+}
+
+export type HelpArticle = {
+  id: string;
+  title: string;
+  category: string;
+  body: string;
+};
+
+export async function fetchHelpCenterArticles(): Promise<HelpArticle[]> {
+  const res = await fetch(`${apiBase()}/help-center`);
+  const data = (await res.json().catch(() => ({}))) as { articles?: HelpArticle[] };
+  return data.articles || [];
 }
 
 export function listenRechargeBoard(

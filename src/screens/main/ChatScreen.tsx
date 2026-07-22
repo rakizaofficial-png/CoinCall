@@ -1,6 +1,6 @@
 import { ChevronLeft, Image as ImageIcon, Video } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   FlatList,
   Image,
@@ -19,7 +19,12 @@ import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import type { RootStackParamList } from '../../navigation/types';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { listenChatMessages, sendChatMessage, fetchDmMessages, type ChatMessage } from '../../services/chatService';
+import {
+  listenChatMessages,
+  sendChatMessage,
+  fetchDmMessages,
+  type ChatMessage,
+} from '../../services/chatService';
 import { radii } from '../../theme/colors';
 import { useTheme } from '../../theme/ThemeContext';
 import { notify } from '../../utils/notify';
@@ -31,6 +36,7 @@ export function ChatScreen({ navigation, route }: Props) {
   const { colors } = useTheme();
   const { user: authUser } = useAuth();
   const { getHost, startCall, user } = useApp();
+  const listRef = useRef<FlatList<ChatMessage>>(null);
   const peerId = route.params.peerId;
   const peerName = route.params.peerName || getHost(peerId)?.name || 'Fan';
   const peerAvatar =
@@ -45,6 +51,15 @@ export function ChatScreen({ navigation, route }: Props) {
     if (!peerId || !meId) return;
     return listenChatMessages(meId, peerId, setMessages);
   }, [peerId, meId]);
+
+  // Newest at bottom — scroll when list grows
+  useEffect(() => {
+    if (!messages.length) return;
+    const t = setTimeout(() => {
+      listRef.current?.scrollToEnd({ animated: true });
+    }, 80);
+    return () => clearTimeout(t);
+  }, [messages.length]);
 
   const send = async (imageUrl?: string) => {
     if ((!text.trim() && !imageUrl) || sending) return;
@@ -91,7 +106,8 @@ export function ChatScreen({ navigation, route }: Props) {
   return (
     <KeyboardAvoidingView
       style={[styles.container, { backgroundColor: colors.bg }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
     >
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <Pressable onPress={() => navigation.goBack()} style={styles.back}>
@@ -118,30 +134,43 @@ export function ChatScreen({ navigation, route }: Props) {
             </Text>
           </View>
         </Pressable>
-        <Pressable
-          onPress={() => {
-            const r = startCall(peerId);
-            if (r.ok) {
-              navigation.navigate('Call', {
-                hostId: peerId,
-                peerName,
-                peerAvatar,
-                role: 'host',
-              });
-            } else {
-              notify('Call', r.message || 'Unavailable');
-            }
-          }}
-          style={styles.callBtn}
-        >
-          <Video size={18} color="#fff" />
-        </Pressable>
+        {peerId.startsWith('admin') || peerId === 'admin_support' ? null : (
+          <Pressable
+            onPress={() => {
+              const r = startCall(peerId);
+              if (r.ok) {
+                navigation.navigate('Call', {
+                  hostId: peerId,
+                  peerName,
+                  peerAvatar,
+                  role: 'host',
+                });
+              } else {
+                notify('Call', r.message || 'Unavailable');
+              }
+            }}
+            style={styles.callBtn}
+          >
+            <Video size={18} color="#fff" />
+          </Pressable>
+        )}
       </View>
 
       <FlatList
+        ref={listRef}
         data={messages}
         keyExtractor={(item) => item.id}
-        contentContainerStyle={{ padding: 16, paddingBottom: 24 }}
+        style={{ flex: 1 }}
+        contentContainerStyle={{
+          padding: 16,
+          paddingBottom: 24,
+          flexGrow: 1,
+          justifyContent: messages.length ? 'flex-end' : 'flex-start',
+        }}
+        onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+        onLayout={() => listRef.current?.scrollToEnd({ animated: false })}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
         renderItem={({ item }) => {
           const mine = item.fromId === meId;
           return (
@@ -174,7 +203,7 @@ export function ChatScreen({ navigation, route }: Props) {
         }
       />
 
-      <View style={[styles.composer, { paddingBottom: insets.bottom + 10 }]}>
+      <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, 10) }]}>
         <Pressable onPress={() => void sendImage()} style={styles.iconBtn}>
           <ImageIcon size={20} color={colors.textMuted} />
         </Pressable>
@@ -197,6 +226,7 @@ export function ChatScreen({ navigation, route }: Props) {
             color: colors.textMuted,
             fontSize: 11,
             paddingHorizontal: 16,
+            paddingBottom: 6,
           }}
         >
           Sending image…

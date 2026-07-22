@@ -10,7 +10,7 @@ import {
   VideoOff,
   X,
 } from 'lucide-react-native';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   FlatList,
   Image,
@@ -33,6 +33,7 @@ import {
 } from '../../services/agoraService';
 import { useTheme } from '../../theme/ThemeContext';
 import { notify } from '../../utils/notify';
+import { LiveBroadcastSurface } from './LiveBroadcastSurface';
 
 type Props = {
   navigation: any;
@@ -72,46 +73,63 @@ export function LiveRoomScreen({ navigation, route }: Props) {
   const [cameraOff, setCameraOff] = useState(false);
   const [beauty, setBeauty] = useState(true);
   const [giftsOpen, setGiftsOpen] = useState(false);
-  const localMountReady = useRef(false);
+  const [cameraReady, setCameraReady] = useState(false);
 
   useEffect(() => {
     openRoom(roomId);
   }, [openRoom, roomId]);
 
-  useEffect(() => {
-    if (!hostMode || Platform.OS !== 'web' || !room) return;
-    let cancelled = false;
-    (async () => {
-      const mount = document.getElementById('live-local-mount');
-      if (!mount) return;
-      let el = document.getElementById('live-local') as HTMLDivElement | null;
-      if (!el) {
-        el = document.createElement('div');
-        el.id = 'live-local';
-        el.style.width = '100%';
-        el.style.height = '100%';
-        mount.appendChild(el);
-      }
-      try {
+  const startBroadcast = useCallback(async () => {
+    if (!hostMode || !room?.channel) return;
+    try {
+      if (Platform.OS === 'web') {
+        const mount = document.getElementById('live-local-mount');
+        if (!mount) return;
+        let el = document.getElementById('live-local') as HTMLDivElement | null;
+        if (!el) {
+          el = document.createElement('div');
+          el.id = 'live-local';
+          el.style.width = '100%';
+          el.style.height = '100%';
+          mount.appendChild(el);
+        }
         await startAgoraLiveBroadcast({
           channel: room.channel,
           localVideoEl: el,
-          beauty: beauty ? 'snap' : 'off',
+          beauty: 'snap',
         });
-        await setAgoraBeauty(beauty ? 'snap' : 'off');
-        localMountReady.current = true;
-      } catch (e) {
-        if (!cancelled) {
-          notify('Live video', e instanceof Error ? e.message : 'Camera failed');
-        }
+      } else {
+        await startAgoraLiveBroadcast({
+          channel: room.channel,
+          beauty: 'snap',
+        });
       }
+      await setAgoraBeauty(beauty ? 'snap' : 'off');
+      setCameraReady(true);
+    } catch (e) {
+      setCameraReady(false);
+      notify('Live video', e instanceof Error ? e.message : 'Camera failed');
+    }
+  }, [beauty, hostMode, room?.channel]);
+
+  useEffect(() => {
+    if (!hostMode || !room?.channel) return;
+    let cancelled = false;
+    (async () => {
+      if (cancelled) return;
+      await startBroadcast();
     })();
     return () => {
       cancelled = true;
       void stopAgoraCall();
-      document.getElementById('live-local')?.remove();
+      if (Platform.OS === 'web') {
+        document.getElementById('live-local')?.remove();
+      }
+      setCameraReady(false);
     };
-  }, [beauty, hostMode, room?.channel, room?.id]);
+    // Only rejoin when channel/host mode changes — beauty is applied live
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hostMode, room?.channel, room?.id]);
 
   const feed = useMemo(() => {
     const giftLines = gifts.slice(0, 20).map((g) => ({
@@ -127,14 +145,11 @@ export function LiveRoomScreen({ navigation, route }: Props) {
         text:
           c.kind === 'join'
             ? `${c.userName} joined`
-            : c.kind === 'gift'
-              ? `${c.userName} ${c.text}`
-              : c.kind === 'system'
-                ? c.text
-                : `${c.userName}: ${c.text}`,
-        kind: (c.kind === 'gift' ? 'gift' : 'chat') as 'gift' | 'chat',
+            : c.kind === 'system'
+              ? c.text
+              : `${c.userName}: ${c.text}`,
+        kind: 'chat' as const,
       }));
-    // Newest last so inverted FlatList shows them at the bottom visually
     return [...giftLines, ...commentLines];
   }, [comments, gifts]);
 
@@ -157,19 +172,28 @@ export function LiveRoomScreen({ navigation, route }: Props) {
 
   return (
     <View style={styles.root}>
-      {Platform.OS === 'web' && hostMode ? (
-        // @ts-expect-error web video mount
-        <div id="live-local-mount" style={webFill} />
+      {hostMode ? (
+        Platform.OS === 'web' ? (
+          <div id="live-local-mount" style={webFill} />
+        ) : (
+          <LiveBroadcastSurface cameraOff={cameraOff} />
+        )
       ) : (
         <Image source={{ uri: room.thumbnailUrl || room.hostAvatar }} style={styles.cover} />
       )}
+
+      {hostMode && !cameraReady ? (
+        <View style={styles.openingCam}>
+          <Text style={{ color: '#fff', fontWeight: '800' }}>Opening camera…</Text>
+        </View>
+      ) : null}
+
       <LinearGradient
         colors={['rgba(0,0,0,0.55)', 'transparent', 'rgba(0,0,0,0.78)']}
         style={StyleSheet.absoluteFill}
         pointerEvents="none"
       />
 
-      {/* Top bar — floating glass */}
       <View style={[styles.top, { paddingTop: insets.top + 8 }]}>
         <View style={styles.hostChip}>
           <Image source={{ uri: room.hostAvatar }} style={styles.hostAv} />
@@ -197,7 +221,6 @@ export function LiveRoomScreen({ navigation, route }: Props) {
         </View>
       </View>
 
-      {/* Chat overlay — bottom left */}
       <View style={[styles.feed, { bottom: insets.bottom + 100 }]}>
         <FlatList
           data={feed}
@@ -232,7 +255,6 @@ export function LiveRoomScreen({ navigation, route }: Props) {
         />
       ) : null}
 
-      {/* Floating circular actions */}
       {hostMode ? (
         <View style={[styles.fabColumn, { paddingBottom: insets.bottom + 16 }]}>
           <Pressable
@@ -325,7 +347,14 @@ const webFill: any = {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#05070F' },
   center: { alignItems: 'center', justifyContent: 'center' },
-  cover: { ...StyleSheet.absoluteFillObject, width: '100%', height: '100%' },
+  cover: { ...StyleSheet.absoluteFill, width: '100%', height: '100%' },
+  openingCam: {
+    ...StyleSheet.absoluteFill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    zIndex: 5,
+  },
   top: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -412,21 +441,6 @@ const styles = StyleSheet.create({
     textShadowRadius: 3,
   },
   feedEmpty: { color: 'rgba(255,255,255,0.5)', fontSize: 12, marginBottom: 8 },
-  giftBurst: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 25,
-  },
-  giftEmoji: { fontSize: 72 },
-  giftLabel: {
-    marginTop: 8,
-    color: '#fff',
-    fontWeight: '800',
-    fontSize: 16,
-    textShadowColor: '#000',
-    textShadowRadius: 8,
-  },
   fabColumn: {
     position: 'absolute',
     right: 14,

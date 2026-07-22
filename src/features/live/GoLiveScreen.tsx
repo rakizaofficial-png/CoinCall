@@ -1,4 +1,4 @@
-import { CameraView, useCameraPermissions } from 'expo-camera';
+import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   Camera,
@@ -44,6 +44,7 @@ export function GoLiveScreen({ navigation, mode = 'solo' }: Props) {
     useLiveStudio();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [permission, requestPermission] = useCameraPermissions();
+  const [micPermission, requestMicPermission] = useMicrophonePermissions();
   const [facing, setFacing] = useState<'front' | 'back'>(
     goLiveDraft.facing === 'environment' ? 'back' : 'front',
   );
@@ -66,6 +67,7 @@ export function GoLiveScreen({ navigation, mode = 'solo' }: Props) {
   useEffect(() => {
     if (Platform.OS !== 'web') {
       if (!permission?.granted) void requestPermission();
+      if (!micPermission?.granted) void requestMicPermission();
       return;
     }
     let cancelled = false;
@@ -117,7 +119,7 @@ export function GoLiveScreen({ navigation, mode = 'solo' }: Props) {
       stopCameraPreview(videoRef.current);
       document.getElementById('golive-preview')?.remove();
     };
-  }, [permission?.granted]);
+  }, [permission?.granted, micPermission?.granted]);
 
   const onFlip = async () => {
     if (Platform.OS === 'web') {
@@ -141,6 +143,26 @@ export function GoLiveScreen({ navigation, mode = 'solo' }: Props) {
   };
 
   const onStart = async () => {
+    if (Platform.OS !== 'web') {
+      if (!permission?.granted) {
+        const cam = await requestPermission();
+        if (!cam.granted) {
+          notify('Camera', 'Allow camera access to go live');
+          return;
+        }
+      }
+      if (!micPermission?.granted) {
+        const mic = await requestMicPermission();
+        if (!mic.granted) {
+          notify('Microphone', 'Allow microphone access to go live');
+          return;
+        }
+      }
+      if (!camOn) {
+        notify('Camera', 'Turn camera on before going live');
+        return;
+      }
+    }
     setBusy(true);
     try {
       // Ensure defaults without forcing setup UI
@@ -169,7 +191,6 @@ export function GoLiveScreen({ navigation, mode = 'solo' }: Props) {
     <View style={[styles.root, { backgroundColor: '#05070F' }]}>
       <View style={[styles.preview, { paddingTop: insets.top }, beautyFilter]}>
         {Platform.OS === 'web' ? (
-          // @ts-expect-error web mount
           <div id="golive-preview-mount" style={webMountStyle} />
         ) : permission?.granted && camOn ? (
           <CameraView
@@ -184,10 +205,16 @@ export function GoLiveScreen({ navigation, mode = 'solo' }: Props) {
             <Text style={styles.previewHint}>
               {permission?.granted
                 ? 'Camera paused'
-                : 'Allow camera access to preview'}
+                : 'Allow camera & microphone to preview'}
             </Text>
-            {!permission?.granted ? (
-              <Pressable onPress={() => void requestPermission()} style={styles.chip}>
+            {!permission?.granted || !micPermission?.granted ? (
+              <Pressable
+                onPress={() => {
+                  void requestPermission();
+                  void requestMicPermission();
+                }}
+                style={styles.chip}
+              >
                 <Text style={styles.chipText}>Grant permission</Text>
               </Pressable>
             ) : null}
@@ -304,7 +331,7 @@ const styles = StyleSheet.create({
   },
   previewHint: { color: '#fff', fontWeight: '700', textAlign: 'center' },
   loading: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(0,0,0,0.45)',

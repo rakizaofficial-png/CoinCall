@@ -1,6 +1,8 @@
 import {
   ChevronLeft,
   Eye,
+  Headphones,
+  Info,
   Languages,
   LogOut,
   Moon,
@@ -290,6 +292,22 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
           loading={saving}
         />
       </GlassCard>
+
+      <Pressable
+        style={[styles.linkRow, { borderColor: colors.border }]}
+        onPress={() => navigation.navigate('SystemInformation')}
+      >
+        <Info size={18} color={colors.primarySoft} />
+        <Text style={[styles.linkText, { color: colors.text }]}>System information</Text>
+      </Pressable>
+
+      <Pressable
+        style={[styles.linkRow, { borderColor: colors.border }]}
+        onPress={() => navigation.navigate('HelpCenter')}
+      >
+        <Headphones size={18} color={colors.primarySoft} />
+        <Text style={[styles.linkText, { color: colors.text }]}>Help Center</Text>
+      </Pressable>
 
       <Pressable
         style={[styles.linkRow, { borderColor: colors.border }]}

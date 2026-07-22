@@ -367,15 +367,19 @@ export function getAgoraBeautyPreset(): BeautyPreset {
 
 export async function startAgoraLiveBroadcast(options: {
   channel: string;
-  localVideoEl: HTMLElement;
+  localVideoEl?: HTMLElement;
   uid?: number;
   beauty?: BeautyPreset;
 }) {
   if (Platform.OS !== 'web') {
     throw new Error('Live broadcast runs on the web host studio. Open coincall-host in Chrome.');
   }
+  if (!options.localVideoEl) {
+    throw new Error('localVideoEl required for web live broadcast');
+  }
+  const localVideoEl = options.localVideoEl;
   await stopAgoraCall();
-  prepVideoEl(options.localVideoEl);
+  prepVideoEl(localVideoEl);
 
   // Use a non-zero uid — Agora + certificate is more reliable than uid 0
   const hostUid =
@@ -403,7 +407,7 @@ export async function startAgoraLiveBroadcast(options: {
     await pipeBeauty(cam, beautyProcessor, preset);
   }
 
-  cam.play(options.localVideoEl, { fit: 'cover', mirror: true });
+  cam.play(localVideoEl, { fit: 'cover', mirror: true });
   applyLocalCssBeauty(preset);
   await client.publish([mic, cam]);
   session = { client, mic, cam, beautyProcessor, beautyPreset: preset };

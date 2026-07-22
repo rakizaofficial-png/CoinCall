@@ -6,7 +6,7 @@ import {
   Megaphone,
   X,
 } from 'lucide-react-native';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   FlatList,
   Image,
@@ -37,6 +37,7 @@ import {
   pushHostNotification,
   type InboxNotification,
 } from '../../services/notificationInboxService';
+import { tabScreenBottomPad } from '../../navigation/layout';
 import { radii } from '../../theme/colors';
 import { useTheme } from '../../theme/ThemeContext';
 import { notify } from '../../utils/notify';
@@ -65,10 +66,10 @@ export function ChatHubScreen({ navigation }: { navigation: any }) {
   const { user } = useApp();
   const { user: authUser } = useAuth();
   const hostId = authUser?.id || user.id;
-  const { contactAdminSupport, rechargeUsers } = useLiveStudio();
+  const { rechargeUsers } = useLiveStudio();
 
   const [inbox, setInbox] = useState<InboxNotification[]>([]);
-  const [rechargeEvents, setRechargeEvents] = useState<RechargeEvent[]>([]);
+  const [, setRechargeEvents] = useState<RechargeEvent[]>([]);
   const [dmThreads, setDmThreads] = useState<DmThreadRow[]>([]);
   const [activeCount, setActiveCount] = useState(0);
   const [activeFans, setActiveFans] = useState<ActiveUserRow[]>([]);
@@ -76,7 +77,6 @@ export function ChatHubScreen({ navigation }: { navigation: any }) {
   const [massText, setMassText] = useState('');
   const [sending, setSending] = useState(false);
   const [lastSent, setLastSent] = useState<number | null>(null);
-  const [systemOpen, setSystemOpen] = useState(false);
 
   useEffect(() => {
     return listenHostNotifications(hostId, setInbox);
@@ -135,28 +135,12 @@ export function ChatHubScreen({ navigation }: { navigation: any }) {
     return () => unsub?.();
   }, [hostId]);
 
-  const systemUnread = useMemo(() => {
-    const fromInbox = inbox.filter((i) => i.type === 'recharge' && !i.read).length;
-    return Math.max(fromInbox, rechargeEvents.length ? Math.min(rechargeEvents.length, 99) : 0);
-  }, [inbox, rechargeEvents]);
-
   const adminUnread = inbox.filter(
     (i) => (i.type === 'support' || i.type === 'admin') && !i.read,
   ).length;
   const stationUnread = inbox.filter(
     (i) => i.type === 'live' || i.type === 'room' || i.type === 'station',
   ).length;
-
-  const latestSystem =
-    rechargeEvents[0] ||
-    inbox.find((i) => i.type === 'recharge') ||
-    null;
-
-  const systemPreview = latestSystem
-    ? 'userId' in latestSystem && 'coins' in latestSystem
-      ? `ID ${latestSystem.userId} user, recharge ${latestSystem.coins} coins`
-      : (latestSystem as InboxNotification).body
-    : 'No recharges yet';
 
   const adminPreview =
     inbox.find((i) => i.type === 'support' || i.type === 'admin')?.body ||
@@ -205,16 +189,12 @@ export function ChatHubScreen({ navigation }: { navigation: any }) {
     {
       key: 'system',
       title: 'System information',
-      body: systemPreview,
-      time: formatTime(
-        rechargeEvents[0]?.at ||
-          inbox.find((i) => i.type === 'recharge')?.createdAt ||
-          Date.now(),
-      ),
-      badge: systemUnread || undefined,
+      body: 'App version · Host ID · server · legal',
+      time: formatTime(Date.now()),
+      badge: undefined,
       color: '#A855F7',
       Icon: Bell,
-      onPress: () => setSystemOpen(true),
+      onPress: () => navigation.navigate('SystemInformation'),
     },
     {
       key: 'admin',
@@ -224,13 +204,10 @@ export function ChatHubScreen({ navigation }: { navigation: any }) {
         inbox.find((i) => i.type === 'support' || i.type === 'admin')?.createdAt ||
           Date.now(),
       ),
-      badge: adminUnread || 1,
+      badge: adminUnread || undefined,
       color: '#3B82F6',
       Icon: Headphones,
-      onPress: () => {
-        void contactAdminSupport('Hello admin, I need help');
-        notify('Administrator', 'Support ticket opened');
-      },
+      onPress: () => navigation.navigate('HelpCenter'),
     },
   ];
 
@@ -324,7 +301,7 @@ export function ChatHubScreen({ navigation }: { navigation: any }) {
         </Text>
       )}
 
-      <View style={styles.list}>
+      <View style={[styles.list, { paddingBottom: tabScreenBottomPad(insets.bottom) + 72 }]}>
         {rows.map((row) => (
           <Pressable
             key={row.key}
@@ -354,9 +331,8 @@ export function ChatHubScreen({ navigation }: { navigation: any }) {
         ))}
       </View>
 
-      {/* Floating Mass Texting (like reference) */}
       <Pressable
-        style={[styles.fabWrap, { bottom: insets.bottom + 88 }]}
+        style={[styles.fabWrap, { bottom: tabScreenBottomPad(insets.bottom) }]}
         onPress={() => setMassOpen(true)}
       >
         <LinearGradient
@@ -371,7 +347,6 @@ export function ChatHubScreen({ navigation }: { navigation: any }) {
         <Text style={styles.fabLabel}>Mass Texting</Text>
       </Pressable>
 
-      {/* Mass texting composer */}
       <Modal visible={massOpen} animationType="slide" transparent>
         <View style={styles.modalBg}>
           <View style={[styles.sheet, { paddingBottom: insets.bottom + 16 }]}>
@@ -408,41 +383,6 @@ export function ChatHubScreen({ navigation }: { navigation: any }) {
             {lastSent != null ? (
               <Text style={styles.sentHint}>Last send reached {lastSent} users ✓</Text>
             ) : null}
-          </View>
-        </View>
-      </Modal>
-
-      {/* System recharge list */}
-      <Modal visible={systemOpen} animationType="slide" transparent>
-        <View style={styles.modalBg}>
-          <View style={[styles.sheet, { paddingBottom: insets.bottom + 16, maxHeight: '70%' }]}>
-            <View style={styles.sheetHead}>
-              <Text style={styles.sheetTitle}>System information</Text>
-              <Pressable onPress={() => setSystemOpen(false)} hitSlop={10}>
-                <X size={22} color="#fff" />
-              </Pressable>
-            </View>
-            <Text style={styles.sheetSub}>User ID + recharge coins · updates every time</Text>
-            <FlatList
-              data={rechargeEvents}
-              keyExtractor={(e) => e.id}
-              ListEmptyComponent={
-                <Text style={styles.sheetSub}>No recharges yet — demo from live room</Text>
-              }
-              renderItem={({ item }) => (
-                <View style={styles.rechargeRow}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.rechargeId}>ID {item.userId}</Text>
-                    <Text style={styles.rechargeName}>{item.userName}</Text>
-                  </View>
-                  <View style={{ alignItems: 'flex-end' }}>
-                    <Text style={styles.rechargeCoins}>+{item.coins}</Text>
-                    <Text style={styles.rechargeTotal}>total {item.totalCoins}</Text>
-                    <Text style={styles.rowTime}>{formatTime(item.at)}</Text>
-                  </View>
-                </View>
-              )}
-            />
           </View>
         </View>
       </Modal>

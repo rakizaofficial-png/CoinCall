@@ -27,6 +27,8 @@ export type RootStackParamList = {
   FanProfile: { userId: string; userName?: string; avatarUrl?: string };
   Notifications: undefined;
   Settings: undefined;
+  SystemInformation: undefined;
+  HelpCenter: undefined;
   GoLive: { mode?: 'solo' | 'party' };
   LiveRoom: { roomId: string; hostMode?: boolean };
   Withdraw: undefined;

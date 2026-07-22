@@ -809,9 +809,10 @@ export function AppProvider({
         monthlyCoins: monthCoins,
       });
       if (typeof data.summary?.walletBalance === 'number') {
+        // Prefer server wallet as source of truth (covers withdrawals / corrections)
         setUser((u) => ({
           ...u,
-          coinBalance: Math.max(u.coinBalance, data.summary.walletBalance),
+          coinBalance: Math.max(0, data.summary.walletBalance),
         }));
       }
     } catch {
@@ -943,7 +944,7 @@ export function AppProvider({
           if (uid !== user.id) return;
           const bal = Number(event.payload?.coinBalance);
           if (Number.isFinite(bal)) {
-            setUser((u) => ({ ...u, coinBalance: Math.max(u.coinBalance, bal) }));
+            setUser((u) => ({ ...u, coinBalance: Math.max(0, bal) }));
           }
         }
       });

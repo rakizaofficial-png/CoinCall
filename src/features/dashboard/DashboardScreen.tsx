@@ -17,6 +17,7 @@ import { PrimaryButton } from '../../components/ui/PrimaryButton';
 import { useApp } from '../../context/AppContext';
 import { useLiveStudio } from '../../context/LiveStudioContext';
 import { env } from '../../config/env';
+import { tabScreenBottomPad } from '../../navigation/layout';
 import { radii } from '../../theme/colors';
 import { useTheme } from '../../theme/ThemeContext';
 import { notify } from '../../utils/notify';
@@ -103,7 +104,7 @@ export function DashboardScreen({ navigation }: { navigation: any }) {
       contentContainerStyle={{
         paddingTop: insets.top + 12,
         paddingHorizontal: 16,
-        paddingBottom: 120,
+        paddingBottom: tabScreenBottomPad(insets.bottom),
       }}
     >
       <View style={styles.header}>

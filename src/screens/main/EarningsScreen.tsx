@@ -83,9 +83,11 @@ export function EarningsScreen({ navigation }: { navigation: any }) {
   const giftCoins = Math.max(summary?.giftCoins ?? 0, weekly?.giftCoins ?? 0);
   const totalCoins = Math.max(summary?.totalCoins ?? 0, callCoins + giftCoins);
   const balance =
-    fbBalance && fbBalance > 0
+    typeof fbBalance === 'number' && fbBalance >= 0
       ? fbBalance
-      : (summary?.walletBalance ?? user.coinBalance);
+      : typeof summary?.walletBalance === 'number'
+        ? summary.walletBalance
+        : user.coinBalance;
   const totalCalls = Math.max(
     summary?.totalCalls ?? 0,
     fbStats?.totalCalls ?? 0,

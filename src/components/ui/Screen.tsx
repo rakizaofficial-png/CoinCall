@@ -8,12 +8,17 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { tabScreenBottomPad } from '../../navigation/layout';
 import { useTheme } from '../../theme/ThemeContext';
 
 type Props = {
   children: ReactNode;
   scroll?: boolean;
   padded?: boolean;
+  /** When true, leave room for the floating bottom tab bar */
+  tabBar?: boolean;
+  /** Skip top inset (e.g. full-bleed hero that handles insets itself) */
+  skipTopInset?: boolean;
   style?: ViewStyle;
   contentContainerStyle?: ScrollViewProps['contentContainerStyle'];
 };
@@ -22,14 +27,19 @@ export function Screen({
   children,
   scroll,
   padded = true,
+  tabBar = false,
+  skipTopInset = false,
   style,
   contentContainerStyle,
 }: Props) {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
+  const bottomBase = tabBar
+    ? tabScreenBottomPad(insets.bottom)
+    : insets.bottom + 24;
   const pad = {
-    paddingTop: insets.top + 8,
-    paddingBottom: insets.bottom + 24,
+    paddingTop: skipTopInset ? 8 : insets.top + 8,
+    paddingBottom: bottomBase,
     paddingHorizontal: padded ? 16 : 0,
   };
 

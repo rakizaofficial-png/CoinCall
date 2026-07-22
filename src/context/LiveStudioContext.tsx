@@ -568,6 +568,24 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
   }, [goLiveDraft, setHostOnline, user]);
 
   const stopLive = useCallback(async () => {
+    const endingId = myLiveRoom?.id;
+    const endingHostId = user.id;
+    // Remove from local list immediately so Discover clears the card
+    if (endingId || endingHostId) {
+      setLiveRooms((list) =>
+        list.filter(
+          (r) =>
+            r.id !== endingId &&
+            r.hostId !== endingHostId &&
+            r.isLive !== false,
+        ),
+      );
+    }
+    setMyLiveRoom(null);
+    setActiveRoomId(null);
+    setBridgeLive(false);
+    setSessionLiveSeconds(0);
+
     if (myLiveRoom) {
       const startedAt = Number(myLiveRoom.startedAt || Date.now());
       const sessionSec = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
@@ -578,14 +596,10 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
         text: 'Live ended',
         createdAt: Date.now(),
         kind: 'system',
-      });
+      }).catch(() => undefined);
       bumpTodayLiveSeconds(sessionSec);
       void refreshTodayStats();
     }
-    setMyLiveRoom(null);
-    setActiveRoomId(null);
-    setBridgeLive(false);
-    setSessionLiveSeconds(0);
     await syncHostPresence(user.id, {
       isLive: false,
       isOnCall: false,

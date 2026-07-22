@@ -15,6 +15,7 @@ import { env } from '../../config/env';
 import { useApp } from '../../context/AppContext';
 import { useLiveStudio } from '../../context/LiveStudioContext';
 import { MOCK_HOSTS } from '../../data/mockData';
+import { tabScreenBottomPad } from '../../navigation/layout';
 import type { LiveRoom } from '../../services/liveRoomService';
 import { useTheme } from '../../theme/ThemeContext';
 
@@ -136,6 +137,8 @@ export function LiveDiscoverScreen({ navigation }: { navigation: any }) {
     const add = (room: LiveRoom | null | undefined) => {
       if (!room?.isLive || room.mode === 'party' || !room.hostId) return;
       if (!isRealLiveHost(room.hostId, user.id)) return;
+      // Host just ended — never show self until myLiveRoom is live again
+      if (room.hostId === user.id && !myLiveRoom?.isLive) return;
       const key = `live_${room.hostId}`;
       const next: LiveRoom = {
         ...room,
@@ -183,7 +186,10 @@ export function LiveDiscoverScreen({ navigation }: { navigation: any }) {
         keyExtractor={(r) => r.id}
         numColumns={2}
         columnWrapperStyle={styles.row}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[
+          styles.list,
+          { paddingBottom: tabScreenBottomPad(insets.bottom) },
+        ]}
         ListEmptyComponent={
           <View style={styles.empty}>
             <Radio size={32} color={colors.primarySoft} />
@@ -242,7 +248,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#1A2438',
   },
   coverInitial: { color: '#fff', fontSize: 28, fontWeight: '800' },
-  cardGrad: { ...StyleSheet.absoluteFillObject },
+  cardGrad: { ...StyleSheet.absoluteFill },
   topRow: {
     position: 'absolute',
     top: 8,
