@@ -50,6 +50,19 @@
         "EXPO_PUBLIC_APP_ENV": "production",
         "EXPO_PUBLIC_API_BASE_URL": "https://coincall-api.onrender.com/api"
       }
+    },
+    "production-apk": {
+      "distribution": "internal",
+      "node": "20.19.4",
+      "android": {
+        "buildType": "apk",
+        "image": "latest"
+      },
+      "env": {
+        "EXPO_PUBLIC_APP_ENV": "production",
+        "EXPO_PUBLIC_API_BASE_URL": "https://coincall-api.onrender.com/api",
+        "ANDROID_VERSION_CODE": "2"
+      }
     }
   },
   "submit": {

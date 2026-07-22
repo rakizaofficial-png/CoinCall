@@ -88,8 +88,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         microphonePermission:
           'CoinCall Beauty needs microphone for intro video and calls.',
         recordAudioAndroid: true,
+        // Barcode scanner unused — avoid ML Kit barhopper (~5MB/ABI)
+        barcodeScannerEnabled: false,
       },
     ],
+    // Size: ABI filter, R8, shrink resources, strip Agora extensions
+    './plugins/withAndroidSizeOptimizations',
     // Last: force Android SDK for androidx.core 1.16+ (needs compileSdk ≥ 35)
     [
       'expo-build-properties',
@@ -99,6 +103,13 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
           compileSdkVersion: 36,
           targetSdkVersion: 35,
           buildToolsVersion: '36.0.0',
+          enableMinifyInReleaseBuilds: true,
+          enableShrinkResourcesInReleaseBuilds: true,
+          enablePngCrunchInReleaseBuilds: true,
+          // Compress .so inside APK (ABI filter via withAndroidSizeOptimizations)
+          useLegacyPackaging: true,
+          extraProguardRules:
+            '-keep class io.agora.** { *; }\n-keep class com.facebook.react.** { *; }\n-dontwarn io.agora.**',
         },
         ios: {
           deploymentTarget: '16.4',
