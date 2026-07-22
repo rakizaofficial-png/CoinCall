@@ -5,6 +5,7 @@ import { BottomNav } from "@/components/BottomNav";
 import { ToastHost } from "@/components/ToastHost";
 import { DiamondEntranceBlast } from "@/components/DiamondEntranceBlast";
 import { WelcomePushEngine } from "@/components/welcome/WelcomePushEngine";
+import { AuthGuard } from "@/components/auth/AuthGuard";
 import "./globals.css";
 
 const syne = Syne({
@@ -34,13 +35,15 @@ export default function RootLayout({
     <html lang="en" className={`${syne.variable} ${manrope.variable} h-full`}>
       <body className="app-atmosphere app-grain min-h-full antialiased">
         <AppProvider>
-          <div className="phone-shell safe-bottom relative overflow-hidden">
-            <DiamondEntranceBlast />
-            {children}
-            <BottomNav />
-            <ToastHost />
-            <WelcomePushEngine />
-          </div>
+          <AuthGuard>
+            <div className="phone-shell safe-bottom relative overflow-hidden">
+              <DiamondEntranceBlast />
+              {children}
+              <BottomNav />
+              <ToastHost />
+              <WelcomePushEngine />
+            </div>
+          </AuthGuard>
         </AppProvider>
       </body>
     </html>

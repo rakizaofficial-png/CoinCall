@@ -24,6 +24,7 @@ type ApiMessage = {
   text: string;
   createdAt: number;
   imageUrl?: string;
+  readAt?: number;
 };
 
 export default function ChatThreadPage({
@@ -32,9 +33,10 @@ export default function ChatThreadPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
-  const { vipTier, triggerEntranceBlast, inbox, pushToast } = useApp();
+  const { vipTier, triggerEntranceBlast, inbox, markInboxRead, pushToast } = useApp();
   const userId = getDeviceUserId();
   const listEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const hostIdFromRoute = id.startsWith("host_")
@@ -42,9 +44,7 @@ export default function ChatThreadPage({
     : null;
 
   const thread = threads.find((t) => t.id === id) ?? null;
-  const mockCreator = thread
-    ? getCreator(thread.creatorId) ?? creators[0]
-    : null;
+  const mockCreator = thread ? getCreator(thread.creatorId) ?? creators[0] : null;
 
   const hostId = hostIdFromRoute || mockCreator?.id || "host";
   const hostName =
@@ -54,6 +54,11 @@ export default function ChatThreadPage({
   const hostImage =
     mockCreator?.image ||
     `https://i.pravatar.cc/200?u=${encodeURIComponent(hostId)}`;
+
+  // Mark this thread's messages as read when opening
+  useEffect(() => {
+    markInboxRead();
+  }, [markInboxRead]);
 
   const massNotes = useMemo(
     () =>
@@ -75,7 +80,7 @@ export default function ChatThreadPage({
   const [giftOpen, setGiftOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const [viewerUri, setViewerUri] = useState<string | null>(null);
-  const [peerTyping, setPeerTyping] = useState(false);
+  const [peerTyping] = useState(false);
 
   const loadMessages = useCallback(async () => {
     try {
@@ -91,9 +96,17 @@ export default function ChatThreadPage({
   }, [hostId, userId]);
 
   useEffect(() => {
-    void loadMessages();
-    const t = setInterval(() => void loadMessages(), 4000);
-    return () => clearInterval(t);
+    let active = true;
+    const doFetch = async () => {
+      if (!active) return;
+      await loadMessages();
+    };
+    void doFetch();
+    const t = setInterval(() => { void doFetch(); }, 4000);
+    return () => {
+      active = false;
+      clearInterval(t);
+    };
   }, [loadMessages]);
 
   const bubbles = useMemo<ChatBubbleMessage[]>(() => {
@@ -107,7 +120,7 @@ export default function ChatThreadPage({
         fromMe: m.fromId === userId,
         status:
           m.fromId === userId
-            ? (m as ApiMessage & { readAt?: number }).readAt
+            ? (m as ApiMessage).readAt
               ? "read"
               : "delivered"
             : undefined,
@@ -117,9 +130,18 @@ export default function ChatThreadPage({
     return [...mergedMap.values()].sort((a, b) => a.createdAt - b.createdAt);
   }, [apiMessages, massNotes, pending, userId]);
 
+  // Auto-scroll only when near bottom (within 120px)
+  const isNearBottom = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return true;
+    return el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+  }, []);
+
   useEffect(() => {
-    listEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [bubbles.length, text]);
+    if (isNearBottom()) {
+      listEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [bubbles.length, isNearBottom]);
 
   const send = async (imageUrl?: string) => {
     const body = text.trim();
@@ -138,6 +160,10 @@ export default function ChatThreadPage({
     setPending((p) => [...p, optimistic]);
     setText("");
     setSending(true);
+
+    // Scroll to bottom after sending
+    setTimeout(() => listEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
+
     try {
       const res = await fetch(`${requireApiBase()}/dm/send`, {
         method: "POST",
@@ -171,7 +197,11 @@ export default function ChatThreadPage({
 
   const header = (
     <div className="flex items-center gap-3 px-3 pb-3">
-      <Link href="/messages" className="rounded-full p-2" style={{ backgroundColor: CHAT_THEME.theirsBubble, color: CHAT_THEME.accent }}>
+      <Link
+        href="/messages"
+        className="rounded-full p-2"
+        style={{ backgroundColor: CHAT_THEME.theirsBubble, color: CHAT_THEME.accent }}
+      >
         <ArrowLeft className="h-5 w-5" />
       </Link>
       <Image
@@ -186,7 +216,7 @@ export default function ChatThreadPage({
       <div className="min-w-0 flex-1">
         <p className="font-display font-bold leading-tight text-sand">{hostName}</p>
         <p className="text-[11px] font-semibold" style={{ color: CHAT_THEME.accent }}>
-          {peerTyping ? "typing…" : "Host chat"}
+          {peerTyping ? "typing…" : "Host · DM"}
         </p>
       </div>
       <WalletDiamond compact />
@@ -204,6 +234,7 @@ export default function ChatThreadPage({
     <>
       <ChatThreadLayout
         header={header}
+        scrollRef={scrollContainerRef}
         composer={
           <>
             <input
@@ -241,8 +272,8 @@ export default function ChatThreadPage({
       >
         <div className="space-y-3">
           {bubbles.length === 0 ? (
-            <p className="text-center text-sm" style={{ color: CHAT_THEME.muted }}>
-              Say hi to start the chat
+            <p className="py-6 text-center text-sm" style={{ color: CHAT_THEME.muted }}>
+              Say hi to start the chat 👋
             </p>
           ) : null}
           {bubbles.map((m) => (

@@ -1,20 +1,52 @@
 @import "tailwindcss";
 
 :root {
+  /* Color palette */
   --ink: #06040b;
   --ink-2: #100c16;
   --ink-3: #1a1424;
+  --ink-4: #231b30;
   --sand: #f6efe6;
+  --sand-2: #e8ddd2;
   --muted: #a89a8c;
+  --muted-2: #7a6e68;
   --coral: #ff2a7a;
   --coral-2: #ff5a9a;
   --gold: #ffb800;
+  --gold-2: #ffd04d;
   --teal: #00f0ff;
   --cyan: #00f0ff;
+  --green: #22c55e;
+  --red: #ef4444;
   --line: rgba(246, 239, 230, 0.08);
+  --line-2: rgba(246, 239, 230, 0.14);
   --glow: rgba(255, 42, 122, 0.4);
   --background: var(--ink);
   --foreground: var(--sand);
+
+  /* Typography */
+  --font-body: var(--font-manrope), system-ui, sans-serif;
+  --font-display: var(--font-syne), system-ui, sans-serif;
+
+  /* Spacing scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+
+  /* Radii */
+  --radius-sm: 12px;
+  --radius-md: 16px;
+  --radius-lg: 20px;
+  --radius-xl: 24px;
+  --radius-2xl: 28px;
+  --radius-full: 9999px;
+
+  /* Shadows */
+  --shadow-glow: 0 0 24px rgba(255, 42, 122, 0.35);
+  --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.45);
 }
 
 @theme inline {
@@ -23,14 +55,21 @@
   --color-ink: var(--ink);
   --color-ink-2: var(--ink-2);
   --color-ink-3: var(--ink-3);
+  --color-ink-4: var(--ink-4);
   --color-sand: var(--sand);
+  --color-sand-2: var(--sand-2);
   --color-muted: var(--muted);
+  --color-muted-2: var(--muted-2);
   --color-coral: var(--coral);
   --color-coral-2: var(--coral-2);
   --color-gold: var(--gold);
+  --color-gold-2: var(--gold-2);
   --color-teal: var(--teal);
   --color-cyan: var(--cyan);
+  --color-green: var(--green);
+  --color-red: var(--red);
   --color-line: var(--line);
+  --color-line-2: var(--line-2);
   --font-display: var(--font-syne);
   --font-sans: var(--font-manrope);
 }
@@ -47,12 +86,13 @@ body {
 body {
   background: var(--ink);
   color: var(--sand);
-  font-family: var(--font-manrope), system-ui, sans-serif;
+  font-family: var(--font-body);
   overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
 }
 
 .font-display {
-  font-family: var(--font-syne), system-ui, sans-serif;
+  font-family: var(--font-display);
 }
 
 .app-atmosphere {
@@ -136,6 +176,62 @@ body {
 
 .safe-bottom {
   padding-bottom: calc(5.5rem + env(safe-area-inset-bottom));
+}
+
+/* Auth / form helpers */
+.auth-input {
+  width: 100%;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--line-2);
+  background: var(--ink-3);
+  color: var(--sand);
+  padding: 14px 16px;
+  font-family: var(--font-body);
+  font-size: 15px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.auth-input:focus {
+  border-color: var(--coral);
+}
+.auth-input::placeholder {
+  color: var(--muted);
+}
+
+.btn-primary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  border-radius: var(--radius-full);
+  background: linear-gradient(135deg, var(--coral), #c71585);
+  color: #fff;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 15px;
+  padding: 14px 24px;
+  border: none;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.1s;
+}
+.btn-primary:active { transform: scale(0.97); }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Stats card */
+.stat-card {
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--line);
+  background: var(--ink-3);
+  padding: 14px 16px;
+}
+
+/* Version badge */
+.version-badge {
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .lounge-shell {

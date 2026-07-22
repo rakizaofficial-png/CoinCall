@@ -4,6 +4,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import { GIFT_CATALOG, PHOTO_UNLOCK_MIN_COINS } from '../data/gifts';
@@ -20,6 +21,7 @@ import {
   sendRoomGift,
   addLockedPhoto,
   unlockLivePhoto,
+  updateLiveRoomLock,
   updatePartySeats,
   updateRoomTitle,
   type LiveComment,
@@ -88,6 +90,7 @@ type LiveStudioValue = {
   muteUser: (userId: string) => void;
   kickUser: (userId: string) => void;
   blockUserInRoom: (userId: string) => void;
+  updateRoomLock: (opts: { entryLocked: boolean; entryFee: number }) => Promise<void>;
   mutedUserIds: string[];
   blockedInRoom: string[];
   liveSeconds: number;
@@ -127,6 +130,38 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
   const [comments, setComments] = useState<LiveComment[]>([]);
   const [gifts, setGifts] = useState<LiveGiftEvent[]>([]);
   const [giftOverlay, setGiftOverlay] = useState<LiveGiftEvent | null>(null);
+  const giftQueueRef = useRef<LiveGiftEvent[]>([]);
+  const giftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const advanceGiftRef = useRef<() => void>(() => {});
+
+  // Keep advance function current without stale closures
+  useEffect(() => {
+    advanceGiftRef.current = () => {
+      if (giftTimerRef.current) {
+        clearTimeout(giftTimerRef.current);
+        giftTimerRef.current = null;
+      }
+      const next = giftQueueRef.current.shift();
+      if (next) {
+        setGiftOverlay(next);
+        giftTimerRef.current = setTimeout(() => {
+          giftTimerRef.current = null;
+          setGiftOverlay(null);
+          advanceGiftRef.current();
+        }, 2500);
+      } else {
+        setGiftOverlay(null);
+      }
+    };
+  });
+
+  const enqueueGiftOverlay = useCallback((gift: LiveGiftEvent) => {
+    giftQueueRef.current.push(gift);
+    // Only start processing if nothing is currently showing
+    if (!giftTimerRef.current) {
+      advanceGiftRef.current();
+    }
+  }, []);
   const [lockedPhotos, setLockedPhotos] = useState<LockedLivePhoto[]>([]);
   const [rechargeTicker, setRechargeTicker] = useState<{
     userName: string;
@@ -198,8 +233,7 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
     const u2 = listenRoomGifts(activeRoomId, (items) => {
       setGifts(items);
       if (items[0] && Date.now() - items[0].createdAt < 4000) {
-        setGiftOverlay(items[0]);
-        setTimeout(() => setGiftOverlay(null), 2800);
+        enqueueGiftOverlay(items[0]);
       }
     });
     const u3 = listenLockedPhotos(activeRoomId, setLockedPhotos);
@@ -332,8 +366,7 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
             createdAt: p.createdAt || Date.now(),
           };
           setGifts((prev) => [overlay, ...prev].slice(0, 50));
-          setGiftOverlay(overlay);
-          setTimeout(() => setGiftOverlay(null), 2800);
+          enqueueGiftOverlay(overlay);
           const coins = Number(p.coins) || 0;
           if (coins > 0) {
             setTodayLiveGiftCoins((c) => c + coins);
@@ -945,6 +978,24 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
     notify('Blocked', 'User blocked from your live.');
   }, []);
 
+  const updateRoomLock = useCallback(
+    async (opts: { entryLocked: boolean; entryFee: number }) => {
+      if (!myLiveRoom) return;
+      await updateLiveRoomLock(myLiveRoom.id, user.id, opts);
+      setMyLiveRoom((r) =>
+        r ? { ...r, entryLocked: opts.entryLocked, entryFee: opts.entryLocked ? opts.entryFee : 0 } : r,
+      );
+      setLiveRooms((list) =>
+        list.map((r) =>
+          r.id === myLiveRoom.id
+            ? { ...r, entryLocked: opts.entryLocked, entryFee: opts.entryLocked ? opts.entryFee : 0 }
+            : r,
+        ),
+      );
+    },
+    [myLiveRoom, user.id],
+  );
+
   const monthlyEarn = useMemo(() => {
     const fromApi = hostLifetime?.monthlyCoins;
     if (typeof fromApi === 'number' && fromApi > 0) return fromApi;
@@ -993,6 +1044,7 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
       muteUser,
       kickUser,
       blockUserInRoom,
+      updateRoomLock,
       mutedUserIds,
       blockedInRoom,
       liveSeconds,
@@ -1034,6 +1086,7 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
       muteUser,
       kickUser,
       blockUserInRoom,
+      updateRoomLock,
       mutedUserIds,
       blockedInRoom,
       liveSeconds,

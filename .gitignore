@@ -53,3 +53,11 @@ server/.data/
 server/.data/
 .data/
 artifacts/
+
+android-user/.gradle/
+android-user/app/build/
+android-user/**/debug.keystore
+releases/
+*.apk
+*.aab
+android-user/build/

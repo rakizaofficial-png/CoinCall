@@ -2,7 +2,6 @@ import { ChevronLeft, Video } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChatBubble, type ChatBubbleMessage } from '../../components/chat/ChatBubble';
 import { ChatSystemProfileHeader } from '../../components/chat/ChatSystemProfileHeader';
 import { ChatComposer } from '../../components/chat/ChatComposer';
@@ -27,7 +26,6 @@ import { notify } from '../../utils/notify';
 type Props = NativeStackScreenProps<RootStackParamList, 'DirectChat'>;
 
 export function ChatScreen({ navigation, route }: Props) {
-  const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const { user: authUser } = useAuth();
   const { getHost, startCall, user } = useApp();
@@ -59,7 +57,7 @@ export function ChatScreen({ navigation, route }: Props) {
   }, [peerId, meId]);
 
   const bubbles = useMemo<ChatBubbleMessage[]>(() => {
-    const server = messages.map((m) => ({
+    const server: ChatBubbleMessage[] = messages.map((m) => ({
       id: m.id,
       text: m.text,
       createdAt: m.createdAt,
@@ -218,7 +216,7 @@ export function ChatScreen({ navigation, route }: Props) {
             onSend={() => void send()}
             onPickImage={() => void sendImage()}
             sending={sending}
-            bottomInset={insets.bottom}
+            bottomInset={0}
           />
         }
       >
@@ -251,31 +249,42 @@ const styles = StyleSheet.create({
   headerInner: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingBottom: 10,
-    gap: 4,
+    paddingHorizontal: 10,
+    paddingBottom: 12,
+    paddingTop: 4,
+    gap: 6,
   },
-  back: { padding: 6 },
-  headerCenter: { flexDirection: 'row', alignItems: 'center', flex: 1 },
-  name: { fontWeight: '800', fontSize: 16 },
-  sub: { fontSize: 11, marginTop: 1 },
-  callBtn: {
+  back: {
     width: 36,
     height: 36,
     borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerCenter: { flexDirection: 'row', alignItems: 'center', flex: 1, gap: 0 },
+  name: { fontWeight: '700', fontSize: 16, letterSpacing: -0.2 },
+  sub: { fontSize: 12, marginTop: 2, fontWeight: '500' },
+  callBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: CHAT_THEME.coral,
     alignItems: 'center',
     justifyContent: 'center',
   },
   listContent: {
-    padding: 16,
-    paddingBottom: 12,
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 16,
     flexGrow: 1,
     justifyContent: 'flex-end',
   },
   empty: {
     color: CHAT_THEME.muted,
     textAlign: 'center',
-    marginTop: 40,
+    marginTop: 48,
+    fontSize: 14,
+    lineHeight: 20,
+    paddingHorizontal: 24,
   },
 });

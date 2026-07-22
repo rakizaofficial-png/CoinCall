@@ -396,25 +396,33 @@ export function IncomingCallModal({ call, onClear, hostBusyOnCall }: Props) {
 
         <View style={[styles.row, { paddingBottom: insets.bottom + 28 }]}>
           <Pressable
-            style={[styles.btn, styles.reject]}
+            style={[styles.btn, styles.reject, (busy || phase === 'accepting') && styles.btnDisabled]}
             onPress={() => void reject()}
             disabled={busy}
           >
             <PhoneOff size={28} color="#fff" />
-            <Text style={styles.btnLabel}>Reject</Text>
+            <Text style={styles.btnLabel}>
+              {phase === 'rejecting' ? 'Declining…' : 'Decline'}
+            </Text>
           </Pressable>
           <Pressable
-            style={[styles.btn, styles.accept]}
+            style={[styles.btn, styles.accept, (busy || phase === 'rejecting') && styles.btnDisabled]}
             onPress={accept}
             disabled={busy}
           >
             <LinearGradient
-              colors={['#22C55E', '#16A34A']}
+              colors={phase === 'accepting' ? ['#16A34A', '#15803D'] : ['#22C55E', '#16A34A']}
               style={styles.acceptGrad}
             >
-              <Video size={28} color="#fff" />
+              {phase === 'accepting' ? (
+                <Text style={{ color: '#fff', fontSize: 11, fontWeight: '900' }}>…</Text>
+              ) : (
+                <Video size={28} color="#fff" />
+              )}
             </LinearGradient>
-            <Text style={styles.btnLabel}>Accept</Text>
+            <Text style={styles.btnLabel}>
+              {phase === 'accepting' ? 'Connecting…' : 'Accept'}
+            </Text>
           </Pressable>
         </View>
       </Animated.View>
@@ -528,6 +536,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   accept: { alignItems: 'center' },
+  btnDisabled: { opacity: 0.45 },
   acceptGrad: {
     width: 78,
     height: 78,

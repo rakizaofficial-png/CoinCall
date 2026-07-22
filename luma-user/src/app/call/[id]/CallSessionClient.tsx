@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useRef, useState } from "react";
+import { use, useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -92,11 +92,14 @@ export default function CallSessionClient({
   const isDisconnected = state === "DISCONNECTED";
   const isAi = transport === "ai_prerecorded";
 
-  const hangUp = async () => {
+  const hangUp = useCallback(async () => {
     await disconnect();
     await stopUserAgoraCall();
-  };
-  hangUpRef.current = hangUp;
+  }, [disconnect]);
+
+  useEffect(() => {
+    hangUpRef.current = hangUp;
+  });
 
   // After either side hangs up, show Disconnected briefly then leave
   useEffect(() => {
@@ -259,32 +262,52 @@ export default function CallSessionClient({
       )}
 
       {isRinging && (
-        <div className="absolute inset-0 z-[1] flex flex-col items-center justify-center bg-gradient-to-b from-[#06040b] via-ink-2 to-coral/30">
+        <div className="absolute inset-0 z-[1] flex flex-col items-center justify-center bg-gradient-to-b from-[#06040b] via-ink-2 to-coral/20">
           <div className="relative mb-6">
-            <span className="absolute inset-0 animate-ping rounded-full bg-coral/40" />
+            <span className="absolute inset-0 scale-125 animate-ping rounded-full bg-coral/30" />
+            <span className="absolute inset-0 scale-110 animate-ping rounded-full bg-coral/20 [animation-delay:0.3s]" />
             <Image
               src={displayAvatar}
               alt=""
               width={120}
               height={120}
-              className="relative h-28 w-28 rounded-full object-cover ring-4 ring-coral/50"
+              className="relative h-32 w-32 rounded-full object-cover ring-4 ring-coral/60 shadow-[0_0_40px_rgba(255,42,122,0.4)]"
             />
           </div>
-          <p className="font-display text-2xl font-extrabold">{displayName}</p>
-          <p className="mt-2 animate-pulse text-sm font-semibold text-cyan">
-            Connecting to Host…
+          <p className="font-display text-2xl font-extrabold text-sand">{displayName}</p>
+          <p className="mt-3 rounded-full border border-cyan/30 bg-cyan/10 px-4 py-1.5 text-sm font-semibold text-cyan animate-pulse">
+            {state === "ROUTING" ? "Finding host…" : "Ringing…"}
           </p>
-          <p className="mt-1 text-xs text-gold/80">{statusText}</p>
+          {statusText ? (
+            <p className="mt-2 text-xs text-white/50">{statusText}</p>
+          ) : null}
+          <p className="mt-4 text-xs text-gold/70">
+            {rate} coins/min{isPremium ? " · VIP −15%" : ""}
+          </p>
         </div>
       )}
 
       {isDisconnected && (
-        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/80">
-          <PhoneOff className="mb-4 h-10 w-10 text-white" />
-          <p className="font-display text-3xl font-extrabold text-white">
-            Disconnected
-          </p>
-          <p className="mt-2 text-sm text-white/70">Call ended</p>
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/85 backdrop-blur-sm">
+          <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-white/10">
+            <PhoneOff className="h-8 w-8 text-white/80" />
+          </div>
+          <p className="font-display text-2xl font-extrabold text-white">Call ended</p>
+          <p className="mt-2 text-sm text-white/55">Duration: {mm}:{ss}</p>
+          <p className="mt-1 text-xs text-white/35">Returning to calls…</p>
+        </div>
+      )}
+
+      {isFailed && (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/85 backdrop-blur-sm">
+          <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-red-500/20">
+            <PhoneOff className="h-8 w-8 text-red-400" />
+          </div>
+          <p className="font-display text-xl font-extrabold text-white">Connection failed</p>
+          <p className="mt-2 text-sm text-white/55">{statusText}</p>
+          <Link href="/call" className="mt-5 rounded-full bg-coral px-6 py-2.5 text-sm font-bold text-white">
+            Back to calls
+          </Link>
         </div>
       )}
 
@@ -332,16 +355,17 @@ export default function CallSessionClient({
       </motion.div>
 
       <div className="relative z-10 flex min-h-dvh flex-col px-4 pb-8 pt-[max(0.75rem,env(safe-area-inset-top))]">
+        {/* Top bar */}
         <div className="flex items-center justify-between">
           <Link
             href="/call"
-            className="rounded-full bg-black/40 p-2 backdrop-blur"
+            className="rounded-full bg-black/55 p-2 shadow backdrop-blur"
             onClick={() => void hangUp()}
           >
-            <ArrowLeft className="h-5 w-5" />
+            <ArrowLeft className="h-5 w-5 text-white drop-shadow" />
           </Link>
-          <div className="rounded-full bg-black/45 px-3 py-1.5 text-center backdrop-blur">
-            <p className="text-xs font-bold">
+          <div className="rounded-full bg-black/60 px-4 py-2 text-center shadow backdrop-blur">
+            <p className="text-[11px] font-semibold text-white/70">
               {isRinging
                 ? "Connecting…"
                 : isConnected
@@ -354,40 +378,43 @@ export default function CallSessionClient({
                       ? "Failed"
                       : "1v1"}
             </p>
-            <p className="font-mono text-sm tabular-nums text-gold">
+            <p className="font-mono text-base font-bold tabular-nums text-gold leading-none">
               {mm}:{ss}
             </p>
           </div>
           <button
             type="button"
             onClick={() => setGiftOpen(true)}
-            className="rounded-full bg-coral p-2 shadow-[0_0_20px_var(--glow)]"
+            className="rounded-full bg-coral p-2.5 shadow-[0_0_20px_rgba(255,42,122,0.5)]"
           >
-            <Gift className="h-5 w-5" />
+            <Gift className="h-5 w-5 text-white" />
           </button>
         </div>
 
-        <div className="mt-8 text-center">
-          <h1 className="font-display text-3xl font-extrabold">{displayName}</h1>
-          <p className="mt-1 text-sm text-white/70">
-            {rate} coins/min
-            {isBlur ? " · Blind 50% off" : isPremium ? " · VIP −15%" : ""} ·{" "}
-            {coins} coins left
-          </p>
-          <p className="mt-3 text-sm text-white/80">{statusText}</p>
-          {isBlur && blurReveal < 1 && isConnected && (
-            <button
-              type="button"
-              onClick={clearBlur}
-              className="relative z-30 mt-4 rounded-full border border-cyan/40 bg-cyan/20 px-4 py-2 text-xs font-bold text-cyan backdrop-blur"
-            >
-              Instant Clear · reveal now
-            </button>
-          )}
-        </div>
+        {/* Center info (connected state) */}
+        {isConnected && (
+          <div className="mt-6 text-center">
+            <h1 className="font-display text-2xl font-extrabold text-white drop-shadow">{displayName}</h1>
+            <p className="mt-1 text-sm text-white/60">
+              {rate} coins/min
+              {isBlur ? " · Blind 50% off" : isPremium ? " · VIP −15%" : ""}
+            </p>
+            <p className="mt-0.5 text-xs text-white/40">{coins.toLocaleString()} coins remaining</p>
+            {isBlur && blurReveal < 1 && (
+              <button
+                type="button"
+                onClick={clearBlur}
+                className="relative z-30 mt-4 rounded-full border border-cyan/50 bg-cyan/15 px-5 py-2 text-xs font-bold text-cyan shadow backdrop-blur"
+              >
+                ✨ Instant Clear · reveal now
+              </button>
+            )}
+          </div>
+        )}
 
+        {/* Bottom controls */}
         <div className="mt-auto flex flex-col items-center gap-5">
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             <button
               type="button"
               onClick={() => {
@@ -397,9 +424,11 @@ export default function CallSessionClient({
                   return next;
                 });
               }}
-              className="rounded-full bg-white/15 p-4 backdrop-blur"
+              className={`rounded-full p-4 shadow backdrop-blur transition ${
+                muted ? "bg-red-500/70" : "bg-black/50"
+              }`}
             >
-              {muted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+              {muted ? <MicOff className="h-5 w-5 text-white" /> : <Mic className="h-5 w-5 text-white" />}
             </button>
             <button
               type="button"
@@ -410,32 +439,36 @@ export default function CallSessionClient({
                   return next;
                 });
               }}
-              className="rounded-full bg-white/15 p-4 backdrop-blur"
+              className={`rounded-full p-4 shadow backdrop-blur transition ${
+                camOff ? "bg-red-500/70" : "bg-black/50"
+              }`}
             >
               {camOff ? (
-                <VideoOff className="h-5 w-5" />
+                <VideoOff className="h-5 w-5 text-white" />
               ) : (
-                <Video className="h-5 w-5" />
+                <Video className="h-5 w-5 text-white" />
               )}
             </button>
             <button
               type="button"
-              className="rounded-full bg-white/15 p-4 backdrop-blur"
+              className="rounded-full bg-black/50 p-4 shadow backdrop-blur"
             >
-              <SwitchCamera className="h-5 w-5" />
+              <SwitchCamera className="h-5 w-5 text-white" />
             </button>
             <Link
               href="/call"
-              className="rounded-full bg-red-500 p-4 shadow-lg"
+              className="rounded-full bg-red-500 p-4 shadow-[0_0_20px_rgba(239,68,68,0.45)]"
               onClick={() => void hangUp()}
             >
-              <PhoneOff className="h-5 w-5" />
+              <PhoneOff className="h-5 w-5 text-white" />
             </Link>
           </div>
-          <p className="text-center text-xs text-white/50">
+          <p className="text-center text-[11px] text-white/40">
             {isConnected
-              ? "Secure private session"
-              : "Establishing encrypted media path…"}
+              ? "Encrypted private session"
+              : isRinging
+                ? "Establishing secure media path…"
+                : ""}
           </p>
         </div>
       </div>

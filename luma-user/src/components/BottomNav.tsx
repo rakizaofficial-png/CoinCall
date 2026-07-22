@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Home, Radio, Video, MessageCircle, UserRound } from "lucide-react";
 import { motion } from "framer-motion";
+import { useApp } from "@/lib/store";
 
 const tabs = [
   { href: "/", label: "Home", icon: Home },
@@ -15,12 +16,16 @@ const tabs = [
 
 export function BottomNav() {
   const pathname = usePathname();
+  const { unreadInbox } = useApp();
+
   const hide =
     pathname.startsWith("/live/") ||
     pathname.startsWith("/call/") ||
     pathname.startsWith("/messages/") ||
     pathname.startsWith("/party/") ||
-    pathname === "/premium";
+    pathname === "/premium" ||
+    pathname.startsWith("/login") ||
+    pathname.startsWith("/register");
 
   if (hide) return null;
 
@@ -33,6 +38,7 @@ export function BottomNav() {
               ? pathname === "/"
               : pathname.startsWith(tab.href);
           const Icon = tab.icon;
+          const badge = tab.href === "/messages" && unreadInbox > 0 ? unreadInbox : 0;
           return (
             <li key={tab.href}>
               <Link
@@ -46,10 +52,17 @@ export function BottomNav() {
                     transition={{ type: "spring", stiffness: 380, damping: 30 }}
                   />
                 )}
-                <Icon
-                  className={`relative h-5 w-5 ${active ? "text-coral" : "text-muted"}`}
-                  strokeWidth={active ? 2.4 : 1.8}
-                />
+                <span className="relative">
+                  <Icon
+                    className={`relative h-5 w-5 ${active ? "text-coral" : "text-muted"}`}
+                    strokeWidth={active ? 2.4 : 1.8}
+                  />
+                  {badge > 0 && (
+                    <span className="absolute -right-1.5 -top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-coral px-1 text-[9px] font-bold text-white">
+                      {badge > 99 ? "99+" : badge}
+                    </span>
+                  )}
+                </span>
                 <span
                   className={
                     active ? "relative text-sand" : "relative text-muted"

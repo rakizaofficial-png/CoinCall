@@ -199,14 +199,32 @@ export const threads: ChatThread[] = [
   },
 ];
 
-/** Prices must match server GIFT_CATALOG_SERVER (legacy aliases). */
+/**
+ * Gift catalog — primary keys match server GIFT_CATALOG_SERVER exactly.
+ * Legacy alias keys (rose, heart, etc.) also included for compatibility.
+ * Prefer fetching GET /api/gifts at runtime; this is the static fallback.
+ */
 export const gifts: Gift[] = [
-  { id: "rose", name: "Rose Bouquet", emoji: "🌹", coins: 10 },
-  { id: "heart", name: "Neon Heart", emoji: "💗", coins: 99 },
-  { id: "kiss", name: "Kiss Heart", emoji: "💋", coins: 99 },
-  { id: "star", name: "Golden Butterfly", emoji: "⭐", coins: 199 },
-  { id: "diamond", name: "Diamond Ring", emoji: "💎", coins: 299 },
-  { id: "crown", name: "Diamond Crown", emoji: "👑", coins: 1999 },
+  { id: "rose_bouquet", name: "Rose Bouquet", emoji: "🌹", coins: 10 },
+  { id: "luxury_perfume", name: "Luxury Perfume", emoji: "🧴", coins: 50 },
+  { id: "neon_heart", name: "Neon Heart", emoji: "💗", coins: 99 },
+  { id: "golden_butterfly", name: "Golden Butterfly", emoji: "🦋", coins: 199 },
+  { id: "diamond_ring", name: "Diamond Ring", emoji: "💍", coins: 299 },
+  { id: "vip_champagne", name: "VIP Champagne", emoji: "🍾", coins: 399 },
+  { id: "luxury_watch", name: "Luxury Watch", emoji: "⌚", coins: 599 },
+  { id: "luxury_handbag", name: "Luxury Handbag", emoji: "👜", coins: 799 },
+  { id: "fireworks", name: "Fireworks", emoji: "🎆", coins: 999 },
+  { id: "sports_car", name: "Sports Car", emoji: "🏎️", coins: 1299 },
+  { id: "super_bike", name: "Super Bike", emoji: "🏍️", coins: 1599 },
+  { id: "diamond_crown", name: "Diamond Crown", emoji: "👑", coins: 1999 },
+  { id: "red_carpet", name: "Red Carpet", emoji: "🎬", coins: 2499 },
+  { id: "fashion_collection", name: "Fashion Collection", emoji: "👗", coins: 2999 },
+  { id: "private_jet", name: "Private Jet", emoji: "✈️", coins: 4999 },
+  { id: "luxury_yacht", name: "Luxury Yacht", emoji: "🛥️", coins: 6999 },
+  { id: "royal_castle", name: "Royal Castle", emoji: "🏰", coins: 9999 },
+  { id: "golden_throne", name: "Golden Throne", emoji: "🪑", coins: 12999 },
+  { id: "diamond_rain", name: "Diamond Rain", emoji: "💎", coins: 15999 },
+  { id: "millionaire_box", name: "Millionaire Box", emoji: "🎁", coins: 19999 },
 ];
 
 export const giftTickerLines = [

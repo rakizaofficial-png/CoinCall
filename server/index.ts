@@ -32,6 +32,11 @@ import {
 import { registerVideoLibraryRoutes } from './videoLibrary.ts';
 import { registerHostAppUpdateRoutes } from './hostAppUpdate.ts';
 import {
+  loginUser,
+  publicAuthUser,
+  registerUser,
+} from './userAuth.ts';
+import {
   dumpHomeBannersForSnapshot,
   getHomeBanners,
   loadHomeBannersFromSnapshot,
@@ -508,6 +513,14 @@ function pushToHost(hostId: string, event: string, data: unknown) {
 
 setInterval(() => {
   pruneHosts();
+  // Presence TTL deletions must also end live rooms (force-close / crash)
+  for (const [id, room] of liveRooms) {
+    if (!room?.isLive) continue;
+    const hostId = String(room.hostId || room.id || '');
+    if (hostId && !getPresence(hostId)) {
+      endLiveRoomsForHost(hostId, 'presence_ttl');
+    }
+  }
   pruneZombieLiveRooms();
 }, 10_000);
 
@@ -533,6 +546,56 @@ app.get('/api/health', (_req, res) => {
         'Set EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET on host (project lovecall-2291e)',
     },
   });
+});
+
+/** Public gift catalog — User + Host must use the same IDs */
+app.get('/api/gifts', (_req, res) => {
+  const gifts = Object.entries(GIFT_CATALOG_SERVER).map(([id, g]) => ({
+    id,
+    name: g.name,
+    emoji: g.emoji,
+    coins: g.coins,
+  }));
+  res.json({ gifts });
+});
+
+/** Zuko user email+password registration (no OTP) */
+app.post('/api/users/register', (req, res) => {
+  const result = registerUser({
+    email: String(req.body?.email || ''),
+    password: String(req.body?.password || ''),
+    displayName: String(req.body?.displayName || ''),
+  });
+  if (!result.ok) {
+    res.status(result.status).json({ error: result.error });
+    return;
+  }
+  const { account } = result;
+  ensureWallet(account.userId, {
+    role: 'user',
+    displayName: account.displayName,
+  });
+  persist();
+  res.status(201).json(publicAuthUser(account));
+});
+
+/** Zuko user email+password login (no OTP) */
+app.post('/api/users/login', (req, res) => {
+  const result = loginUser({
+    email: String(req.body?.email || ''),
+    password: String(req.body?.password || ''),
+  });
+  if (!result.ok) {
+    res.status(result.status).json({ error: result.error });
+    return;
+  }
+  const { account } = result;
+  ensureWallet(account.userId, {
+    role: 'user',
+    displayName: account.displayName,
+  });
+  persist();
+  res.json(publicAuthUser(account));
 });
 
 /**
@@ -4183,15 +4246,37 @@ function endLiveRoomsForHost(hostId: string, reason = 'host_offline') {
   return n;
 }
 
-/** Drop live rooms whose host is no longer present/online */
+/** Drop live rooms whose host is gone OR heartbeat is stale */
+const LIVE_ROOM_HEARTBEAT_TTL_MS = Number(
+  process.env.LIVE_ROOM_HEARTBEAT_TTL_MS || 45_000,
+);
+
 function pruneZombieLiveRooms() {
-  for (const [id, room] of liveRooms) {
+  const now = Date.now();
+  const hostIdsToEnd = new Set<string>();
+  for (const [, room] of liveRooms) {
     if (!room?.isLive) continue;
     const hostId = String(room.hostId || room.id || '');
     if (!hostId) continue;
     const presence = getPresence(hostId);
-    if (!presence || !presence.isOnline) {
-      endLiveRoomsForHost(hostId, 'presence_expired');
+    const updatedAt = Number(room.updatedAt || room.startedAt || 0);
+    const staleHeartbeat =
+      updatedAt > 0 && now - updatedAt > LIVE_ROOM_HEARTBEAT_TTL_MS;
+    if (!presence || !presence.isOnline || !presence.isLive || staleHeartbeat) {
+      hostIdsToEnd.add(hostId);
+    }
+  }
+  for (const hostId of hostIdsToEnd) {
+    const presence = getPresence(hostId);
+    const reason =
+      !presence || !presence.isOnline
+        ? 'presence_expired'
+        : !presence.isLive
+          ? 'presence_not_live'
+          : 'heartbeat_timeout';
+    endLiveRoomsForHost(hostId, reason);
+    if (presence) {
+      patchPresence(hostId, { isLive: false });
     }
   }
 }
@@ -4961,6 +5046,46 @@ app.post('/api/live/rooms/:id/title', (req, res) => {
   liveRooms.set(id, room);
   broadcastWs({ type: 'live:title', payload: { id, title } });
   res.json({ ok: true, room });
+});
+
+/** Host toggles Premium / coin-lock mid-live (server authoritative) */
+app.patch('/api/live/rooms/:id/lock', (req, res) => {
+  const id = String(req.params.id || '');
+  const room = liveRooms.get(id) || findLiveRoom(id)?.room;
+  if (!room || !room.isLive) {
+    res.status(404).json({ error: 'Live room not found' });
+    return;
+  }
+  const hostId = String(
+    req.headers['x-user-id'] || req.body?.hostId || room.hostId || '',
+  );
+  if (!hostId || String(room.hostId || '') !== hostId) {
+    res.status(403).json({ error: 'Only the live host can change lock' });
+    return;
+  }
+  const entryLocked = Boolean(req.body?.entryLocked);
+  const entryFee = entryLocked
+    ? Math.max(10, Math.min(9999, Math.floor(Number(req.body?.entryFee) || 50)))
+    : 0;
+  room.entryLocked = entryLocked;
+  room.entryFee = entryFee;
+  room.updatedAt = Date.now();
+  liveRooms.set(String(room.id || id), room);
+  broadcastWs({
+    type: 'live:lock',
+    payload: {
+      id: String(room.id || id),
+      entryLocked,
+      entryFee,
+    },
+  });
+  persist();
+  res.json({
+    ok: true,
+    roomId: String(room.id || id),
+    entryLocked,
+    entryFee,
+  });
 });
 
 /** Announce a viewer recharge into a live room (user app / host demo). */

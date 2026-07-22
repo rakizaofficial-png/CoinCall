@@ -185,31 +185,44 @@ export function DashboardScreen({ navigation }: { navigation: any }) {
 
       <View style={styles.grid}>
         {[
-          { icon: Gift, label: 'Total gifts', value: hostLifetime.totalGifts },
-          { icon: Wallet, label: 'Coins earned', value: hostLifetime.coinsEarned },
-          { icon: Heart, label: 'Wallet', value: walletBalance },
-          { icon: Radio, label: 'Total calls', value: hostLifetime.totalCalls },
-          { icon: Users, label: 'Followers', value: hostLifetime.followers },
-          { icon: Clock, label: 'Live time', value: `${liveTimeMinutes}m` },
-          { icon: Radio, label: 'Calls today', value: callsToday },
-          { icon: Gift, label: 'Gifts today', value: giftCoinsToday },
+          { icon: Gift, label: 'Gifts today', value: giftCoinsToday, route: 'Earnings' as const },
+          { icon: Wallet, label: 'Coins earned', value: hostLifetime.coinsEarned, route: 'Earnings' as const },
+          { icon: Heart, label: 'Wallet', value: walletBalance, route: 'CoinHistory' as const },
+          { icon: Radio, label: 'Calls today', value: callsToday, route: 'CallHistory' as const },
+          { icon: Users, label: 'Followers', value: hostLifetime.followers, route: undefined },
+          { icon: Clock, label: 'Live time', value: `${liveTimeMinutes}m`, route: undefined },
+          { icon: Radio, label: 'Total calls', value: hostLifetime.totalCalls, route: 'CallHistory' as const },
+          { icon: Gift, label: 'Total gifts', value: hostLifetime.totalGifts, route: 'Earnings' as const },
         ].map((s) => (
-          <GlassCard key={s.label} style={styles.stat}>
-            <s.icon size={18} color={colors.primarySoft} />
-            <Text style={[styles.statValue, { color: colors.text }]}>{s.value}</Text>
-            <Text style={[styles.statLabel, { color: colors.textMuted }]}>{s.label}</Text>
-          </GlassCard>
+          <Pressable
+            key={s.label}
+            onPress={s.route ? () => navigation.navigate(s.route) : undefined}
+            style={styles.statPress}
+          >
+            <GlassCard style={[styles.stat, s.route && styles.statTappable]}>
+              <s.icon size={16} color={colors.primarySoft} />
+              <Text style={[styles.statValue, { color: colors.text }]}>{s.value}</Text>
+              <Text style={[styles.statLabel, { color: colors.textMuted }]}>{s.label}</Text>
+            </GlassCard>
+          </Pressable>
         ))}
       </View>
 
-      <Pressable onPress={() => navigation.navigate('Earnings')}>
-        <GlassCard>
-          <Text style={[styles.rowTitle, { color: colors.text }]}>Call Analytics & Revenue</Text>
-          <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
-            Total calls, duration, call coins, gifts with sender details — open Earnings
-          </Text>
-        </GlassCard>
-      </Pressable>
+      <View style={styles.quickLinks}>
+        {[
+          { label: 'Earnings', route: 'Earnings' as const },
+          { label: 'Coin history', route: 'CoinHistory' as const },
+          { label: 'Call history', route: 'CallHistory' as const },
+        ].map((l) => (
+          <Pressable
+            key={l.label}
+            onPress={() => navigation.navigate(l.route)}
+            style={[styles.quickLink, { borderColor: colors.border }]}
+          >
+            <Text style={[styles.quickLinkText, { color: colors.primarySoft }]}>{l.label}</Text>
+          </Pressable>
+        ))}
+      </View>
 
       <GlassCard>
         <View style={styles.row}>
@@ -275,9 +288,21 @@ const styles = StyleSheet.create({
   },
   secondaryText: { color: '#fff', fontWeight: '800' },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 12 },
-  stat: { width: '48%', alignItems: 'flex-start', gap: 6 },
+  statPress: { width: '48%' },
+  stat: { width: '100%', alignItems: 'flex-start', gap: 6 },
+  statTappable: { borderWidth: StyleSheet.hairlineWidth },
   statValue: { fontWeight: '900', fontSize: 22 },
   statLabel: { fontSize: 12 },
+  quickLinks: { flexDirection: 'row', gap: 8, marginBottom: 12 },
+  quickLink: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+  },
+  quickLinkText: { fontWeight: '800', fontSize: 13 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

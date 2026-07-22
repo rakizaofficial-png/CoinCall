@@ -37,6 +37,9 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 
 ## Deploy via CoinCall monorepo
 
+**Canonical User App repo:** [`rakizaofficial-png/zuko-call`](https://github.com/rakizaofficial-png/zuko-call).  
+Future Zuko / User App merges should land there first. This `luma-user/` folder is a vendored mirror for the CoinCall Render blueprint.
+
 This app is also vendored in `rakizaofficial-png/CoinCall` under `luma-user/`.
 On Render, set the service root directory to `luma-user` and connect the CoinCall repo
 (or sync the Blueprint) so production picks up host-bridge feed fixes.

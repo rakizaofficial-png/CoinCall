@@ -1,0 +1,1652 @@
+From 0130b6b40e58ffb3ec2147d75e81e5fd9bb8a98a Mon Sep 17 00:00:00 2001
+From: Cursor Agent <cursoragent@cursor.com>
+Date: Wed, 22 Jul 2026 21:54:05 +0000
+Subject: [PATCH] Production sync: email/password auth (no OTP),
+ live/gift/history fixes.
+
+- Login/register use CoinCall API email+password without OTP
+- Live list uses server /live/rooms only (no ghost presence hosts)
+- Gift catalog includes server IDs; GiftSheet fetches GET /api/gifts
+- Dedicated /profile/coins and /profile/calls history pages
+- Document zuko-call as canonical User App repo; bump to 1.1.0
+---
+ AGENTS.md                      |   7 +
+ package-lock.json              | 118 +---------------
+ package.json                   |   2 +-
+ src/app/live/page.tsx          |  29 +---
+ src/app/login/page.tsx         |  65 +++++----
+ src/app/profile/calls/page.tsx | 250 +++++++++++++++++++++++++++++++++
+ src/app/profile/coins/page.tsx | 224 +++++++++++++++++++++++++++++
+ src/app/profile/page.tsx       |  16 +++
+ src/app/register/page.tsx      |  78 ++++++++--
+ src/components/GiftSheet.tsx   |  46 +++++-
+ src/lib/authSession.ts         | 137 +++++++++++++++---
+ src/lib/data.ts                | 124 ++++++----------
+ 12 files changed, 815 insertions(+), 281 deletions(-)
+ create mode 100644 src/app/profile/calls/page.tsx
+ create mode 100644 src/app/profile/coins/page.tsx
+
+diff --git a/AGENTS.md b/AGENTS.md
+index d6418a0..06000ff 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -28,3 +28,10 @@ This version has breaking changes — APIs, conventions, and file structure may
+ 
+ ### Lint
+ - `npm run lint` currently reports pre-existing errors/warnings in committed code. Treat those as baseline, not as a broken environment.
++
++
++## Canonical Zuko repo policy
++- **This repository (`rakizaofficial-png/zuko-call`) is the source of truth for all Zuko / User App work.**
++- Do **not** land User App feature work only in CoinCall `luma-user/` — merge Zuko changes here.
++- CoinCall monorepo may keep a vendored `luma-user/` mirror for Render blueprint convenience; sync **from this repo → CoinCall**, not the other way around, for User App UI.
++- Host / API changes stay in `rakizaofficial-png/CoinCall`.
+diff --git a/package-lock.json b/package-lock.json
+index 10b327f..4ff9cdc 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -1,12 +1,12 @@
+ {
+   "name": "myapp",
+-  "version": "0.1.2",
++  "version": "1.1.0",
+   "lockfileVersion": 3,
+   "requires": true,
+   "packages": {
+     "": {
+       "name": "myapp",
+-      "version": "0.1.2",
++      "version": "1.1.0",
+       "dependencies": {
+         "@tailwindcss/postcss": "^4",
+         "agora-rtc-sdk-ng": "^4.24.6",
+@@ -1309,9 +1309,6 @@
+       "cpu": [
+         "arm"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "LGPL-3.0-or-later",
+       "optional": true,
+       "os": [
+@@ -1328,9 +1325,6 @@
+       "cpu": [
+         "arm64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "LGPL-3.0-or-later",
+       "optional": true,
+       "os": [
+@@ -1347,9 +1341,6 @@
+       "cpu": [
+         "ppc64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "LGPL-3.0-or-later",
+       "optional": true,
+       "os": [
+@@ -1366,9 +1357,6 @@
+       "cpu": [
+         "riscv64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "LGPL-3.0-or-later",
+       "optional": true,
+       "os": [
+@@ -1385,9 +1373,6 @@
+       "cpu": [
+         "s390x"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "LGPL-3.0-or-later",
+       "optional": true,
+       "os": [
+@@ -1404,9 +1389,6 @@
+       "cpu": [
+         "x64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "LGPL-3.0-or-later",
+       "optional": true,
+       "os": [
+@@ -1423,9 +1405,6 @@
+       "cpu": [
+         "arm64"
+       ],
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "LGPL-3.0-or-later",
+       "optional": true,
+       "os": [
+@@ -1442,9 +1421,6 @@
+       "cpu": [
+         "x64"
+       ],
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "LGPL-3.0-or-later",
+       "optional": true,
+       "os": [
+@@ -1461,9 +1437,6 @@
+       "cpu": [
+         "arm"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "Apache-2.0",
+       "optional": true,
+       "os": [
+@@ -1486,9 +1459,6 @@
+       "cpu": [
+         "arm64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "Apache-2.0",
+       "optional": true,
+       "os": [
+@@ -1511,9 +1481,6 @@
+       "cpu": [
+         "ppc64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "Apache-2.0",
+       "optional": true,
+       "os": [
+@@ -1536,9 +1503,6 @@
+       "cpu": [
+         "riscv64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "Apache-2.0",
+       "optional": true,
+       "os": [
+@@ -1561,9 +1525,6 @@
+       "cpu": [
+         "s390x"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "Apache-2.0",
+       "optional": true,
+       "os": [
+@@ -1586,9 +1547,6 @@
+       "cpu": [
+         "x64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "Apache-2.0",
+       "optional": true,
+       "os": [
+@@ -1611,9 +1569,6 @@
+       "cpu": [
+         "arm64"
+       ],
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "Apache-2.0",
+       "optional": true,
+       "os": [
+@@ -1636,9 +1591,6 @@
+       "cpu": [
+         "x64"
+       ],
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "Apache-2.0",
+       "optional": true,
+       "os": [
+@@ -1848,9 +1800,6 @@
+       "cpu": [
+         "arm64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -1867,9 +1816,6 @@
+       "cpu": [
+         "arm64"
+       ],
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -1886,9 +1832,6 @@
+       "cpu": [
+         "x64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -1905,9 +1848,6 @@
+       "cpu": [
+         "x64"
+       ],
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -2195,9 +2135,6 @@
+       "cpu": [
+         "arm64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -2214,9 +2151,6 @@
+       "cpu": [
+         "arm64"
+       ],
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -2233,9 +2167,6 @@
+       "cpu": [
+         "x64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -2252,9 +2183,6 @@
+       "cpu": [
+         "x64"
+       ],
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -2805,9 +2733,6 @@
+         "arm64"
+       ],
+       "dev": true,
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -2822,9 +2747,6 @@
+         "arm64"
+       ],
+       "dev": true,
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -2839,9 +2761,6 @@
+         "loong64"
+       ],
+       "dev": true,
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -2856,9 +2775,6 @@
+         "loong64"
+       ],
+       "dev": true,
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -2873,9 +2789,6 @@
+         "ppc64"
+       ],
+       "dev": true,
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -2890,9 +2803,6 @@
+         "riscv64"
+       ],
+       "dev": true,
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -2907,9 +2817,6 @@
+         "riscv64"
+       ],
+       "dev": true,
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -2924,9 +2831,6 @@
+         "s390x"
+       ],
+       "dev": true,
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -2941,9 +2845,6 @@
+         "x64"
+       ],
+       "dev": true,
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -2958,9 +2859,6 @@
+         "x64"
+       ],
+       "dev": true,
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -5910,9 +5808,6 @@
+       "cpu": [
+         "arm64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MPL-2.0",
+       "optional": true,
+       "os": [
+@@ -5933,9 +5828,6 @@
+       "cpu": [
+         "arm64"
+       ],
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MPL-2.0",
+       "optional": true,
+       "os": [
+@@ -5956,9 +5848,6 @@
+       "cpu": [
+         "x64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MPL-2.0",
+       "optional": true,
+       "os": [
+@@ -5979,9 +5868,6 @@
+       "cpu": [
+         "x64"
+       ],
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MPL-2.0",
+       "optional": true,
+       "os": [
+diff --git a/package.json b/package.json
+index ee49ba6..13c5618 100644
+--- a/package.json
++++ b/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "myapp",
+-  "version": "0.1.2",
++  "version": "1.1.0",
+   "private": true,
+   "engines": {
+     "node": ">=20"
+diff --git a/src/app/live/page.tsx b/src/app/live/page.tsx
+index e57b213..dbba2da 100644
+--- a/src/app/live/page.tsx
++++ b/src/app/live/page.tsx
+@@ -23,6 +23,8 @@ type LiveRoomRow = {
+   locked?: boolean;
+   isPremium?: boolean;
+   premium?: boolean;
++  entryLocked?: boolean;
++  entryFee?: number;
+ };
+ 
+ type Card = {
+@@ -67,6 +69,8 @@ function roomLocked(r: LiveRoomRow) {
+       r.locked ||
+       r.isPremium ||
+       r.premium ||
++      r.entryLocked ||
++      (Number(r.entryFee) || 0) > 0 ||
+       r.mode === "premium" ||
+       r.mode === "locked",
+   );
+@@ -102,14 +106,9 @@ export default function LivePage() {
+         const hosts = hostList.filter((h) => h.isLive);
+         const rooms = Array.isArray(roomRes.rooms)
+           ? (roomRes.rooms as LiveRoomRow[]).filter((r) => {
+-              // Only truly live rooms — ended sessions disappear immediately
+-              if (r.isLive === false) return false;
++              // Server /live/rooms is authoritative — never invent LIVE from presence alone
++              if (r.isLive !== true) return false;
+               if (String(r.mode || "solo") === "party") return false;
+-              // If API omits isLive, require matching live host presence
+-              if (r.isLive !== true) {
+-                const hid = String(r.hostId || "");
+-                return hosts.some((h) => h.id === hid);
+-              }
+               return true;
+             })
+           : [];
+@@ -139,22 +138,6 @@ export default function LivePage() {
+           });
+         }
+ 
+-        for (const h of hosts) {
+-          if (byId.has(h.id)) continue;
+-          byId.set(h.id, {
+-            id: h.id,
+-            roomId: `live_${h.id}`,
+-            name: h.name,
+-            avatar: avatarFor(h.id, h.avatarUrl, h.name),
+-            title: "Live now",
+-            viewers: 0,
+-            country: h.country || "",
+-            giftCoins: 0,
+-            locked: false,
+-            source: "live",
+-          });
+-        }
+-
+         const next = Array.from(byId.values());
+         const sig = cardSig(next);
+         if (sig !== sigRef.current) {
+diff --git a/src/app/login/page.tsx b/src/app/login/page.tsx
+index 0b59802..c05da22 100644
+--- a/src/app/login/page.tsx
++++ b/src/app/login/page.tsx
+@@ -21,11 +21,9 @@ export default function LoginPage() {
+   const submit = async () => {
+     setLoading(true);
+     try {
+-      const res = await loginAccount({ email, password });
+-      pushToast("OTP sent — verify to continue");
+-      const q = new URLSearchParams({ email: res.email });
+-      if (res.demoCode) q.set("demo", res.demoCode);
+-      router.push(`/otp?${q.toString()}`);
++      await loginAccount({ email, password });
++      pushToast("Welcome back");
++      router.replace("/");
+     } catch (e: unknown) {
+       pushToast(e instanceof Error ? e.message : "Login failed");
+     } finally {
+@@ -36,35 +34,42 @@ export default function LoginPage() {
+   return (
+     <AuthShell
+       title="Sign in"
+-      subtitle="Secure login for your Zuko wallet, calls, and VIP."
++      subtitle="Email and password — no OTP required."
+       footer={
+-        <Link href="/forgot-password" className="font-bold text-coral">
+-          Forgot password?
+-        </Link>
++        <p className="text-center text-sm text-muted">
++          New here?{" "}
++          <Link href="/register" className="font-semibold text-coral">
++            Create account
++          </Link>
++        </p>
+       }
+     >
+-      <AuthField
+-        label="Email"
+-        type="email"
+-        autoComplete="email"
+-        value={email}
+-        onChange={setEmail}
+-        placeholder="you@email.com"
+-      />
+-      <AuthField
+-        label="Password"
+-        type="password"
+-        autoComplete="current-password"
+-        value={password}
+-        onChange={setPassword}
+-        placeholder="••••••••"
+-      />
+-      <div className="flex justify-end">
+-        <span className="text-[11px] text-muted">OTP required after password</span>
++      <div className="space-y-3">
++        <AuthField
++          label="Email"
++          type="email"
++          autoComplete="email"
++          value={email}
++          onChange={setEmail}
++          placeholder="you@email.com"
++        />
++        <AuthField
++          label="Password"
++          type="password"
++          autoComplete="current-password"
++          value={password}
++          onChange={setPassword}
++          placeholder="••••••••"
++        />
++        <AuthPrimaryButton disabled={loading} onClick={() => void submit()}>
++          {loading ? "Signing in…" : "Sign in"}
++        </AuthPrimaryButton>
++        <p className="text-center text-xs text-muted">
++          <Link href="/forgot-password" className="text-cyan">
++            Forgot password?
++          </Link>
++        </p>
+       </div>
+-      <AuthPrimaryButton loading={loading} onClick={() => void submit()}>
+-        Continue to OTP
+-      </AuthPrimaryButton>
+     </AuthShell>
+   );
+ }
+diff --git a/src/app/profile/calls/page.tsx b/src/app/profile/calls/page.tsx
+new file mode 100644
+index 0000000..be403d2
+--- /dev/null
++++ b/src/app/profile/calls/page.tsx
+@@ -0,0 +1,250 @@
++// Data source: GET /api/users/:userId/calls (callHistory filtered by userId)
++"use client";
++
++import { useEffect, useState } from "react";
++import Image from "next/image";
++import Link from "next/link";
++import { ArrowLeft, Clock, PhoneCall, PhoneMissed } from "lucide-react";
++import { requireApiBase } from "@/config/apiConfig";
++import { getDeviceUserId } from "@/lib/walletApi";
++
++type CallRecord = {
++  id: string;
++  hostId: string;
++  hostName: string;
++  status: string;
++  durationSec: number;
++  coinsSpent: number;
++  startedAt: number;
++  endedAt: number;
++  ratePerMinute: number;
++};
++
++type CallSummary = { totalCalls: number; totalCoinsSpent: number; totalDurationSec: number };
++
++type Tab = "all" | "completed" | "missed";
++type Filter = "today" | "7d" | "30d";
++
++const PAGE_SIZE = 12;
++
++function fmtDuration(sec: number): string {
++  if (sec < 60) return `${sec}s`;
++  const m = Math.floor(sec / 60);
++  const s = sec % 60;
++  return s ? `${m}m ${s}s` : `${m}m`;
++}
++
++function fmtDate(ts: number): string {
++  return new Date(ts).toLocaleDateString("en-US", {
++    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
++  });
++}
++
++function filterByDate(records: CallRecord[], filter: Filter): CallRecord[] {
++  const now = Date.now();
++  const cut: Record<Filter, number> = {
++    today: now - 86_400_000,
++    "7d": now - 7 * 86_400_000,
++    "30d": now - 30 * 86_400_000,
++  };
++  return records.filter((c) => (c.startedAt ?? 0) >= cut[filter]);
++}
++
++export default function CallHistoryPage() {
++  const [calls, setCalls] = useState<CallRecord[]>([]);
++  const [summary, setSummary] = useState<CallSummary>({ totalCalls: 0, totalCoinsSpent: 0, totalDurationSec: 0 });
++  const [loading, setLoading] = useState(true);
++  const [error, setError] = useState<string | null>(null);
++  const [retryAt, setRetryAt] = useState(0);
++  const [tab, setTab] = useState<Tab>("all");
++  const [filter, setFilter] = useState<Filter>("30d");
++  const [page, setPage] = useState(0);
++
++  useEffect(() => {
++    let active = true;
++    const doLoad = async () => {
++      if (!active) return;
++      setLoading(true);
++      setError(null);
++      try {
++        const userId = getDeviceUserId();
++        const res = await fetch(
++          `${requireApiBase()}/users/${encodeURIComponent(userId)}/calls?limit=100`,
++          { headers: { "X-User-Id": userId }, cache: "no-store" },
++        );
++        const data = (await res.json()) as { calls?: CallRecord[]; summary?: CallSummary };
++        if (active) {
++          setCalls(data.calls ?? []);
++          if (data.summary) setSummary(data.summary);
++        }
++      } catch (e) {
++        if (active) setError(e instanceof Error ? e.message : "Could not load call history");
++      } finally {
++        if (active) setLoading(false);
++      }
++    };
++    void doLoad();
++    return () => { active = false; };
++  }, [retryAt]);
++
++  const tabFiltered = calls.filter((c) => {
++    if (tab === "all") return true;
++    if (tab === "completed") return c.status === "ended";
++    if (tab === "missed") return c.status === "missed" || c.status === "rejected";
++    return true;
++  });
++  const dateFiltered = filterByDate(tabFiltered, filter);
++  const totalPages = Math.ceil(dateFiltered.length / PAGE_SIZE);
++  const paged = dateFiltered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
++
++  const handleTab = (t: Tab) => { setTab(t); setPage(0); };
++  const handleFilter = (f: Filter) => { setFilter(f); setPage(0); };
++
++  return (
++    <main className="pb-28">
++      <div className="sticky top-0 z-10 border-b border-line bg-ink/95 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur-xl">
++        <div className="flex items-center gap-3">
++          <Link href="/profile" className="rounded-full bg-ink-3 p-2">
++            <ArrowLeft className="h-4 w-4" />
++          </Link>
++          <h1 className="font-display text-lg font-extrabold">Call History</h1>
++        </div>
++
++        {/* Summary row */}
++        <div className="mt-3 flex gap-2 overflow-x-auto scrollbar-hide pb-0.5">
++          <div className="shrink-0 rounded-xl border border-line bg-ink-3 px-3 py-2 text-center">
++            <p className="text-[10px] text-muted">Calls</p>
++            <p className="font-display text-sm font-bold text-sand">{summary.totalCalls}</p>
++          </div>
++          <div className="shrink-0 rounded-xl border border-line bg-ink-3 px-3 py-2 text-center">
++            <p className="text-[10px] text-muted">Coins</p>
++            <p className="font-display text-sm font-bold text-gold">{summary.totalCoinsSpent.toLocaleString()}</p>
++          </div>
++          <div className="shrink-0 rounded-xl border border-line bg-ink-3 px-3 py-2 text-center">
++            <p className="text-[10px] text-muted">Duration</p>
++            <p className="font-display text-sm font-bold text-cyan">{fmtDuration(summary.totalDurationSec)}</p>
++          </div>
++        </div>
++
++        {/* Tabs */}
++        <div className="mt-3 flex gap-1 rounded-xl bg-ink-3 p-1">
++          {(["all", "completed", "missed"] as Tab[]).map((t) => (
++            <button
++              key={t}
++              type="button"
++              onClick={() => handleTab(t)}
++              className={`flex-1 rounded-lg py-1.5 text-xs font-semibold capitalize transition ${
++                tab === t ? "bg-coral text-white" : "text-muted"
++              }`}
++            >
++              {t}
++            </button>
++          ))}
++        </div>
++
++        {/* Date filter */}
++        <div className="mt-2 flex gap-1.5">
++          {(["today", "7d", "30d"] as Filter[]).map((f) => (
++            <button
++              key={f}
++              type="button"
++              onClick={() => handleFilter(f)}
++              className={`rounded-full px-3 py-1 text-[11px] font-semibold transition ${
++                filter === f ? "bg-gold/20 text-gold" : "bg-ink-3 text-muted"
++              }`}
++            >
++              {f === "today" ? "Today" : f === "7d" ? "7 days" : "30 days"}
++            </button>
++          ))}
++        </div>
++      </div>
++
++      <section className="px-4 pt-4">
++        {loading ? (
++          <p className="py-12 text-center text-sm text-muted">Loading…</p>
++        ) : error ? (
++          <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-center">
++            <p className="text-sm text-red-400">{error}</p>
++            <button
++              type="button"
++              onClick={() => setRetryAt(Date.now())}
++              className="mt-2 text-xs text-muted underline"
++            >
++              Retry
++            </button>
++          </div>
++        ) : paged.length === 0 ? (
++          <div className="py-12 text-center">
++            <p className="text-sm text-muted">No calls found</p>
++          </div>
++        ) : (
++          <div className="space-y-2">
++            {paged.map((c) => {
++              const isMissed = c.status === "missed" || c.status === "rejected";
++              return (
++                <div
++                  key={c.id}
++                  className="flex items-center gap-3 rounded-2xl border border-line bg-ink-2 px-4 py-3"
++                >
++                  <Image
++                    src={`https://i.pravatar.cc/80?u=${encodeURIComponent(c.hostId)}`}
++                    alt={c.hostName}
++                    width={40}
++                    height={40}
++                    unoptimized
++                    className="h-10 w-10 rounded-full object-cover"
++                  />
++                  <div className="min-w-0 flex-1">
++                    <p className="truncate text-sm font-semibold text-sand">{c.hostName}</p>
++                    <div className="flex items-center gap-2 text-[11px] text-muted">
++                      {isMissed ? (
++                        <span className="flex items-center gap-0.5 text-coral">
++                          <PhoneMissed className="h-3 w-3" /> Missed
++                        </span>
++                      ) : (
++                        <span className="flex items-center gap-0.5 text-green">
++                          <PhoneCall className="h-3 w-3" /> {fmtDuration(c.durationSec)}
++                        </span>
++                      )}
++                      <span>·</span>
++                      <Clock className="h-3 w-3" />
++                      {fmtDate(c.startedAt)}
++                    </div>
++                  </div>
++                  <div className="text-right">
++                    <p className="font-display text-sm font-bold text-coral">
++                      -{c.coinsSpent.toLocaleString()}
++                    </p>
++                    <p className="text-[10px] text-muted">coins</p>
++                  </div>
++                </div>
++              );
++            })}
++          </div>
++        )}
++
++        {totalPages > 1 && (
++          <div className="mt-4 flex items-center justify-between gap-3">
++            <button
++              type="button"
++              disabled={page === 0}
++              onClick={() => setPage((p) => p - 1)}
++              className="rounded-xl border border-line bg-ink-2 px-4 py-2 text-sm font-semibold disabled:opacity-40"
++            >
++              ← Prev
++            </button>
++            <span className="text-xs text-muted">{page + 1} / {totalPages}</span>
++            <button
++              type="button"
++              disabled={page >= totalPages - 1}
++              onClick={() => setPage((p) => p + 1)}
++              className="rounded-xl border border-line bg-ink-2 px-4 py-2 text-sm font-semibold disabled:opacity-40"
++            >
++              Next →
++            </button>
++          </div>
++        )}
++      </section>
++    </main>
++  );
++}
+diff --git a/src/app/profile/coins/page.tsx b/src/app/profile/coins/page.tsx
+new file mode 100644
+index 0000000..4ca3ba4
+--- /dev/null
++++ b/src/app/profile/coins/page.tsx
+@@ -0,0 +1,224 @@
++// Data source: GET /api/wallet/history/:userId (walletLedger entries per user)
++"use client";
++
++import { useEffect, useState } from "react";
++import Link from "next/link";
++import { ArrowLeft, TrendingDown, TrendingUp } from "lucide-react";
++import { requireApiBase } from "@/config/apiConfig";
++import { getDeviceUserId } from "@/lib/walletApi";
++
++type LedgerEntry = {
++  id?: string;
++  kind: "credit" | "spend";
++  amount: number;
++  reason: string;
++  createdAt?: number;
++  at?: number;
++};
++
++type Tab = "all" | "earn" | "spend";
++type Filter = "today" | "7d" | "30d";
++
++const PAGE_SIZE = 12;
++
++function filterByDate(entries: LedgerEntry[], filter: Filter): LedgerEntry[] {
++  const now = Date.now();
++  const cutoffs: Record<Filter, number> = {
++    today: now - 86_400_000,
++    "7d": now - 7 * 86_400_000,
++    "30d": now - 30 * 86_400_000,
++  };
++  const cut = cutoffs[filter];
++  return entries.filter((e) => (e.createdAt ?? e.at ?? 0) >= cut);
++}
++
++function entryTime(e: LedgerEntry): string {
++  const ts = e.createdAt ?? e.at;
++  if (!ts) return "";
++  const d = new Date(ts);
++  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
++}
++
++export default function CoinHistoryPage() {
++  const [entries, setEntries] = useState<LedgerEntry[]>([]);
++  const [loading, setLoading] = useState(true);
++  const [error, setError] = useState<string | null>(null);
++  const [retryAt, setRetryAt] = useState(0);
++  const [tab, setTab] = useState<Tab>("all");
++  const [filter, setFilter] = useState<Filter>("30d");
++  const [page, setPage] = useState(0);
++
++  useEffect(() => {
++    let active = true;
++    const doLoad = async () => {
++      if (!active) return;
++      setLoading(true);
++      setError(null);
++      try {
++        const userId = getDeviceUserId();
++        const res = await fetch(
++          `${requireApiBase()}/wallet/history/${encodeURIComponent(userId)}`,
++          { headers: { "X-User-Id": userId }, cache: "no-store" },
++        );
++        const data = (await res.json()) as { history?: LedgerEntry[] };
++        if (active) setEntries(data.history ?? []);
++      } catch (e) {
++        if (active) setError(e instanceof Error ? e.message : "Could not load history");
++      } finally {
++        if (active) setLoading(false);
++      }
++    };
++    void doLoad();
++    return () => { active = false; };
++  }, [retryAt]);
++
++  const tabFiltered = entries.filter((e) =>
++    tab === "all" ? true : tab === "earn" ? e.kind === "credit" : e.kind === "spend",
++  );
++  const dateFiltered = filterByDate(tabFiltered, filter);
++  const totalPages = Math.ceil(dateFiltered.length / PAGE_SIZE);
++  const paged = dateFiltered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
++
++  const totalEarned = entries.filter((e) => e.kind === "credit").reduce((s, e) => s + e.amount, 0);
++  const totalSpent = entries.filter((e) => e.kind === "spend").reduce((s, e) => s + e.amount, 0);
++
++  const handleTab = (t: Tab) => { setTab(t); setPage(0); };
++  const handleFilter = (f: Filter) => { setFilter(f); setPage(0); };
++
++  return (
++    <main className="pb-28">
++      <div className="sticky top-0 z-10 border-b border-line bg-ink/95 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur-xl">
++        <div className="flex items-center gap-3">
++          <Link href="/profile" className="rounded-full bg-ink-3 p-2">
++            <ArrowLeft className="h-4 w-4" />
++          </Link>
++          <h1 className="font-display text-lg font-extrabold">Coin History</h1>
++        </div>
++
++        {/* Summary */}
++        <div className="mt-3 grid grid-cols-2 gap-2">
++          <div className="flex items-center gap-2 rounded-xl border border-line bg-ink-3 px-3 py-2">
++            <TrendingUp className="h-4 w-4 shrink-0 text-green" />
++            <div>
++              <p className="text-[10px] text-muted">Earned</p>
++              <p className="font-display text-sm font-bold text-green">+{totalEarned.toLocaleString()}</p>
++            </div>
++          </div>
++          <div className="flex items-center gap-2 rounded-xl border border-line bg-ink-3 px-3 py-2">
++            <TrendingDown className="h-4 w-4 shrink-0 text-coral" />
++            <div>
++              <p className="text-[10px] text-muted">Spent</p>
++              <p className="font-display text-sm font-bold text-coral">-{totalSpent.toLocaleString()}</p>
++            </div>
++          </div>
++        </div>
++
++        {/* Tabs */}
++        <div className="mt-3 flex gap-1 rounded-xl bg-ink-3 p-1">
++          {(["all", "earn", "spend"] as Tab[]).map((t) => (
++            <button
++              key={t}
++              type="button"
++              onClick={() => handleTab(t)}
++              className={`flex-1 rounded-lg py-1.5 text-xs font-semibold capitalize transition ${
++                tab === t ? "bg-coral text-white" : "text-muted"
++              }`}
++            >
++              {t}
++            </button>
++          ))}
++        </div>
++
++        {/* Date filter */}
++        <div className="mt-2 flex gap-1.5">
++          {(["today", "7d", "30d"] as Filter[]).map((f) => (
++            <button
++              key={f}
++              type="button"
++              onClick={() => handleFilter(f)}
++              className={`rounded-full px-3 py-1 text-[11px] font-semibold transition ${
++                filter === f ? "bg-gold/20 text-gold" : "bg-ink-3 text-muted"
++              }`}
++            >
++              {f === "today" ? "Today" : f === "7d" ? "7 days" : "30 days"}
++            </button>
++          ))}
++        </div>
++      </div>
++
++      <section className="px-4 pt-4">
++        {loading ? (
++          <p className="py-12 text-center text-sm text-muted">Loading…</p>
++        ) : error ? (
++          <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-center">
++            <p className="text-sm text-red-400">{error}</p>
++            <button
++              type="button"
++              onClick={() => setRetryAt(Date.now())}
++              className="mt-2 text-xs text-muted underline"
++            >
++              Retry
++            </button>
++          </div>
++        ) : paged.length === 0 ? (
++          <div className="py-12 text-center">
++            <p className="text-sm text-muted">No transactions found</p>
++          </div>
++        ) : (
++          <div className="space-y-2">
++            {paged.map((e, i) => (
++              <div
++                key={e.id ?? i}
++                className="flex items-center gap-3 rounded-2xl border border-line bg-ink-2 px-4 py-3"
++              >
++                <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
++                  e.kind === "credit" ? "bg-green/15 text-green" : "bg-coral/15 text-coral"
++                }`}>
++                  {e.kind === "credit" ? (
++                    <TrendingUp className="h-4 w-4" />
++                  ) : (
++                    <TrendingDown className="h-4 w-4" />
++                  )}
++                </div>
++                <div className="min-w-0 flex-1">
++                  <p className="truncate text-sm font-semibold text-sand">{e.reason || "Transaction"}</p>
++                  <p className="text-[11px] text-muted">{entryTime(e)}</p>
++                </div>
++                <span className={`font-display text-sm font-bold ${
++                  e.kind === "credit" ? "text-green" : "text-coral"
++                }`}>
++                  {e.kind === "credit" ? "+" : "-"}{e.amount.toLocaleString()}
++                </span>
++              </div>
++            ))}
++          </div>
++        )}
++
++        {/* Pagination */}
++        {totalPages > 1 && (
++          <div className="mt-4 flex items-center justify-between gap-3">
++            <button
++              type="button"
++              disabled={page === 0}
++              onClick={() => setPage((p) => p - 1)}
++              className="rounded-xl border border-line bg-ink-2 px-4 py-2 text-sm font-semibold disabled:opacity-40"
++            >
++              ← Prev
++            </button>
++            <span className="text-xs text-muted">
++              {page + 1} / {totalPages}
++            </span>
++            <button
++              type="button"
++              disabled={page >= totalPages - 1}
++              onClick={() => setPage((p) => p + 1)}
++              className="rounded-xl border border-line bg-ink-2 px-4 py-2 text-sm font-semibold disabled:opacity-40"
++            >
++              Next →
++            </button>
++          </div>
++        )}
++      </section>
++    </main>
++  );
++}
+diff --git a/src/app/profile/page.tsx b/src/app/profile/page.tsx
+index 283f467..76d79a8 100644
+--- a/src/app/profile/page.tsx
++++ b/src/app/profile/page.tsx
+@@ -599,6 +599,22 @@ export default function ProfilePage() {
+         </button>
+       </section>
+ 
++      {/* Dedicated history pages */}
++      <section className="mt-4 grid grid-cols-2 gap-2 px-4">
++        <Link
++          href="/profile/calls"
++          className="rounded-2xl border border-line bg-ink-2 px-3 py-3 text-center text-xs font-bold text-sand"
++        >
++          Call History →
++        </Link>
++        <Link
++          href="/profile/coins"
++          className="rounded-2xl border border-line bg-ink-2 px-3 py-3 text-center text-xs font-bold text-sand"
++        >
++          Coin History →
++        </Link>
++      </section>
++
+       {/* History */}
+       <section className="px-4 pb-10">
+         <div className="mb-3 flex gap-2">
+diff --git a/src/app/register/page.tsx b/src/app/register/page.tsx
+index 7fb89fd..d1de587 100644
+--- a/src/app/register/page.tsx
++++ b/src/app/register/page.tsx
+@@ -1,17 +1,77 @@
+ "use client";
+ 
+-import { useEffect } from "react";
++import { useState } from "react";
++import Link from "next/link";
+ import { useRouter } from "next/navigation";
++import {
++  AuthField,
++  AuthPrimaryButton,
++  AuthShell,
++} from "@/components/auth/AuthShell";
++import { registerAccount } from "@/lib/authSession";
++import { useApp } from "@/lib/store";
+ 
+-/** User App is login-only — registration is disabled. */
+-export default function RegisterRedirectPage() {
++export default function RegisterPage() {
+   const router = useRouter();
+-  useEffect(() => {
+-    router.replace("/login");
+-  }, [router]);
++  const { pushToast } = useApp();
++  const [name, setName] = useState("");
++  const [email, setEmail] = useState("");
++  const [password, setPassword] = useState("");
++  const [loading, setLoading] = useState(false);
++
++  const submit = async () => {
++    setLoading(true);
++    try {
++      await registerAccount({ email, password, name });
++      pushToast("Account created");
++      router.replace("/");
++    } catch (e: unknown) {
++      pushToast(e instanceof Error ? e.message : "Registration failed");
++    } finally {
++      setLoading(false);
++    }
++  };
++
+   return (
+-    <main className="flex min-h-dvh items-center justify-center text-sm text-muted">
+-      Redirecting to login…
+-    </main>
++    <AuthShell
++      title="Create account"
++      subtitle="Email and password — no OTP required."
++      footer={
++        <p className="text-center text-sm text-muted">
++          Already have an account?{" "}
++          <Link href="/login" className="font-semibold text-coral">
++            Sign in
++          </Link>
++        </p>
++      }
++    >
++      <div className="space-y-3">
++        <AuthField
++          label="Display name"
++          value={name}
++          onChange={setName}
++          placeholder="Your name"
++        />
++        <AuthField
++          label="Email"
++          type="email"
++          autoComplete="email"
++          value={email}
++          onChange={setEmail}
++          placeholder="you@email.com"
++        />
++        <AuthField
++          label="Password"
++          type="password"
++          autoComplete="new-password"
++          value={password}
++          onChange={setPassword}
++          placeholder="At least 6 characters"
++        />
++        <AuthPrimaryButton disabled={loading} onClick={() => void submit()}>
++          {loading ? "Creating…" : "Create account"}
++        </AuthPrimaryButton>
++      </div>
++    </AuthShell>
+   );
+ }
+diff --git a/src/components/GiftSheet.tsx b/src/components/GiftSheet.tsx
+index f6d3d8c..2bcc976 100644
+--- a/src/components/GiftSheet.tsx
++++ b/src/components/GiftSheet.tsx
+@@ -1,6 +1,6 @@
+ "use client";
+ 
+-import { useState } from "react";
++import { useEffect, useState } from "react";
+ import { motion, AnimatePresence } from "framer-motion";
+ import { Sparkles, X } from "lucide-react";
+ import { gifts, type Gift } from "@/lib/data";
+@@ -60,9 +60,49 @@ export function GiftSheet({
+   const [sending, setSending] = useState<string | null>(null);
+   const [cinematic, setCinematic] = useState<Gift | null>(null);
+   const [busy, setBusy] = useState(false);
++  const [catalog, setCatalog] = useState<Gift[]>(gifts);
+ 
+-  const basic = gifts.filter((g) => !isCinematic(g));
+-  const adult = gifts.filter((g) => isCinematic(g));
++  useEffect(() => {
++    let alive = true;
++    void (async () => {
++      try {
++        const res = await fetch(`${requireApiBase()}/gifts`, { cache: "no-store" });
++        if (!res.ok) return;
++        const data = (await res.json()) as {
++          gifts?: { id: string; name: string; emoji: string; coins: number }[];
++        };
++        if (!alive || !data.gifts?.length) return;
++        setCatalog(
++          data.gifts.map((g) => ({
++            id: g.id,
++            name: g.name,
++            emoji: g.emoji,
++            coins: g.coins,
++            tier:
++              g.coins >= 2000
++                ? "legendary"
++                : g.coins >= 700
++                  ? "vip"
++                  : g.coins >= 250
++                    ? "luxury"
++                    : g.coins >= 100
++                      ? "large"
++                      : g.coins >= 40
++                        ? "medium"
++                        : "small",
++          })),
++        );
++      } catch {
++        /* keep static catalog */
++      }
++    })();
++    return () => {
++      alive = false;
++    };
++  }, []);
++
++  const basic = catalog.filter((g) => !isCinematic(g));
++  const adult = catalog.filter((g) => isCinematic(g));
+ 
+   const send = async (g: Gift) => {
+     if (busy) return;
+diff --git a/src/lib/authSession.ts b/src/lib/authSession.ts
+index 94f3843..d462750 100644
+--- a/src/lib/authSession.ts
++++ b/src/lib/authSession.ts
+@@ -1,9 +1,10 @@
+ /**
+- * Client auth session for Zuko Android user app.
+- * Production: swap issue/verify with CoinCall JWT `/auth/*`.
+- * Never trusts client for wallet minting — only identity headers + UX gate.
++ * Client auth session for Zuko user app.
++ * Prefer CoinCall API email+password (no OTP). Local store is fallback only.
+  */
+ 
++import { apiConfig, requireApiBase } from "@/config/apiConfig";
++
+ const SESSION_KEY = "zuko_user_session_v1";
+ const USERS_KEY = "zuko_local_users_v1";
+ const OTP_KEY = "zuko_otp_pending_v1";
+@@ -20,14 +21,12 @@ export type AuthSession = {
+   token: string;
+   user: AuthUser;
+   expiresAt: number;
+-  /** JWT-shaped placeholder until server issues real JWT */
+   refreshToken: string;
+ };
+ 
+ type StoredUser = AuthUser & { passwordHash: string };
+ 
+ function hashPassword(password: string): string {
+-  // Lightweight client hash (not a substitute for server bcrypt).
+   let h = 2166136261;
+   const s = `zuko:${password}`;
+   for (let i = 0; i < s.length; i++) {
+@@ -59,7 +58,6 @@ export function getSession(): AuthSession | null {
+     const s = JSON.parse(raw) as AuthSession;
+     if (!s?.token || !s.user?.email) return null;
+     if (s.expiresAt && s.expiresAt < Date.now()) {
+-      // Soft refresh window: re-issue if refresh token still present
+       if (s.refreshToken && s.expiresAt > Date.now() - 7 * 24 * 60 * 60 * 1000) {
+         return issueSession(s.user, s.refreshToken);
+       }
+@@ -77,10 +75,14 @@ export function clearSession() {
+   localStorage.removeItem(SESSION_KEY);
+ }
+ 
+-/** Bind authenticated account to device wallet identity for API headers. */
+ export function bindSessionToDevice(userId: string) {
+   if (typeof window === "undefined") return;
+   localStorage.setItem(BOUND_KEY, userId);
++  try {
++    localStorage.setItem(apiConfig.deviceUserKey, userId);
++  } catch {
++    /* ignore */
++  }
+ }
+ 
+ export function getBoundAuthUserId(): string | null {
+@@ -94,6 +96,7 @@ export function getAuthHeaders(): Record<string, string> {
+   if (session?.token) {
+     headers.Authorization = `Bearer ${session.token}`;
+     headers["X-Auth-User-Id"] = session.user.id;
++    headers["X-User-Id"] = session.user.id;
+     headers["X-Auth-Email"] = session.user.email;
+   }
+   return headers;
+@@ -123,6 +126,7 @@ function makeOtpCode(): string {
+ 
+ export type OtpPurpose = "register" | "login" | "reset";
+ 
++/** Kept for forgot-password flows only — login/register no longer require OTP. */
+ export async function startOtp(input: {
+   email: string;
+   purpose: OtpPurpose;
+@@ -143,7 +147,6 @@ export async function startOtp(input: {
+     at: Date.now(),
+   };
+   sessionStorage.setItem(OTP_KEY, JSON.stringify(payload));
+-  // Demo builds surface the code; production must email/SMS via API only.
+   const isProd = process.env.NODE_ENV === "production";
+   return { email, demoCode: isProd ? undefined : code };
+ }
+@@ -206,38 +209,141 @@ export async function verifyOtp(input: {
+   });
+ }
+ 
++type ApiAuth = {
++  token: string;
++  userId: string;
++  email: string;
++  displayName: string;
++};
++
++async function apiRegister(input: {
++  email: string;
++  password: string;
++  name: string;
++}): Promise<AuthSession | null> {
++  try {
++    const base = requireApiBase();
++    const res = await fetch(`${base}/users/register`, {
++      method: "POST",
++      headers: { "Content-Type": "application/json" },
++      body: JSON.stringify({
++        email: input.email,
++        password: input.password,
++        displayName: input.name,
++      }),
++    });
++    if (!res.ok) {
++      const data = (await res.json().catch(() => ({}))) as { error?: string };
++      if (res.status === 404) return null; // API not deployed yet
++      throw new Error(data.error || `Register failed (${res.status})`);
++    }
++    const data = (await res.json()) as ApiAuth;
++    return issueSession({
++      id: data.userId,
++      email: data.email,
++      name: data.displayName || input.name,
++      createdAt: Date.now(),
++    });
++  } catch (e) {
++    if (e instanceof Error && e.message.includes("Register failed")) throw e;
++    return null;
++  }
++}
++
++async function apiLogin(input: {
++  email: string;
++  password: string;
++}): Promise<AuthSession | null> {
++  try {
++    const base = requireApiBase();
++    const res = await fetch(`${base}/users/login`, {
++      method: "POST",
++      headers: { "Content-Type": "application/json" },
++      body: JSON.stringify({
++        email: input.email,
++        password: input.password,
++      }),
++    });
++    if (!res.ok) {
++      const data = (await res.json().catch(() => ({}))) as { error?: string };
++      if (res.status === 404) return null;
++      throw new Error(data.error || `Login failed (${res.status})`);
++    }
++    const data = (await res.json()) as ApiAuth;
++    return issueSession({
++      id: data.userId,
++      email: data.email,
++      name: data.displayName || "Zuko Fan",
++      createdAt: Date.now(),
++    });
++  } catch (e) {
++    if (e instanceof Error && e.message.includes("Login failed")) throw e;
++    return null;
++  }
++}
++
++/** Email + password registration — no OTP. Uses CoinCall API when available. */
+ export async function registerAccount(input: {
+   email: string;
+   password: string;
+   name: string;
+-}): Promise<{ email: string; demoCode?: string }> {
++}): Promise<AuthSession> {
+   const email = input.email.trim().toLowerCase();
++  const name = input.name.trim() || "Zuko Fan";
++  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
++    throw new Error("Enter a valid email");
++  }
+   if (input.password.length < 6) {
+     throw new Error("Password must be at least 6 characters");
+   }
++
++  const fromApi = await apiRegister({ email, password: input.password, name });
++  if (fromApi) return fromApi;
++
+   const users = readUsers();
+   if (users.some((u) => u.email === email)) {
+     throw new Error("Email already registered");
+   }
+-  return startOtp({
++  const user: StoredUser = {
++    id: `usr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+     email,
+-    purpose: "register",
+-    name: input.name,
+-    password: input.password,
++    name,
++    createdAt: Date.now(),
++    passwordHash: hashPassword(input.password),
++  };
++  writeUsers([user, ...users]);
++  return issueSession({
++    id: user.id,
++    email: user.email,
++    name: user.name,
++    createdAt: user.createdAt,
+   });
+ }
+ 
++/** Email + password login — no OTP. Uses CoinCall API when available. */
+ export async function loginAccount(input: {
+   email: string;
+   password: string;
+-}): Promise<{ email: string; demoCode?: string }> {
++}): Promise<AuthSession> {
+   const email = input.email.trim().toLowerCase();
++  if (!email || !input.password) {
++    throw new Error("Email and password required");
++  }
++
++  const fromApi = await apiLogin({ email, password: input.password });
++  if (fromApi) return fromApi;
++
+   const users = readUsers();
+   const hit = users.find((u) => u.email === email);
+   if (!hit || hit.passwordHash !== hashPassword(input.password)) {
+     throw new Error("Invalid email or password");
+   }
+-  return startOtp({ email, purpose: "login" });
++  return issueSession({
++    id: hit.id,
++    email: hit.email,
++    name: hit.name,
++    createdAt: hit.createdAt,
++  });
+ }
+ 
+ export async function requestPasswordReset(email: string): Promise<{
+@@ -263,7 +369,6 @@ export async function setPendingResetPassword(newPassword: string) {
+   sessionStorage.setItem(OTP_KEY, JSON.stringify(pending));
+ }
+ 
+-/** @deprecated use verifyOtp after setPendingResetPassword */
+ export async function resetPassword(input: {
+   email: string;
+   code: string;
+diff --git a/src/lib/data.ts b/src/lib/data.ts
+index 8633a0b..6483c95 100644
+--- a/src/lib/data.ts
++++ b/src/lib/data.ts
+@@ -212,94 +212,52 @@ export const threads: ChatThread[] = [
+ ];
+ 
+ export const gifts: Gift[] = [
+-  // Small
+-  { id: "rose", name: "Rose", emoji: "🌹", coins: 1, tier: "small" },
+-  { id: "heart", name: "Heart", emoji: "💖", coins: 5, tier: "small" },
+-  { id: "kiss", name: "Kiss", emoji: "💋", coins: 10, tier: "small" },
++  // CoinCall server catalog IDs (authoritative — avoid Invalid Gift)
++  { id: "rose_bouquet", name: "Rose Bouquet", emoji: "🌹", coins: 10, tier: "small" },
++  { id: "luxury_perfume", name: "Luxury Perfume", emoji: "🧴", coins: 50, tier: "medium" },
++  { id: "neon_heart", name: "Neon Heart", emoji: "💗", coins: 99, tier: "medium" },
++  { id: "golden_butterfly", name: "Golden Butterfly", emoji: "🦋", coins: 199, tier: "large" },
++  { id: "diamond_ring", name: "Diamond Ring", emoji: "💍", coins: 299, tier: "large" },
++  { id: "vip_champagne", name: "VIP Champagne", emoji: "🍾", coins: 399, tier: "large" },
++  { id: "luxury_watch", name: "Luxury Watch", emoji: "⌚", coins: 599, tier: "luxury" },
++  { id: "luxury_handbag", name: "Luxury Handbag", emoji: "👜", coins: 799, tier: "vip" },
++  { id: "fireworks", name: "Fireworks", emoji: "🎆", coins: 999, tier: "vip" },
++  { id: "sports_car", name: "Sports Car", emoji: "🏎️", coins: 1299, tier: "vip" },
++  { id: "super_bike", name: "Super Bike", emoji: "🏍️", coins: 1599, tier: "legendary" },
++  { id: "diamond_crown", name: "Diamond Crown", emoji: "👑", coins: 1999, tier: "legendary" },
++  { id: "red_carpet", name: "Red Carpet", emoji: "🎬", coins: 2499, tier: "legendary" },
++  { id: "fashion_collection", name: "Fashion Collection", emoji: "👗", coins: 2999, tier: "legendary" },
++  { id: "private_jet", name: "Private Jet", emoji: "✈️", coins: 4999, tier: "legendary" },
++  { id: "luxury_yacht", name: "Luxury Yacht", emoji: "🛥️", coins: 6999, tier: "legendary" },
++  { id: "royal_castle", name: "Royal Castle", emoji: "🏰", coins: 9999, tier: "legendary" },
++  { id: "golden_throne", name: "Golden Throne", emoji: "🪑", coins: 12999, tier: "legendary" },
++  { id: "diamond_rain", name: "Diamond Rain", emoji: "💎", coins: 15999, tier: "legendary" },
++  { id: "millionaire_box", name: "Millionaire Box", emoji: "🎁", coins: 19999, tier: "legendary" },
++  // Legacy aliases accepted by server
++  { id: "rose", name: "Rose", emoji: "🌹", coins: 10, tier: "small" },
++  { id: "heart", name: "Heart", emoji: "💖", coins: 99, tier: "medium" },
++  { id: "kiss", name: "Kiss", emoji: "💋", coins: 99, tier: "medium" },
++  { id: "star", name: "Star", emoji: "⭐", coins: 199, tier: "large" },
++  { id: "diamond", name: "Diamond", emoji: "💎", coins: 299, tier: "large" },
++  { id: "crown", name: "Crown", emoji: "👑", coins: 1999, tier: "legendary" },
+   { id: "candy", name: "Candy", emoji: "🍬", coins: 15, tier: "small" },
+-  { id: "star", name: "Star", emoji: "⭐", coins: 20, tier: "small" },
+   { id: "coffee", name: "Coffee", emoji: "☕", coins: 30, tier: "small" },
+-  // Medium
+   { id: "balloon", name: "Balloon", emoji: "🎈", coins: 49, tier: "medium" },
+   { id: "icecream", name: "Ice Cream", emoji: "🍦", coins: 69, tier: "medium" },
+   { id: "teddy", name: "Teddy", emoji: "🧸", coins: 89, tier: "medium" },
+-  { id: "diamond", name: "Diamond", emoji: "💎", coins: 99, tier: "medium" },
+-  { id: "perfume", name: "Perfume", emoji: "🧴", coins: 129, tier: "medium" },
+-  { id: "crown", name: "Crown", emoji: "👑", coins: 199, tier: "large" },
+-  // Large
+-  { id: "ring", name: "Ring", emoji: "💍", coins: 249, tier: "large" },
+-  { id: "car", name: "Sports Car", emoji: "🏎️", coins: 399, tier: "large" },
+-  { id: "yacht", name: "Yacht", emoji: "🛥️", coins: 599, tier: "large" },
+-  // Luxury / cinematic
+-  {
+-    id: "silk_touch",
+-    name: "Silk Touch",
+-    emoji: "👙",
+-    coins: 299,
+-    tier: "luxury",
+-    adult: true,
+-  },
+-  {
+-    id: "velvet_night",
+-    name: "Velvet Night",
+-    emoji: "🔥",
+-    coins: 499,
+-    tier: "luxury",
+-    adult: true,
+-  },
+-  {
+-    id: "private_dance",
+-    name: "Private Dance",
+-    emoji: "💃",
+-    coins: 799,
+-    tier: "vip",
+-    adult: true,
+-  },
+-  {
+-    id: "cinematic_kiss",
+-    name: "Cinematic Kiss",
+-    emoji: "😘",
+-    coins: 999,
+-    tier: "vip",
+-    adult: true,
+-  },
+-  {
+-    id: "castle",
+-    name: "Magic Castle",
+-    emoji: "🏰",
+-    coins: 1499,
+-    tier: "vip",
+-  },
+-  {
+-    id: "royal_fantasy",
+-    name: "Royal Fantasy",
+-    emoji: "👸",
+-    coins: 1999,
+-    tier: "legendary",
+-    adult: true,
+-  },
+-  {
+-    id: "galaxy",
+-    name: "Galaxy Love",
+-    emoji: "🌌",
+-    coins: 2999,
+-    tier: "legendary",
+-  },
+-  {
+-    id: "ultimate_desire",
+-    name: "Ultimate Desire",
+-    emoji: "✨",
+-    coins: 4999,
+-    tier: "legendary",
+-    adult: true,
+-  },
+-  {
+-    id: "phoenix",
+-    name: "Phoenix Rise",
+-    emoji: "🔥",
+-    coins: 9999,
+-    tier: "legendary",
+-  },
++  { id: "perfume", name: "Perfume", emoji: "🧴", coins: 50, tier: "medium" },
++  { id: "ring", name: "Ring", emoji: "💍", coins: 299, tier: "large" },
++  { id: "car", name: "Sports Car", emoji: "🏎️", coins: 1299, tier: "vip" },
++  { id: "yacht", name: "Yacht", emoji: "🛥️", coins: 6999, tier: "legendary" },
++  { id: "silk_touch", name: "Silk Touch", emoji: "👙", coins: 299, tier: "luxury", adult: true },
++  { id: "velvet_night", name: "Velvet Night", emoji: "🔥", coins: 499, tier: "luxury", adult: true },
++  { id: "private_dance", name: "Private Dance", emoji: "💃", coins: 799, tier: "vip", adult: true },
++  { id: "cinematic_kiss", name: "Cinematic Kiss", emoji: "😘", coins: 999, tier: "vip", adult: true },
++  { id: "castle", name: "Magic Castle", emoji: "🏰", coins: 9999, tier: "legendary" },
++  { id: "royal_fantasy", name: "Royal Fantasy", emoji: "👸", coins: 1999, tier: "legendary", adult: true },
++  { id: "galaxy", name: "Galaxy Love", emoji: "🌌", coins: 2999, tier: "legendary" },
++  { id: "ultimate_desire", name: "Ultimate Desire", emoji: "✨", coins: 4999, tier: "legendary", adult: true },
++  { id: "phoenix", name: "Phoenix Rise", emoji: "🔥", coins: 9999, tier: "legendary" },
+ ];
+ 
+ export const giftTickerLines = [
+-- 
+2.43.0
+

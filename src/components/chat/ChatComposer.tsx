@@ -1,6 +1,6 @@
 import { Image as ImageIcon, Send } from 'lucide-react-native';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
-import { AppTextInput } from '../ui/AppTextInput';
+import { ActivityIndicator, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { font } from '../../theme/fonts';
 import { CHAT_THEME } from './chatTheme';
 
 type Props = {
@@ -24,20 +24,24 @@ export function ChatComposer({
 }: Props) {
   const canSend = Boolean(value.trim()) && !sending;
   return (
-    <View style={[styles.wrap, { paddingBottom: Math.max(bottomInset, 10) }]}>
+    <View style={[styles.wrap, { paddingBottom: Math.max(bottomInset, 8) }]}>
       {onPickImage ? (
         <Pressable onPress={onPickImage} style={styles.iconBtn} hitSlop={8}>
-          <ImageIcon size={20} color={CHAT_THEME.muted} />
+          <ImageIcon size={22} color={CHAT_THEME.muted} />
         </Pressable>
       ) : null}
-      <AppTextInput
-        value={value}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-        style={styles.input}
-        multiline
-        maxLength={500}
-      />
+      <View style={styles.inputShell}>
+        <TextInput
+          value={value}
+          onChangeText={onChangeText}
+          placeholder={placeholder}
+          placeholderTextColor={CHAT_THEME.muted}
+          style={styles.input}
+          multiline
+          maxLength={500}
+          textAlignVertical="center"
+        />
+      </View>
       <Pressable
         onPress={onSend}
         disabled={!canSend}
@@ -59,13 +63,38 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     gap: 8,
     paddingHorizontal: 12,
-    paddingTop: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: CHAT_THEME.border,
-    backgroundColor: CHAT_THEME.bg,
+    paddingTop: 10,
+    backgroundColor: CHAT_THEME.composerBg,
   },
-  iconBtn: { padding: 8, marginBottom: 4 },
-  input: { flex: 1, maxHeight: 120, marginBottom: 2 },
+  iconBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 2,
+  },
+  inputShell: {
+    flex: 1,
+    minHeight: 44,
+    maxHeight: 120,
+    borderRadius: 22,
+    backgroundColor: CHAT_THEME.inputBg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: CHAT_THEME.inputBorder,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    justifyContent: 'center',
+  },
+  input: {
+    fontFamily: font.medium,
+    fontSize: 15,
+    lineHeight: 20,
+    color: CHAT_THEME.mineText,
+    padding: 0,
+    margin: 0,
+    maxHeight: 100,
+  },
   sendBtn: {
     width: 44,
     height: 44,
@@ -75,5 +104,5 @@ const styles = StyleSheet.create({
     backgroundColor: CHAT_THEME.mineBubble,
     marginBottom: 2,
   },
-  sendDisabled: { opacity: 0.45 },
+  sendDisabled: { opacity: 0.4 },
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { CHAT_THEME } from "./chatTheme";
 
 /** Locks layout: header + scroll body + fixed composer. Keyboard only resizes the scroll area. */
@@ -8,11 +8,15 @@ export function ChatThreadLayout({
   header,
   children,
   composer,
+  scrollRef: externalScrollRef,
 }: {
   header: ReactNode;
   children: ReactNode;
   composer: ReactNode;
+  scrollRef?: RefObject<HTMLDivElement | null>;
 }) {
+  const internalRef = useRef<HTMLDivElement>(null);
+  const scrollRef = externalScrollRef ?? internalRef;
   const [kbOffset, setKbOffset] = useState(0);
 
   useEffect(() => {
@@ -46,7 +50,7 @@ export function ChatThreadLayout({
       >
         {header}
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4">
         {children}
       </div>
       <div className="shrink-0" style={{ transform: kbOffset ? `translateY(-${kbOffset}px)` : undefined }}>
