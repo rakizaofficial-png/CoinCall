@@ -141,14 +141,18 @@ export function listenLiveRooms(onRooms: (rooms: LiveRoom[]) => void): Unsubscri
   const emit = () => {
     if (dead) return;
     const map = new Map<string, LiveRoom>();
-    // API is authoritative for presence; prefer over Firebase stale cache
+    // API is the only source of truth for which rooms are LIVE.
+    // Firebase may refresh fields for rooms already returned by API,
+    // but must NEVER reintroduce stale/zombie rooms missing from API.
     for (const r of fromApi) {
       if (!isValidLiveRoom(r)) continue;
       map.set(r.id, r);
     }
     for (const r of fromFb) {
       if (!isValidLiveRoom(r)) continue;
-      if (!map.has(r.id)) map.set(r.id, r);
+      const apiRoom = map.get(r.id);
+      if (!apiRoom) continue;
+      map.set(r.id, { ...apiRoom, ...r, isLive: true });
     }
     onRooms([...map.values()].sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0)));
   };
@@ -372,7 +376,7 @@ export function listenLockedPhotos(
     const val = snap.val() as Record<string, Omit<LockedLivePhoto, 'id'>>;
     onPhotos(
       Object.entries(val)
-        .map(([id, row]) => ({ id, unlockedBy: row.unlockedBy || {}, ...row }))
+        .map(([id, row]) => ({ ...row, id, unlockedBy: row.unlockedBy || {} }))
         .sort((a, b) => b.createdAt - a.createdAt),
     );
   });
@@ -407,4 +411,32 @@ export async function unlockLivePhoto(
 export async function removeLiveRoom(roomId: string) {
   if (!isFirebaseReady()) return;
   await remove(ref(getFirebaseDb(), `liveRooms/${roomId}`));
+}
+
+/**
+ * Update entry lock / fee on an active live room.
+ * Mirrors to Firebase + REST so changes take effect on viewers immediately.
+ */
+export async function updateLiveRoomLock(
+  roomId: string,
+  hostId: string,
+  opts: { entryLocked: boolean; entryFee: number },
+) {
+  if (isFirebaseReady()) {
+    await update(ref(getFirebaseDb(), `liveRooms/${roomId}`), {
+      entryLocked: opts.entryLocked,
+      entryFee: opts.entryLocked ? Math.max(1, opts.entryFee) : 0,
+    }).catch(() => undefined);
+  }
+  await fetch(`${api()}/live/rooms/${encodeURIComponent(roomId)}/lock`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-User-Id': hostId,
+    },
+    body: JSON.stringify({
+      entryLocked: opts.entryLocked,
+      entryFee: opts.entryLocked ? Math.max(1, opts.entryFee) : 0,
+    }),
+  }).catch(() => undefined);
 }

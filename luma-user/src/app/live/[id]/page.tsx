@@ -327,57 +327,83 @@ export default function LiveRoomPage({
       <div className="pointer-events-none absolute inset-0 z-[2] bg-gradient-to-b from-black/50 via-transparent to-black/90" />
 
       {paywallOpen ? (
-        <div className="absolute inset-0 z-[30] flex items-center justify-center bg-black/70 p-6 backdrop-blur-md">
-          <div className="w-full max-w-sm rounded-3xl border border-white/10 bg-[#121826]/95 p-6 text-center shadow-2xl">
-            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-amber-400/20 text-2xl">
+        <div className="absolute inset-0 z-[30] flex items-center justify-center bg-black/80 p-6 backdrop-blur-xl">
+          <div className="w-full max-w-sm rounded-3xl border border-white/10 bg-[#0e0a14]/95 p-6 text-center shadow-2xl">
+            {/* PREMIUM/LOCKED badge */}
+            <div className="mb-4 flex justify-center gap-2">
+              <span className="rounded-full bg-amber-400/20 px-3 py-1 text-[11px] font-bold uppercase tracking-widest text-amber-300">
+                PREMIUM
+              </span>
+              <span className="rounded-full bg-white/10 px-3 py-1 text-[11px] font-bold uppercase tracking-widest text-white/70">
+                LOCKED
+              </span>
+            </div>
+            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400/30 to-orange-500/20 text-3xl shadow-[0_0_24px_rgba(251,191,36,0.3)]">
               🔒
             </div>
-            <h2 className="text-lg font-black text-white">Locked Live</h2>
-            <p className="mt-2 text-sm text-white/65">
-              {display.name} requires a coin entry fee to watch this stream.
+            <h2 className="font-display text-xl font-extrabold text-white">Exclusive Live</h2>
+            <p className="mt-2 text-sm text-white/60">
+              <span className="font-semibold text-white">{display.name}</span> requires an entry
+              fee to join this premium stream.
             </p>
-            <p className="mt-4 text-3xl font-black text-amber-300">
-              {entryFee} <span className="text-sm font-bold">coins</span>
-            </p>
-            <p className="mt-1 text-xs text-white/45">
+            <div className="my-5 rounded-2xl border border-amber-400/20 bg-amber-400/10 p-4">
+              <p className="font-display text-4xl font-extrabold text-amber-300">
+                {entryFee.toLocaleString()}
+              </p>
+              <p className="mt-0.5 text-xs font-semibold text-amber-300/70">COINS TO ENTER</p>
+            </div>
+            <p className="mb-4 text-xs text-white/40">
               Your balance: {coins.toLocaleString()} coins
             </p>
             <button
               type="button"
               disabled={paying || coins < entryFee}
               onClick={() => void payEntry()}
-              className="mt-5 w-full rounded-2xl bg-gradient-to-r from-coral to-fuchsia-500 py-3.5 text-sm font-black text-white disabled:opacity-50"
+              className="w-full rounded-2xl bg-gradient-to-r from-amber-400 to-orange-500 py-3.5 text-sm font-extrabold text-black shadow-[0_0_24px_rgba(251,191,36,0.35)] disabled:opacity-50"
             >
-              {paying ? "Processing…" : `Pay ${entryFee} coins to enter`}
+              {paying
+                ? "Processing…"
+                : coins < entryFee
+                  ? "Not enough coins"
+                  : `Pay ${entryFee.toLocaleString()} coins · Enter Live`}
             </button>
+            {coins < entryFee && (
+              <Link
+                href="/wallet"
+                className="mt-2 block text-xs font-semibold text-coral"
+              >
+                Top up coins →
+              </Link>
+            )}
             <Link
               href="/live"
-              className="mt-3 inline-block text-xs font-semibold text-white/50"
+              className="mt-3 inline-block text-xs text-white/40"
             >
-              Back to live list
+              ← Back to live
             </Link>
           </div>
         </div>
       ) : null}
 
       <div className="relative z-10 flex min-h-dvh flex-col px-4 pb-24 pt-[max(0.75rem,env(safe-area-inset-top))]">
+        {/* Top bar */}
         <div className="flex items-start justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
             <Link
               href="/live"
-              className="rounded-full bg-black/40 p-2 backdrop-blur"
+              className="rounded-full bg-black/60 p-2 shadow-[0_2px_12px_rgba(0,0,0,0.5)] backdrop-blur"
             >
-              <ArrowLeft className="h-5 w-5" />
+              <ArrowLeft className="h-5 w-5 text-white drop-shadow-md" />
             </Link>
-            <div className="flex min-w-0 items-center gap-2 rounded-full bg-black/45 py-1 pl-1 pr-3 backdrop-blur">
+            <div className="flex min-w-0 items-center gap-2 rounded-full bg-black/60 py-1 pl-1 pr-3 shadow-[0_2px_12px_rgba(0,0,0,0.5)] backdrop-blur">
               <img
                 src={display.image}
                 alt=""
-                className="h-9 w-9 shrink-0 rounded-full object-cover"
+                className="h-9 w-9 shrink-0 rounded-full object-cover ring-1 ring-white/20"
               />
               <div className="min-w-0">
-                <p className="truncate text-xs font-bold">{display.name}</p>
-                <p className="flex items-center gap-1 text-[10px] text-white/70">
+                <p className="truncate text-xs font-bold text-white drop-shadow">{display.name}</p>
+                <p className="flex items-center gap-1 text-[10px] text-white/80">
                   <Eye className="h-3 w-3" />{" "}
                   {viewers > 0 ? viewers.toLocaleString() : "Live"}
                   {likes > 0 ? ` · ${likes}♥` : ""}
@@ -386,49 +412,58 @@ export default function LiveRoomPage({
               <button
                 type="button"
                 onClick={() => toggleFollow(display.id)}
-                className="ml-1 shrink-0 rounded-full bg-coral px-2.5 py-1 text-[10px] font-bold"
+                className="ml-1 shrink-0 rounded-full bg-coral px-2.5 py-1 text-[10px] font-bold text-white shadow"
               >
                 {following.includes(display.id) ? "Following" : "Follow"}
               </button>
             </div>
           </div>
-          <span className="live-pulse shrink-0 rounded-full bg-coral px-2.5 py-1 text-[10px] font-bold uppercase">
-            {hasVideo ? "Live" : "…"}
+          <span className="live-pulse shrink-0 rounded-full bg-coral px-2.5 py-1 text-[10px] font-bold uppercase text-white shadow">
+            {hasVideo ? "LIVE" : "…"}
           </span>
         </div>
 
-        <p className="mt-3 text-center text-[11px] font-semibold text-white/70">
-          {videoStatus}
-        </p>
+        {/* Status text */}
+        {(!hasVideo || error) && (
+          <div className="mt-3">
+            {videoStatus && !error && (
+              <p className="text-center text-[11px] font-semibold text-white/80 drop-shadow">
+                {videoStatus}
+              </p>
+            )}
+            {error && (
+              <p className="rounded-xl bg-black/60 px-3 py-2 text-center text-xs text-white/90 shadow backdrop-blur">
+                {error}
+              </p>
+            )}
+          </div>
+        )}
 
-        {error && !hasVideo ? (
-          <p className="mt-2 rounded-xl bg-black/50 px-3 py-2 text-center text-xs text-white/80">
-            {error}
-          </p>
-        ) : null}
-
+        {/* Bottom controls */}
         <div className="mt-auto space-y-3">
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={like}
-              className="rounded-full bg-black/40 p-3 backdrop-blur"
+              className="rounded-full bg-black/60 p-3 shadow-[0_2px_12px_rgba(0,0,0,0.5)] backdrop-blur"
             >
-              <Heart className="h-5 w-5 text-coral" fill="currentColor" />
+              <Heart className="h-5 w-5 text-coral drop-shadow" fill="currentColor" />
             </button>
             <button
               type="button"
               onClick={() => setGiftOpen(true)}
-              className="rounded-full bg-coral p-3"
+              className="rounded-full bg-coral p-3 shadow-[0_0_20px_rgba(255,42,122,0.5)]"
             >
-              <Gift className="h-5 w-5" />
+              <Gift className="h-5 w-5 text-white" />
             </button>
-            <span className="ml-auto text-xs text-white/60">{coins} coins</span>
+            <span className="ml-auto rounded-full bg-black/60 px-3 py-1.5 text-xs font-semibold text-white/90 backdrop-blur">
+              {coins.toLocaleString()} coins
+            </span>
           </div>
 
           <Link
             href={`/call/${encodeURIComponent(display.id)}?live=1`}
-            className="inline-flex w-full items-center justify-center gap-1.5 rounded-full bg-sand px-4 py-3 text-sm font-bold text-ink"
+            className="inline-flex w-full items-center justify-center gap-1.5 rounded-full bg-white/95 px-4 py-3 text-sm font-bold text-ink shadow-xl backdrop-blur"
           >
             <Video className="h-4 w-4" /> Private call · {display.callRate}/min
           </Link>

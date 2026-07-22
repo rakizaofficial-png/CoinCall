@@ -67,6 +67,7 @@ export function GoLiveScreen({ navigation, mode = 'solo' }: Props) {
   }, [user.avatarUrl]);
 
   useEffect(() => {
+    // Request camera first so native preview can paint ASAP — mic is separate.
     if (Platform.OS !== 'web') {
       if (!permission?.granted) void requestPermission();
       if (!micPermission?.granted) void requestMicPermission();
@@ -76,6 +77,7 @@ export function GoLiveScreen({ navigation, mode = 'solo' }: Props) {
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
 
     const mountPreview = async (attempt = 0) => {
+      // Don't block preview on mic permission — video mounts as soon as DOM is ready.
       const mount = document.getElementById('golive-preview-mount');
       if (!mount) {
         if (attempt < 20 && !cancelled) {
@@ -121,7 +123,8 @@ export function GoLiveScreen({ navigation, mode = 'solo' }: Props) {
       stopCameraPreview(videoRef.current);
       document.getElementById('golive-preview')?.remove();
     };
-  }, [permission?.granted, micPermission?.granted]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [permission?.granted]);
 
   const onFlip = async () => {
     if (Platform.OS === 'web') {

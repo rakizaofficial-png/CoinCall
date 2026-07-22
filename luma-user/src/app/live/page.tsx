@@ -32,6 +32,8 @@ type Card = {
   title: string;
   viewers: number;
   rate: number;
+  entryLocked?: boolean;
+  entryFee?: number;
 };
 
 export default function LivePage() {
@@ -57,34 +59,23 @@ export default function LivePage() {
           ? (roomRes.rooms as LiveRoomRow[]).filter((r) => r.isLive !== false)
           : [];
 
-        let next: Card[] = [];
-        if (rooms.length > 0) {
-          next = rooms.map((r) => {
-            const host = hosts.find((h) => h.id === r.hostId);
-            const id = String(r.hostId || r.id);
-            return {
-              id,
-              roomId: r.id,
-              name: r.hostName || host?.name || "Host",
-              avatar: avatarFor(id, host?.avatarUrl || r.hostAvatar),
-              title: r.title || "Live now",
-              viewers: Number(r.viewers) || 0,
-              rate: host?.ratePerMinute || 80,
-            };
-          });
-        } else {
-          next = hosts
-            .filter((h) => h.isLive)
-            .map((h) => ({
-              id: h.id,
-              roomId: h.id,
-              name: h.name,
-              avatar: avatarFor(h.id, h.avatarUrl),
-              title: "Live now",
-              viewers: 0,
-              rate: h.ratePerMinute || 80,
-            }));
-        }
+        // Server /live/rooms is authoritative — never invent LIVE from presence alone
+        // (presence isLive can lag after force-close / stale sessions).
+        let next: Card[] = rooms.map((r) => {
+          const host = hosts.find((h) => h.id === r.hostId);
+          const id = String(r.hostId || r.id);
+          return {
+            id,
+            roomId: r.id,
+            name: r.hostName || host?.name || "Host",
+            avatar: avatarFor(id, host?.avatarUrl || r.hostAvatar),
+            title: r.title || "Live now",
+            viewers: Number(r.viewers) || 0,
+            rate: host?.ratePerMinute || 80,
+            entryLocked: Boolean((r as { entryLocked?: boolean }).entryLocked),
+            entryFee: Number((r as { entryFee?: number }).entryFee) || 0,
+          };
+        });
         setCards(next);
         setError(null);
       } catch (e) {
@@ -140,10 +131,15 @@ export default function LivePage() {
                 className="aspect-[3/4] w-full object-cover transition duration-500 group-hover:scale-105"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-black/10" />
-              <div className="absolute left-2 top-2">
+              <div className="absolute left-2 top-2 flex flex-col gap-1">
                 <span className="live-pulse rounded-full bg-coral px-2 py-0.5 text-[10px] font-bold uppercase text-white">
                   Live
                 </span>
+                {card.entryLocked ? (
+                  <span className="rounded-full bg-amber-500/90 px-2 py-0.5 text-[10px] font-bold uppercase text-black">
+                    Premium · {card.entryFee || 0}
+                  </span>
+                ) : null}
               </div>
               <div className="absolute right-2 top-2 flex items-center gap-1 rounded-full bg-black/50 px-2 py-0.5 text-[10px] text-sand">
                 <Eye className="h-3 w-3" />

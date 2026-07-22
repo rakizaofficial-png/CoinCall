@@ -112,6 +112,8 @@ export function ChatHubScreen({ navigation }: { navigation: any }) {
   const [massText, setMassText] = useState('');
   const [sending, setSending] = useState(false);
   const [lastSent, setLastSent] = useState<number | null>(null);
+  // Track when each thread was last opened to show unread badge
+  const [seenAt, setSeenAt] = useState<Record<string, number>>({});
 
   useEffect(() => {
     return listenHostNotifications(hostId, setInbox);
@@ -305,30 +307,49 @@ export function ChatHubScreen({ navigation }: { navigation: any }) {
             const photo =
               t.userAvatar ||
               `https://api.dicebear.com/9.x/avataaars/png?seed=${encodeURIComponent(t.userId)}&size=128`;
+            const isUnread = Boolean(t.lastMessage) && (!seenAt[t.id] || t.updatedAt > seenAt[t.id]);
             return (
               <Pressable
                 key={t.id}
-                onPress={() =>
+                onPress={() => {
+                  setSeenAt((s) => ({ ...s, [t.id]: Date.now() }));
                   navigation.navigate('DirectChat', {
                     peerId: t.userId,
                     peerName: t.userName,
                     peerAvatar: t.userAvatar || photo,
-                  })
-                }
+                  });
+                }}
                 style={[styles.row, { borderBottomColor: 'rgba(255,255,255,0.06)' }]}
               >
-                <Image source={{ uri: photo }} style={styles.threadAvatar} />
+                <View style={styles.avatarWrap}>
+                  <Image source={{ uri: photo }} style={styles.threadAvatar} />
+                  {isUnread && <View style={styles.unreadDot} />}
+                </View>
                 <View style={styles.rowBody}>
                   <View style={styles.rowTop}>
-                    <Text style={[styles.rowTitle, { color: colors.text }]}>
+                    <Text
+                      style={[
+                        styles.rowTitle,
+                        { color: colors.text },
+                        isUnread && styles.rowTitleUnread,
+                      ]}
+                    >
                       {t.userName || 'Fan'}
                     </Text>
                     <Text style={styles.rowTime}>{formatTime(t.updatedAt)}</Text>
                   </View>
-                  <Text style={styles.rowPreview} numberOfLines={1}>
+                  <Text
+                    style={[styles.rowPreview, isUnread && styles.rowPreviewUnread]}
+                    numberOfLines={1}
+                  >
                     {t.lastMessage}
                   </Text>
                 </View>
+                {isUnread && (
+                  <View style={styles.badge}>
+                    <Text style={styles.badgeText}>1</Text>
+                  </View>
+                )}
               </Pressable>
             );
           })
@@ -444,12 +465,26 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.2)',
   },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 4, flexShrink: 1 },
+  avatarWrap: { position: 'relative' },
   threadAvatar: {
     width: 52,
     height: 52,
     borderRadius: 26,
     backgroundColor: 'rgba(255,255,255,0.08)',
   },
+  unreadDot: {
+    position: 'absolute',
+    top: 1,
+    right: 1,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#EF4444',
+    borderWidth: 2,
+    borderColor: '#070A14',
+  },
+  rowTitleUnread: { fontWeight: '900' },
+  rowPreviewUnread: { color: 'rgba(255,255,255,0.85)', fontWeight: '600' },
   fanChip: { width: 76, alignItems: 'center' },
   fanChipAvatar: {
     width: 58,

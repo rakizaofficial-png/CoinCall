@@ -97,6 +97,8 @@ export type SignUpInput = {
   password?: string;
   isAgeVerified: boolean;
   method: AuthMethod;
+  /** Optional agency referral code — joined after account creation */
+  agencyCode?: string;
 };
 
 export type SignInInput = {
@@ -302,16 +304,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
       setUser(profile);
       void saveHostSession(profile, true);
+      // Join agency after account creation if referral code provided
+      if (input.agencyCode?.trim()) {
+        void import('../services/agencyJoinService').then(({ joinAgencyByCode }) =>
+          joinAgencyByCode(profile.id, input.agencyCode!.trim()).catch(() => undefined),
+        );
+      }
       return;
     }
 
-    setAuthUser(
-      createMockUser({
-        name: input.name.trim(),
-        email: input.email.trim(),
-        hostStatus: 'none',
-      }),
-    );
+    const newUser = createMockUser({
+      name: input.name.trim(),
+      email: input.email.trim(),
+      hostStatus: 'none',
+    });
+    setAuthUser(newUser);
+    if (input.agencyCode?.trim()) {
+      void import('../services/agencyJoinService').then(({ joinAgencyByCode }) =>
+        joinAgencyByCode(newUser.id, input.agencyCode!.trim()).catch(() => undefined),
+      );
+    }
   }, [setAuthUser, usingFirebase]);
 
   const signOut = useCallback(() => {

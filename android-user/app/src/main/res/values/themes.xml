@@ -1,0 +1,7 @@
+<resources>
+  <style name="Theme.Zuko" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+    <item name="android:statusBarColor">#070A14</item>
+    <item name="android:navigationBarColor">#070A14</item>
+    <item name="android:windowBackground">#070A14</item>
+  </style>
+</resources>

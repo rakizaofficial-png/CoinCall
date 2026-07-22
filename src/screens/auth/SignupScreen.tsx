@@ -30,6 +30,7 @@ export function SignupScreen({ navigation }: Props) {
   const [phone, setPhone] = useState('');
   const [otp, setOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
+  const [agencyCode, setAgencyCode] = useState('');
   const [isAgeVerified, setIsAgeVerified] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -62,6 +63,7 @@ export function SignupScreen({ navigation }: Props) {
         password,
         phone,
         isAgeVerified,
+        agencyCode: agencyCode.trim() || undefined,
       });
     } catch (e: any) {
       const code = e?.code as string | undefined;
@@ -148,6 +150,17 @@ export function SignupScreen({ navigation }: Props) {
             </>
           )}
         </View>
+
+        <Text style={[styles.label, { color: colors.textSecondary }]}>
+          Agency referral code{' '}
+          <Text style={{ fontWeight: '400', fontSize: 12 }}>(optional)</Text>
+        </Text>
+        <AppTextInput
+          autoCapitalize="characters"
+          value={agencyCode}
+          onChangeText={setAgencyCode}
+          placeholder="e.g. AG-12345 · skip if none"
+        />
 
         <Pressable
           accessibilityRole="checkbox"
