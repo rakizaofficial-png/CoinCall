@@ -11,6 +11,7 @@ import {
   type LiveHost,
   fetchLiveHosts,
 } from "@/lib/api";
+import { getDeviceUserId } from "@/lib/walletApi";
 import {
   startUserAgoraCall,
   stopUserAgoraCall,
@@ -160,7 +161,8 @@ export function useCallSessionEngine(opts: {
           if (cancelledRef.current) return;
 
           setStatusText(`Ringing ${host.name}…`);
-          const userId = `luma_${Math.random().toString(36).slice(2, 9)}`;
+          // Must match wallet device id or /calls/:id/minute + gifts will 403/402
+          const userId = getDeviceUserId();
           const call = await createCall({
             hostId: host.id,
             userId,

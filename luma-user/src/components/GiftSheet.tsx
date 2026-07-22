@@ -33,11 +33,15 @@ export function GiftSheet({
     setBusy(true);
     try {
       if (hostId) {
+        const userId = getDeviceUserId();
         const res = await fetch(`${requireApiBase()}/gifts/send`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "X-User-Id": userId,
+          },
           body: JSON.stringify({
-            userId: getDeviceUserId(),
+            userId,
             userName: "Luma Fan",
             hostId,
             giftId: id,

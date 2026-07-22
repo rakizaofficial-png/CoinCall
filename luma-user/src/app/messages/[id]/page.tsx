@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useMemo, useState } from "react";
+import { use, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { motion } from "framer-motion";
@@ -10,12 +10,10 @@ import { useApp } from "@/lib/store";
 import { GiftSheet } from "@/components/GiftSheet";
 import { VipChatBubble } from "@/components/VipChatBubble";
 import { WalletDiamond } from "@/components/WalletDiamond";
+import { requireApiBase } from "@/config/apiConfig";
+import { getDeviceUserId } from "@/lib/walletApi";
 
-const starter = [
-  { from: "them" as const, text: "Hey you ✨ glad you wrote" },
-  { from: "me" as const, text: "Your energy on live was unreal" },
-  { from: "them" as const, text: "Aww thank you! Want a private call later?" },
-];
+type ChatLine = { from: "me" | "them"; text: string };
 
 export default function ChatThreadPage({
   params,
@@ -23,7 +21,7 @@ export default function ChatThreadPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
-  const { spend, vipTier, triggerEntranceBlast, inbox } = useApp();
+  const { vipTier, triggerEntranceBlast, inbox, pushToast } = useApp();
 
   const hostIdFromRoute = id.startsWith("host_")
     ? decodeURIComponent(id.slice(5))
@@ -51,32 +49,46 @@ export default function ChatThreadPage({
     [inbox, hostId],
   );
 
-  const [messages, setMessages] = useState(() =>
-    massNotes.length ? massNotes : starter,
-  );
+  const [messages, setMessages] = useState<ChatLine[]>(() => massNotes);
   const [text, setText] = useState("");
   const [giftOpen, setGiftOpen] = useState(false);
+  const [sending, setSending] = useState(false);
 
-  const send = () => {
-    if (!text.trim()) return;
-    if (vipTier === "diamond") {
-      triggerEntranceBlast();
-    }
-    setMessages((m) => [...m, { from: "me" as const, text: text.trim() }]);
+  useEffect(() => {
+    if (massNotes.length) setMessages(massNotes);
+  }, [massNotes]);
+
+  const send = async () => {
+    const body = text.trim();
+    if (!body || sending) return;
+    if (vipTier === "diamond") triggerEntranceBlast();
+    setSending(true);
+    setMessages((m) => [...m, { from: "me", text: body }]);
     setText("");
-    setTimeout(() => {
-      setMessages((m) => [
-        ...m,
-        {
-          from: "them" as const,
-          text: "Got your message 💫",
+    try {
+      const userId = getDeviceUserId();
+      const res = await fetch(`${requireApiBase()}/dm/send`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-User-Id": userId,
         },
-      ]);
-    }, 900);
-  };
-
-  const unlockPhoto = () => {
-    spend(40, "Unlocked a photo 📸");
+        body: JSON.stringify({
+          fromId: userId,
+          toId: hostId,
+          text: body,
+          fromName: "Luma Fan",
+          fromRole: "user",
+          peerName: hostName,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Message failed");
+    } catch (e) {
+      pushToast?.(e instanceof Error ? e.message : "Could not send message");
+    } finally {
+      setSending(false);
+    }
   };
 
   return (
@@ -95,7 +107,7 @@ export default function ChatThreadPage({
         />
         <div className="min-w-0 flex-1">
           <p className="font-display font-bold leading-tight">{hostName}</p>
-          <p className="text-[11px] font-semibold text-cyan">Online now</p>
+          <p className="text-[11px] font-semibold text-cyan">Host chat</p>
         </div>
         <WalletDiamond compact />
         <Link
@@ -107,6 +119,9 @@ export default function ChatThreadPage({
       </header>
 
       <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
+        {messages.length === 0 ? (
+          <p className="text-center text-sm text-muted">Say hi to start the chat</p>
+        ) : null}
         {messages.map((m, i) => (
           <motion.div
             key={`${m.from}-${i}-${m.text.slice(0, 12)}`}
@@ -119,39 +134,33 @@ export default function ChatThreadPage({
             </VipChatBubble>
           </motion.div>
         ))}
-
-        <button
-          type="button"
-          onClick={unlockPhoto}
-          className="mx-auto flex w-full max-w-xs flex-col items-center gap-2 rounded-2xl border border-dashed border-cyan/30 bg-ink-2 px-4 py-6 shadow-[0_0_16px_rgba(0,240,255,0.12)]"
-        >
-          <span className="text-2xl">🔒</span>
-          <span className="text-xs font-semibold text-cyan">
-            Unlock exclusive snap · 40 coins
-          </span>
-        </button>
       </div>
 
-      <div className="border-t border-cyan/15 bg-ink-2/80 px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-        <div className="flex items-center gap-2">
+      <div className="border-t border-line bg-ink-2 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3">
+        <div className="mb-2 flex gap-2">
           <button
             type="button"
             onClick={() => setGiftOpen(true)}
-            className="rounded-full bg-ink-3 p-2.5 text-gold"
+            className="rounded-full bg-ink-3 p-2.5 text-coral"
           >
-            <Gift className="h-5 w-5" />
+            <Gift className="h-4 w-4" />
           </button>
+        </div>
+        <div className="flex items-center gap-2">
           <input
             value={text}
             onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && send()}
-            placeholder="Write something that lands…"
-            className="flex-1 rounded-full border border-cyan/25 bg-[#06040b] px-4 py-2.5 text-sm text-sand outline-none placeholder:text-cyan/40"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void send();
+            }}
+            placeholder="Message…"
+            className="flex-1 rounded-full border border-line bg-ink-3 px-4 py-2.5 text-sm outline-none focus:border-cyan"
           />
           <button
             type="button"
-            onClick={send}
-            className="rounded-full bg-cyan p-2.5 text-ink shadow-[0_0_16px_rgba(0,240,255,0.45)]"
+            disabled={sending}
+            onClick={() => void send()}
+            className="rounded-full bg-cyan p-2.5 text-ink disabled:opacity-50"
           >
             <Send className="h-4 w-4" />
           </button>

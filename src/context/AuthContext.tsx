@@ -13,6 +13,7 @@ import {
   approveHostInFirebase,
   firebaseEmailSignIn,
   firebaseEmailSignUp,
+  firebaseSendPasswordReset,
   firebaseSignOut,
   listenAuth,
   submitHostApplicationToFirebase,
@@ -133,6 +134,8 @@ type AuthContextValue = {
   /** Dev-only helper — production hosts are approved from Admin panel */
   approveCurrentHost: () => Promise<void>;
   sendLoginOtp: (phone: string) => Promise<void>;
+  /** Firebase email password reset (production) */
+  sendPasswordReset: (email: string) => Promise<void>;
   /** Approved hosts: edit name, bio, photos, intro video */
   saveHostProfile: (
     input: {
@@ -244,6 +247,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
     setAuthUser(next);
   }, [setAuthUser, usingFirebase]);
+
+  const sendPasswordReset = useCallback(async (email: string) => {
+    if (!isFirebaseReady()) {
+      throw new Error('Password reset needs Firebase. Use demo login offline.');
+    }
+    await firebaseSendPasswordReset(email);
+  }, []);
 
   const sendLoginOtp = useCallback(async (phone: string) => {
     if (!usingFirebase) {
@@ -578,6 +588,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       submitHostApplication,
       approveCurrentHost,
       sendLoginOtp,
+      sendPasswordReset,
       saveHostProfile,
     }),
     [
@@ -591,6 +602,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       submitHostApplication,
       approveCurrentHost,
       sendLoginOtp,
+      sendPasswordReset,
       saveHostProfile,
     ],
   );

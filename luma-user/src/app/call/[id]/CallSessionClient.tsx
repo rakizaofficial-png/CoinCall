@@ -24,8 +24,10 @@ import {
   setUserMuted,
   stopUserAgoraCall,
 } from "@/lib/agora";
+import { billCallMinute } from "@/lib/api";
 import { effectiveRate, sliceCost } from "@/lib/ledger";
 import { useApp } from "@/lib/store";
+import { getDeviceUserId } from "@/lib/walletApi";
 
 /**
  * Active call UI — Agora live OR AI prerecorded fallback.
@@ -40,7 +42,7 @@ export default function CallSessionClient({
   const search = useSearchParams();
   const preferLiveBridge = search.get("live") === "1";
   const isBlur = search.get("blur") === "1";
-  const { spend, pushToast, isPremium, coins, openTopUp } = useApp();
+  const { spend, pushToast, isPremium, coins, openTopUp, syncWallet } = useApp();
 
   const engine = useCallSessionEngine({
     hostId: id,
@@ -105,9 +107,40 @@ export default function CallSessionClient({
     return () => clearTimeout(t);
   }, [isDisconnected]);
 
-  // Dynamic 10-second coin deduction — identical for Agora + AI fallback
+  const startLowBalanceGrace = () => {
+    setLowBalance(true);
+    setGraceLeft(15);
+    openTopUp(15);
+    if (!graceRef.current) {
+      graceRef.current = setInterval(() => {
+        setGraceLeft((g) => {
+          if (g <= 1) {
+            if (graceRef.current) clearInterval(graceRef.current);
+            graceRef.current = null;
+            void hangUpRef.current();
+            pushToast("Call ended — top up to continue");
+            return 0;
+          }
+          return g - 1;
+        });
+      }, 1000);
+    }
+  };
+
+  const clearLowBalanceGrace = () => {
+    setLowBalance(false);
+    if (graceRef.current) {
+      clearInterval(graceRef.current);
+      graceRef.current = null;
+    }
+  };
+
+  // Live Agora bridge: authoritative /calls/:id/minute (user debit + host credit)
+  // AI fallback: local 10s slices via /wallet/spend (no host on AI path)
   useEffect(() => {
     if (!isConnected) return;
+    const isLiveBridge = transport === "agora_live" && Boolean(bridgeCall?.id);
+    let billedMinute = 0;
 
     const tick = setInterval(() => {
       setSecs((s) => {
@@ -117,38 +150,60 @@ export default function CallSessionClient({
           setBlurReveal((b) => Math.min(1, b + 0.12));
         }
 
-        if (next > 0 && next % 10 === 0) {
-          const cost = sliceCost(rate);
-          const ok = spend(cost, `−${cost} coins · 10s`);
-          if (!ok) {
-            setLowBalance(true);
-            setGraceLeft(15);
-            openTopUp(15);
-            if (!graceRef.current) {
-              graceRef.current = setInterval(() => {
-                setGraceLeft((g) => {
-                  if (g <= 1) {
-                    if (graceRef.current) clearInterval(graceRef.current);
-                    graceRef.current = null;
-                    void hangUpRef.current();
-                    pushToast("Call ended — top up to continue");
-                    return 0;
-                  }
-                  return g - 1;
-                });
-              }, 1000);
-            }
-          } else if (ok && lowBalance) {
-            setLowBalance(false);
-            if (graceRef.current) {
-              clearInterval(graceRef.current);
-              graceRef.current = null;
-            }
+        if (isLiveBridge && bridgeCall?.id && next > 0 && next % 60 === 0) {
+          const minuteIndex = Math.floor(next / 60);
+          if (minuteIndex > billedMinute) {
+            billedMinute = minuteIndex;
+            void billCallMinute({
+              callId: bridgeCall.id,
+              userId: getDeviceUserId(),
+              minuteIndex,
+            }).then((result) => {
+              if (!result.ok) {
+                startLowBalanceGrace();
+                pushToast(result.error || "Not enough coins");
+              } else {
+                clearLowBalanceGrace();
+                void syncWallet?.();
+              }
+            });
           }
+        } else if (!isLiveBridge && next > 0 && next % 10 === 0) {
+          const cost = sliceCost(rate);
+          const ok = spend(cost, `ai_call_slice:${cost}`);
+          if (!ok) startLowBalanceGrace();
+          else clearLowBalanceGrace();
         }
         return next;
       });
     }, 1000);
+
+    // Bill first minute shortly after connect on live bridge
+    if (isLiveBridge && bridgeCall?.id) {
+      const t = setTimeout(() => {
+        billedMinute = 1;
+        void billCallMinute({
+          callId: bridgeCall.id,
+          userId: getDeviceUserId(),
+          minuteIndex: 1,
+        }).then((result) => {
+          if (!result.ok) {
+            startLowBalanceGrace();
+            pushToast(result.error || "Not enough coins");
+          } else {
+            void syncWallet?.();
+          }
+        });
+      }, 3_000);
+      return () => {
+        clearInterval(tick);
+        clearTimeout(t);
+        if (graceRef.current) {
+          clearInterval(graceRef.current);
+          graceRef.current = null;
+        }
+      };
+    }
 
     return () => {
       clearInterval(tick);
@@ -157,7 +212,17 @@ export default function CallSessionClient({
         graceRef.current = null;
       }
     };
-  }, [isBlur, isConnected, rate, spend, pushToast, lowBalance, openTopUp]);
+  }, [
+    isBlur,
+    isConnected,
+    transport,
+    bridgeCall?.id,
+    rate,
+    spend,
+    pushToast,
+    openTopUp,
+    syncWallet,
+  ]);
 
   const mm = String(Math.floor(secs / 60)).padStart(2, "0");
   const ss = String(secs % 60).padStart(2, "0");

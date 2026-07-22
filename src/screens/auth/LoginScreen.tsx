@@ -21,7 +21,7 @@ type Props = NativeStackScreenProps<AuthStackParamList, 'Login'>;
 type AuthMethod = 'email' | 'phone';
 
 export function LoginScreen({ navigation }: Props) {
-  const { signIn, usingFirebase, sendLoginOtp } = useAuth();
+  const { signIn, usingFirebase, sendLoginOtp, sendPasswordReset } = useAuth();
   const { colors } = useTheme();
   const [method, setMethod] = useState<AuthMethod>('email');
   const [email, setEmail] = useState('');
@@ -30,6 +30,7 @@ export function LoginScreen({ navigation }: Props) {
   const [otp, setOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const handleSendOtp = async () => {
@@ -49,8 +50,27 @@ export function LoginScreen({ navigation }: Props) {
     }
   };
 
+  const handleForgotPassword = async () => {
+    setError(null);
+    setInfo(null);
+    if (!email.trim()) {
+      setError('Enter your account email first.');
+      return;
+    }
+    setLoading(true);
+    try {
+      await sendPasswordReset(email.trim());
+      setInfo('Password reset email sent. Check your inbox.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not send reset email.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleLogin = async () => {
     setError(null);
+    setInfo(null);
     setLoading(true);
     try {
       await signIn(
@@ -162,6 +182,7 @@ export function LoginScreen({ navigation }: Props) {
         </View>
 
         {error ? <Text style={[styles.error, { color: colors.danger }]}>{error}</Text> : null}
+        {info ? <Text style={[styles.error, { color: colors.primary }]}>{info}</Text> : null}
 
         {method === 'phone' && !otpSent ? (
           <PrimaryButton label="Send OTP" onPress={handleSendOtp} style={{ marginTop: 20 }} />
@@ -173,6 +194,16 @@ export function LoginScreen({ navigation }: Props) {
             style={{ marginTop: 20 }}
           />
         )}
+
+        {method === 'email' ? (
+          <Pressable
+            accessibilityRole="button"
+            onPress={handleForgotPassword}
+            style={{ marginTop: 12, alignItems: 'center' }}
+          >
+            <Text style={{ color: colors.primary, fontWeight: '700' }}>Forgot password?</Text>
+          </Pressable>
+        ) : null}
 
         <Pressable
           accessibilityRole="link"
