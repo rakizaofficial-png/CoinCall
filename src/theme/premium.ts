@@ -23,7 +23,7 @@ export const premium = {
   glass: 'rgba(18, 22, 34, 0.72)',
   shadow: 'rgba(255, 77, 109, 0.22)',
   fonts: {
-    display: 'Fraunces',
+    display: 'DM Sans',
     body: 'DM Sans',
   },
   radius: {

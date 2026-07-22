@@ -4,12 +4,11 @@ import { Keyboard, Platform, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CHAT_THEME } from './chatTheme';
 
-const COMPOSER_HEIGHT = 64;
+const COMPOSER_RESERVE = 72;
 
 /**
  * Fixed header + scrollable message list + composer pinned above keyboard.
- * Android: windowSoftInputMode=resize — window shrinks, no full-screen shift.
- * iOS: manual keyboard offset on composer only.
+ * UI-only layout shell — does not touch chat send/listen logic.
  */
 export function ChatThreadLayout({
   header,
@@ -38,12 +37,10 @@ export function ChatThreadLayout({
     };
   }, [insets.bottom, isIos]);
 
-  const composerBottom = insets.bottom;
-
   return (
     <View style={[styles.root, { backgroundColor: CHAT_THEME.bg, paddingTop: insets.top }]}>
       <View style={styles.header}>{header}</View>
-      <View style={[styles.body, { paddingBottom: COMPOSER_HEIGHT + composerBottom + 8 }]}>
+      <View style={[styles.body, { paddingBottom: COMPOSER_RESERVE + insets.bottom }]}>
         {listHeader ? <View style={styles.listHeader}>{listHeader}</View> : null}
         <View style={styles.list}>{children}</View>
       </View>
@@ -51,7 +48,7 @@ export function ChatThreadLayout({
         style={[
           styles.composerDock,
           {
-            paddingBottom: composerBottom,
+            paddingBottom: insets.bottom,
             transform:
               isIos && keyboardHeight > 0 ? [{ translateY: -keyboardHeight }] : undefined,
           },
@@ -82,7 +79,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: CHAT_THEME.headerBg,
+    backgroundColor: CHAT_THEME.composerBg,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: CHAT_THEME.border,
     zIndex: 3,

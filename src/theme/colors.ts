@@ -1,5 +1,7 @@
 /** Premium 2026 palette — blue / violet system, dark + light */
 
+import { font } from './fonts';
+
 export type ColorSchemeName = 'dark' | 'light';
 
 export type AppColors = {
@@ -111,10 +113,36 @@ export const radii = {
 } as const;
 
 export const typography = {
-  hero: { fontSize: 34, fontWeight: '800' as const, letterSpacing: -0.6 },
-  title: { fontSize: 26, fontWeight: '800' as const, letterSpacing: -0.4 },
-  subtitle: { fontSize: 16, fontWeight: '600' as const },
-  body: { fontSize: 15, fontWeight: '500' as const },
-  caption: { fontSize: 12, fontWeight: '600' as const },
-  label: { fontSize: 13, fontWeight: '700' as const },
+  hero: {
+    fontFamily: font.bold,
+    fontSize: 32,
+    fontWeight: '700' as const,
+    letterSpacing: -0.5,
+  },
+  title: {
+    fontFamily: font.bold,
+    fontSize: 24,
+    fontWeight: '700' as const,
+    letterSpacing: -0.3,
+  },
+  subtitle: {
+    fontFamily: font.semi,
+    fontSize: 16,
+    fontWeight: '600' as const,
+  },
+  body: {
+    fontFamily: font.medium,
+    fontSize: 15,
+    fontWeight: '500' as const,
+  },
+  caption: {
+    fontFamily: font.semi,
+    fontSize: 12,
+    fontWeight: '600' as const,
+  },
+  label: {
+    fontFamily: font.bold,
+    fontSize: 13,
+    fontWeight: '700' as const,
+  },
 };
