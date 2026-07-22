@@ -1010,7 +1010,12 @@ app.post('/api/calls', (req, res) => {
 
   calls.set(id, call);
   patchPresence(host.id, { isOnCall: true });
-  pushToHost(host.id, 'incoming_call', call);
+  // Enrich SSE payload for host incoming UI (coins / country)
+  pushToHost(host.id, 'incoming_call', {
+    ...call,
+    userCoinBalance: userWallet.coinBalance,
+    userCountry: String(req.body?.userCountry || userWallet.country || ''),
+  });
   cancelPendingForUser(String(userId), 'user_started_call');
   touchAutoCallHeartbeat({
     userId: String(userId),

@@ -87,6 +87,8 @@ export type BridgeCall = {
   userId: string;
   userName: string;
   userAvatar?: string;
+  userCountry?: string;
+  userCoinBalance?: number;
   ratePerMinute: number;
   status: 'ringing' | 'accepted' | 'rejected' | 'ended' | 'missed';
   hostUidAgora: number;

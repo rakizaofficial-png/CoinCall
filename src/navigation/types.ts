@@ -20,8 +20,12 @@ export type RootStackParamList = {
     channel?: string;
     peerName?: string;
     peerAvatar?: string;
+    peerCountry?: string;
+    peerCoins?: number;
     ratePerMinute?: number;
     role?: 'host' | 'user';
+    fromLive?: boolean;
+    liveRoomId?: string;
   };
   DirectChat: { peerId: string; peerName?: string; peerAvatar?: string };
   FanProfile: { userId: string; userName?: string; avatarUrl?: string };

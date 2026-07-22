@@ -35,6 +35,9 @@ import {
   switchAgoraCamera,
 } from '../../services/agoraService';
 import { endBridgeCall, fetchCallToken, watchBridgeCallEnd } from '../../services/callBridge';
+import { setHostCallBusy } from '../../services/hostCallBusy';
+import { pushLiveCallHistory } from '../../services/liveCallHistory';
+import { useLiveStudio } from '../../context/LiveStudioContext';
 import { listenGiftRequestEvents } from '../../services/giftRequestService';
 import {
   endActiveCall,
@@ -85,16 +88,20 @@ function waitForEl(
 export function CallScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
-  const { getHost, call, endCall, user, beautyOn, registerBridgeCallStart } =
+  const { getHost, call, endCall, user, beautyOn, registerBridgeCallStart, hostEarnings } =
     useApp();
+  const { resumeLiveAfterCall, myLiveRoom } = useLiveStudio();
   const bridgeCallId = route.params.bridgeCallId;
   const isBridge = Boolean(bridgeCallId);
+  const fromLive = Boolean(route.params.fromLive);
+  const liveRoomId = route.params.liveRoomId || myLiveRoom?.id;
   const peerHost = !isBridge ? getHost(route.params.hostId) : undefined;
   const peerName = route.params.peerName || peerHost?.name || 'Caller';
   const peerAvatar =
     route.params.peerAvatar ||
     peerHost?.avatarUrl ||
     `https://i.pravatar.cc/300?u=${route.params.hostId}`;
+  const peerCountry = route.params.peerCountry || '—';
   const rate = route.params.ratePerMinute || peerHost?.ratePerMinute || 80;
   const channel =
     route.params.channel || (peerHost ? `call_${peerHost.id}` : '');
@@ -103,7 +110,9 @@ export function CallScreen({ navigation, route }: Props) {
   const [cameraOff, setCameraOff] = useState(false);
   const [, setVideoStatus] = useState('Starting camera...');
   const [bridgeSeconds, setBridgeSeconds] = useState(0);
-  const [bridgeCoins, setBridgeCoins] = useState(rate);
+  const [bridgeCoins, setBridgeCoins] = useState(0);
+  const [peerBalance, setPeerBalance] = useState(Number(route.params.peerCoins) || 0);
+  const [connectedFlash, setConnectedFlash] = useState(true);
   const [surfacesReady, setSurfacesReady] = useState(false);
   const [netQuality] = useState<'Excellent' | 'Good' | 'Fair'>('Good');
   const [beautyPreset] = useState<BeautyPreset>(beautyOn ? 'snap' : 'off');
@@ -115,7 +124,26 @@ export function CallScreen({ navigation, route }: Props) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const leavingRef = useRef(false);
   const bridgeLedgerStarted = useRef(false);
+  const callStartedAt = useRef(Date.now());
   const markSurfacesReady = useCallback(() => setSurfacesReady(true), []);
+
+  useEffect(() => {
+    setHostCallBusy(true);
+    const t = setTimeout(() => setConnectedFlash(false), 1800);
+    return () => {
+      setHostCallBusy(false);
+      clearTimeout(t);
+    };
+  }, []);
+
+  const returnToLiveIfNeeded = useCallback(async () => {
+    if (!fromLive) return;
+    const resumed = await resumeLiveAfterCall();
+    const roomId = resumed?.roomId || liveRoomId;
+    if (roomId) {
+      navigation.replace('LiveRoom', { roomId, hostMode: true });
+    }
+  }, [fromLive, liveRoomId, navigation, resumeLiveAfterCall]);
 
   const leaveAfterDisconnect = useCallback(async () => {
     if (leavingRef.current) return;
@@ -126,10 +154,46 @@ export function CallScreen({ navigation, route }: Props) {
     activeCallIdRef.current = null;
     await endActiveCall(id);
     endCall();
+    setHostCallBusy(false);
+
+    if (isBridge && bridgeCallId) {
+      await pushLiveCallHistory({
+        id: bridgeCallId,
+        userId: route.params.hostId,
+        userName: peerName,
+        userAvatar: peerAvatar,
+        country: peerCountry,
+        startTime: callStartedAt.current,
+        endTime: Date.now(),
+        durationSec: Math.max(0, Math.floor((Date.now() - callStartedAt.current) / 1000)),
+        coinsEarned: bridgeCoins,
+        ratePerMinute: rate,
+        status: 'completed',
+        fromLive,
+      });
+    }
+
     setTimeout(() => {
-      navigation.goBack();
-    }, 1600);
-  }, [endCall, navigation]);
+      if (fromLive) {
+        void returnToLiveIfNeeded();
+      } else {
+        navigation.goBack();
+      }
+    }, 900);
+  }, [
+    bridgeCallId,
+    bridgeCoins,
+    endCall,
+    fromLive,
+    isBridge,
+    navigation,
+    peerAvatar,
+    peerCountry,
+    peerName,
+    rate,
+    returnToLiveIfNeeded,
+    route.params.hostId,
+  ]);
 
   useEffect(() => {
     if (isBridge) return;
@@ -147,20 +211,21 @@ export function CallScreen({ navigation, route }: Props) {
     if (!bridgeLedgerStarted.current) {
       bridgeLedgerStarted.current = true;
       registerBridgeCallStart();
-      // Wallet credits come from server call_minute / listenHostBillingEvents only
-      // (avoid double-credit with optimistic local add).
     }
     const t = setInterval(() => {
-      setBridgeSeconds((s) => {
-        const next = s + 1;
-        if (next > 0 && next % 60 === 0) {
-          setBridgeCoins((c) => c + rate);
-        }
-        return next;
-      });
+      setBridgeSeconds((s) => s + 1);
     }, 1000);
     return () => clearInterval(t);
-  }, [isBridge, rate, registerBridgeCallStart]);
+  }, [isBridge, registerBridgeCallStart]);
+
+  // Auto-end when user balance can't cover next minute
+  useEffect(() => {
+    if (!isBridge || !rate) return;
+    if (peerBalance > 0 && peerBalance < rate && bridgeSeconds > 5) {
+      notify('Balance ended', 'User coins depleted — returning to live');
+      void leaveAfterDisconnect();
+    }
+  }, [bridgeSeconds, isBridge, leaveAfterDisconnect, peerBalance, rate]);
 
   // Publish shared Firebase session for BOTH demo + bridge calls
   useEffect(() => {
@@ -345,20 +410,29 @@ export function CallScreen({ navigation, route }: Props) {
     if (!bridgeCallId || !user.id) return;
     let stop: (() => void) | undefined;
     void import('../../services/callBridge').then(({ listenHostBillingEvents }) => {
-      stop = listenHostBillingEvents(user.id, () => undefined, (gift) => {
-        setGiftBurst({
-          id: `sse_${Date.now()}`,
-          giftId: gift.giftId,
-          emoji: gift.giftEmoji || '🎁',
-          giftName: gift.giftName || 'Gift',
-          senderName: gift.fromName || peerName || 'Fan',
-          receiverName: user.name || 'You',
-          coins: gift.coins || 0,
-        });
-      });
+      stop = listenHostBillingEvents(
+        user.id,
+        (minute) => {
+          if (minute.callId && minute.callId !== bridgeCallId) return;
+          const earned = Number(minute.amount) || rate;
+          setBridgeCoins((c) => c + earned);
+          setPeerBalance((b) => Math.max(0, b - rate));
+        },
+        (gift) => {
+          setGiftBurst({
+            id: `sse_${Date.now()}`,
+            giftId: gift.giftId,
+            emoji: gift.giftEmoji || '🎁',
+            giftName: gift.giftName || 'Gift',
+            senderName: gift.fromName || peerName || 'Fan',
+            receiverName: user.name || 'You',
+            coins: gift.coins || 0,
+          });
+        },
+      );
     });
     return () => stop?.();
-  }, [bridgeCallId, peerName, user.id, user.name]);
+  }, [bridgeCallId, peerName, rate, user.id, user.name]);
 
   useEffect(() => {
     if (!bridgeCallId || !user.id) return;
@@ -426,14 +500,36 @@ export function CallScreen({ navigation, route }: Props) {
             <Signal size={13} color={netColor} />
             <Text style={[styles.netText, { color: netColor }]}>{netQuality}</Text>
           </View>
+          {fromLive ? (
+            <View style={[styles.glassPill, { backgroundColor: 'rgba(225,29,72,0.85)' }]}>
+              <Text style={styles.netText}>LIVE paused</Text>
+            </View>
+          ) : null}
         </View>
         <View style={styles.namePill}>
           <Text style={styles.peer}>{peerName}</Text>
           <Text style={styles.coins}>
-            {displayCoins} coins · {rate}/min
+            +{displayCoins} earned · {rate}/min
           </Text>
         </View>
+        {isBridge ? (
+          <View style={styles.earningsHud}>
+            <Text style={styles.hudLine}>
+              User · {peerCountry} · bal {peerBalance.toLocaleString()}
+            </Text>
+            <Text style={styles.hudLine}>
+              Session {formatTime(displaySeconds)} · host wallet{' '}
+              {(hostEarnings?.call || 0).toLocaleString()}
+            </Text>
+          </View>
+        ) : null}
       </View>
+
+      {connectedFlash ? (
+        <View style={styles.connectedBanner} pointerEvents="none">
+          <Text style={styles.connectedText}>Call connected</Text>
+        </View>
+      ) : null}
 
       {giftBurst ? (
         <GlamourGiftOverlay item={giftBurst} onDone={() => setGiftBurst(null)} />
@@ -487,11 +583,11 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   remote: { ...StyleSheet.absoluteFill, width: '100%', height: '100%' },
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'transparent',
   },
   disconnectOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 40,
     alignItems: 'center',
     justifyContent: 'center',
@@ -550,6 +646,34 @@ const styles = StyleSheet.create({
   netText: { fontSize: 11, fontWeight: '700' },
   peer: { color: '#fff', fontWeight: '800', fontSize: 16 },
   coins: { color: 'rgba(255,255,255,0.78)', fontWeight: '600', fontSize: 11, marginTop: 2 },
+  earningsHud: {
+    marginTop: 10,
+    alignSelf: 'stretch',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,193,76,0.25)',
+    gap: 4,
+  },
+  hudLine: { color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: '700' },
+  connectedBanner: {
+    ...StyleSheet.absoluteFill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.35)',
+  },
+  connectedText: {
+    color: '#fff',
+    fontWeight: '900',
+    fontSize: 22,
+    backgroundColor: 'rgba(34,197,94,0.9)',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
   localPreview: {
     position: 'absolute',
     right: 14,
@@ -570,7 +694,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 6 },
   },
   giftBurst: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 6,

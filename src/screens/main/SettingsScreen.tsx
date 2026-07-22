@@ -12,7 +12,7 @@ import {
   Video,
   Wallet,
 } from 'lucide-react-native';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GlassCard } from '../../components/ui/GlassCard';
@@ -21,6 +21,12 @@ import { Screen } from '../../components/ui/Screen';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { LIVE_LANGUAGES } from '../../data/gifts';
+import {
+  DEFAULT_LIVE_CALL_SETTINGS,
+  loadLiveCallSettings,
+  saveLiveCallSettings,
+  type LiveCallSettings,
+} from '../../services/liveCallSettings';
 import { persistPayoutMethod } from '../../services/walletSyncService';
 import type { WithdrawalGateway } from '../../services/withdrawalService';
 import { radii } from '../../theme/colors';
@@ -52,6 +58,17 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
   const [appLanguage, setAppLanguage] = useState('English');
   const [hideOnline, setHideOnline] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [liveCall, setLiveCall] = useState<LiveCallSettings>(DEFAULT_LIVE_CALL_SETTINGS);
+
+  useEffect(() => {
+    void loadLiveCallSettings().then(setLiveCall);
+  }, []);
+
+  const patchLiveCall = async (patch: Partial<LiveCallSettings>) => {
+    const next = await saveLiveCallSettings(patch);
+    setLiveCall(next);
+    notify('Saved', 'Live call settings updated');
+  };
 
   const cycleTheme = () => {
     if (preference === 'system') setScheme('dark');
@@ -149,6 +166,111 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
             trackColor={{ false: colors.border, true: colors.primarySoft }}
             thumbColor="#fff"
           />
+        </View>
+      </GlassCard>
+
+      <Text style={[styles.section, { color: colors.text }]}>Live + Video Calls</Text>
+      <GlassCard>
+        <View style={styles.row}>
+          <View style={{ flex: 1, paddingRight: 12 }}>
+            <Text style={[styles.rowTitle, { color: colors.text }]}>
+              Accept calls while LIVE
+            </Text>
+            <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
+              Show premium incoming popup during live
+            </Text>
+          </View>
+          <Switch
+            value={liveCall.acceptCallsWhileLive}
+            onValueChange={(v) => void patchLiveCall({ acceptCallsWhileLive: v })}
+            trackColor={{ false: colors.border, true: colors.primarySoft }}
+            thumbColor="#fff"
+          />
+        </View>
+        <View style={[styles.divider, { backgroundColor: colors.border }]} />
+        <View style={styles.row}>
+          <View style={{ flex: 1, paddingRight: 12 }}>
+            <Text style={[styles.rowTitle, { color: colors.text }]}>Auto-reject if busy</Text>
+            <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
+              Decline new rings during an active private call
+            </Text>
+          </View>
+          <Switch
+            value={liveCall.autoRejectWhenBusy}
+            onValueChange={(v) => void patchLiveCall({ autoRejectWhenBusy: v })}
+            trackColor={{ false: colors.border, true: colors.primarySoft }}
+            thumbColor="#fff"
+          />
+        </View>
+        <View style={[styles.divider, { backgroundColor: colors.border }]} />
+        <Text style={[styles.rowTitle, { color: colors.text, marginBottom: 8 }]}>
+          Coins per minute
+        </Text>
+        <View style={styles.chipRow}>
+          {[50, 80, 100, 150, 200].map((n) => (
+            <Pressable
+              key={n}
+              onPress={() => void patchLiveCall({ coinsPerMinute: n })}
+              style={[
+                styles.chip,
+                {
+                  backgroundColor:
+                    liveCall.coinsPerMinute === n ? `${colors.primary}44` : colors.bgSoft,
+                  borderColor:
+                    liveCall.coinsPerMinute === n ? colors.primary : colors.border,
+                },
+              ]}
+            >
+              <Text style={{ color: colors.text, fontWeight: '800', fontSize: 12 }}>{n}</Text>
+            </Pressable>
+          ))}
+        </View>
+        <View style={[styles.divider, { backgroundColor: colors.border, marginTop: 12 }]} />
+        <Text style={[styles.rowTitle, { color: colors.text, marginBottom: 8 }]}>
+          Max waiting time
+        </Text>
+        <View style={styles.chipRow}>
+          {[20, 30, 45, 60, 90].map((n) => (
+            <Pressable
+              key={n}
+              onPress={() => void patchLiveCall({ maxWaitSec: n })}
+              style={[
+                styles.chip,
+                {
+                  backgroundColor:
+                    liveCall.maxWaitSec === n ? `${colors.primary}44` : colors.bgSoft,
+                  borderColor: liveCall.maxWaitSec === n ? colors.primary : colors.border,
+                },
+              ]}
+            >
+              <Text style={{ color: colors.text, fontWeight: '800', fontSize: 12 }}>{n}s</Text>
+            </Pressable>
+          ))}
+        </View>
+        <View style={[styles.divider, { backgroundColor: colors.border, marginTop: 12 }]} />
+        <Text style={[styles.rowTitle, { color: colors.text, marginBottom: 8 }]}>
+          Call availability status
+        </Text>
+        <View style={styles.chipRow}>
+          {(['available', 'busy', 'offline'] as const).map((s) => (
+            <Pressable
+              key={s}
+              onPress={() => void patchLiveCall({ callAvailability: s })}
+              style={[
+                styles.chip,
+                {
+                  backgroundColor:
+                    liveCall.callAvailability === s ? `${colors.primary}44` : colors.bgSoft,
+                  borderColor:
+                    liveCall.callAvailability === s ? colors.primary : colors.border,
+                },
+              ]}
+            >
+              <Text style={{ color: colors.text, fontWeight: '800', fontSize: 12 }}>
+                {s}
+              </Text>
+            </Pressable>
+          ))}
         </View>
       </GlassCard>
 

@@ -60,6 +60,7 @@ export function LiveRoomScreen({ navigation, route }: Props) {
     liveSeconds,
     stopLive,
     openRoom,
+    livePausedForCall,
   } = useLiveStudio();
 
   const roomId = route.params.roomId;
@@ -112,8 +113,10 @@ export function LiveRoomScreen({ navigation, route }: Props) {
     }
   }, [beauty, hostMode, room?.channel]);
 
+  // Don't stop Agora when navigating to private call — CallScreen owns the engine
   useEffect(() => {
     if (!hostMode || !room?.channel) return;
+    if (livePausedForCall) return;
     let cancelled = false;
     (async () => {
       if (cancelled) return;
@@ -121,15 +124,15 @@ export function LiveRoomScreen({ navigation, route }: Props) {
     })();
     return () => {
       cancelled = true;
+      if (livePausedForCall) return;
       void stopAgoraCall();
       if (Platform.OS === 'web') {
         document.getElementById('live-local')?.remove();
       }
       setCameraReady(false);
     };
-    // Only rejoin when channel/host mode changes — beauty is applied live
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hostMode, room?.channel, room?.id]);
+  }, [hostMode, room?.channel, room?.id, livePausedForCall]);
 
   const feed = useMemo(() => {
     const giftLines = gifts.slice(0, 20).map((g) => ({
@@ -204,7 +207,9 @@ export function LiveRoomScreen({ navigation, route }: Props) {
             <Text style={styles.timer}>{formatLive(hostMode ? liveSeconds : 0)}</Text>
           </View>
           <View style={styles.livePill}>
-            <Text style={styles.livePillText}>LIVE</Text>
+            <Text style={styles.livePillText}>
+              {livePausedForCall ? 'LIVE · CALL' : 'LIVE'}
+            </Text>
           </View>
           {room.entryLocked && (room.entryFee || 0) > 0 ? (
             <View style={styles.lockPill}>

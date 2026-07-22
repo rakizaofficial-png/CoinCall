@@ -66,6 +66,11 @@ type LiveStudioValue = {
   startSoloLive: () => Promise<LiveRoom>;
   startPartyLive: () => Promise<LiveRoom>;
   stopLive: () => Promise<void>;
+  /** Pause Agora publish for private call — keep live room listed */
+  pauseLiveForPrivateCall: () => Promise<void>;
+  /** After private call — mark ready to rejoin live Agora */
+  resumeLiveAfterCall: () => Promise<{ roomId: string; channel: string } | null>;
+  livePausedForCall: boolean;
   openRoom: (roomId: string) => void;
   closeRoomView: () => void;
   sendComment: (text: string) => Promise<void>;
@@ -133,6 +138,7 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
   const [blockedInRoom, setBlockedInRoom] = useState<string[]>([]);
   const [sessionLiveSeconds, setSessionLiveSeconds] = useState(0);
   const [todayLiveGiftCoins, setTodayLiveGiftCoins] = useState(0);
+  const [livePausedForCall, setLivePausedForCall] = useState(false);
   const [goLiveDraft, setDraft] = useState<GoLiveDraft>({
     title: `${user.name}'s Live`,
     category: 'Beauty',
@@ -619,6 +625,7 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
     setActiveRoomId(null);
     setBridgeLive(false);
     setSessionLiveSeconds(0);
+    setLivePausedForCall(false);
 
     if (myLiveRoom) {
       const startedAt = Number(myLiveRoom.startedAt || Date.now());
@@ -652,6 +659,71 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
     }).catch(() => undefined);
     notify('Live ended', 'Thanks for streaming!');
   }, [bumpTodayLiveSeconds, myLiveRoom, refreshTodayStats, user]);
+
+  /**
+   * Keep live room listed & presence isLive=true, free Agora engine for 1v1.
+   * Does NOT call endLiveRoom — Discover still shows the host as LIVE.
+   */
+  const pauseLiveForPrivateCall = useCallback(async () => {
+    if (!myLiveRoom?.isLive) return;
+    setLivePausedForCall(true);
+    setBridgeLive(true);
+    try {
+      const { stopAgoraCall } = await import('../services/agoraService');
+      await stopAgoraCall();
+    } catch {
+      /* engine may already be free */
+    }
+    await postRoomComment(myLiveRoom.id, {
+      userId: 'system',
+      userName: 'System',
+      text: 'Host joined a private video call — live continues',
+      createdAt: Date.now(),
+      kind: 'system',
+    }).catch(() => undefined);
+    void publishHostPresence({
+      id: user.id,
+      name: user.name,
+      avatarUrl: user.avatarUrl || user.photoUrl,
+      photoUrl: user.photoUrl || user.avatarUrl,
+      country: user.country,
+      ratePerMinute: 80,
+      isOnline: true,
+      isLive: true,
+      isOnCall: true,
+      workspaceMode: 'solo_calling',
+    }).catch(() => undefined);
+  }, [myLiveRoom, user]);
+
+  const resumeLiveAfterCall = useCallback(async () => {
+    if (!myLiveRoom?.isLive) {
+      setLivePausedForCall(false);
+      return null;
+    }
+    setLivePausedForCall(false);
+    setActiveRoomId(myLiveRoom.id);
+    setBridgeLive(true);
+    void publishHostPresence({
+      id: user.id,
+      name: user.name,
+      avatarUrl: user.avatarUrl || user.photoUrl,
+      photoUrl: user.photoUrl || user.avatarUrl,
+      country: user.country,
+      ratePerMinute: 80,
+      isOnline: true,
+      isLive: true,
+      isOnCall: false,
+      workspaceMode: 'waiting_1v1',
+    }).catch(() => undefined);
+    await postRoomComment(myLiveRoom.id, {
+      userId: 'system',
+      userName: 'System',
+      text: 'Host is back on live',
+      createdAt: Date.now(),
+      kind: 'system',
+    }).catch(() => undefined);
+    return { roomId: myLiveRoom.id, channel: myLiveRoom.channel };
+  }, [myLiveRoom, user]);
 
   const openRoom = useCallback((roomId: string) => setActiveRoomId(roomId), []);
   const closeRoomView = useCallback(() => {
@@ -901,6 +973,9 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
       startSoloLive,
       startPartyLive,
       stopLive,
+      pauseLiveForPrivateCall,
+      resumeLiveAfterCall,
+      livePausedForCall,
       openRoom,
       closeRoomView,
       sendComment,
@@ -939,6 +1014,9 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
       startSoloLive,
       startPartyLive,
       stopLive,
+      pauseLiveForPrivateCall,
+      resumeLiveAfterCall,
+      livePausedForCall,
       openRoom,
       closeRoomView,
       sendComment,

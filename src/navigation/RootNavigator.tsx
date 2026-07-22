@@ -4,7 +4,7 @@ import {
   NavigationContainer,
 } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { IncomingCallModal } from '../components/IncomingCallModal';
 import { SplashScreen } from '../components/ui/SplashScreen';
 import { AppProvider, useApp } from '../context/AppContext';
@@ -52,10 +52,19 @@ function HostGate() {
 
 function BridgeIncomingLayer() {
   const { incomingBridgeCall, clearIncomingBridgeCall } = useApp();
+  const [hostBusyOnCall, setBusy] = useState(false);
+  useEffect(() => {
+    let unsub: (() => void) | undefined;
+    void import('../services/hostCallBusy').then(({ subscribeHostCallBusy }) => {
+      unsub = subscribeHostCallBusy(setBusy);
+    });
+    return () => unsub?.();
+  }, []);
   return (
     <IncomingCallModal
       call={incomingBridgeCall}
       onClear={clearIncomingBridgeCall}
+      hostBusyOnCall={hostBusyOnCall}
     />
   );
 }
