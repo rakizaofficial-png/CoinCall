@@ -10,6 +10,7 @@ import {
   dumpCoinTxns,
   loadCoinTxns,
   mintCoins,
+  reconcileWalletBalance,
   splitTransfer,
   transferUserToHost,
   type WalletLike,
@@ -216,6 +217,33 @@ function seed(userId: string, coins: number) {
   }
   assert.equal(store.get('u1')!.coinBalance, 1000 - 800);
   assert.equal(store.get('h1')!.coinBalance, 56 * 10);
+}
+
+// --- reconcile wallet from txns ---
+{
+  reset();
+  seed('u1', 0);
+  const d = deps();
+  mintCoins(d, {
+    txnKey: 'iap_rec',
+    type: 'purchase',
+    userId: 'u1',
+    amount: 300,
+    reason: 'iap',
+  });
+  transferUserToHost(d, {
+    txnKey: 'call_rec',
+    type: 'call_minute',
+    userId: 'u1',
+    hostId: 'h1',
+    gross: 80,
+    reason: 'call',
+  });
+  assert.equal(store.get('u1')!.coinBalance, 220);
+  seed('u1', 9999); // corrupt wallet
+  const rec = reconcileWalletBalance(d, 'u1');
+  assert.equal(rec.ok, true);
+  assert.equal(store.get('u1')!.coinBalance, 220);
 }
 
 console.log('coinLedger.test.ts: all scenarios passed');

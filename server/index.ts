@@ -53,12 +53,14 @@ import {
   PLATFORM_TREASURY_ID,
   auditConservation,
   debitOnly,
+  deriveWalletBalanceFromTxns,
   dumpCoinTxns,
   getCoinTxnByKey,
   listCoinTxns,
   loadCoinTxns,
   mintCoins,
   platformCommissionRate,
+  reconcileWalletBalance,
   transferUserToHost,
   type CoinTxn,
 } from './coinLedger.ts';
@@ -2972,6 +2974,31 @@ app.get('/api/wallet/transactions', (req, res) => {
   });
 });
 
+app.get('/api/wallet/balance-check/:userId', (req, res) => {
+  const userId = String(req.params.userId || '').trim();
+  if (!userId) {
+    res.status(400).json({ error: 'userId required' });
+    return;
+  }
+  if (!requireUserMatch(req, res, userId)) return;
+  const row = ensureWallet(userId);
+  const check = reconcileWalletBalance(coinDeps(), userId);
+  const ledger = walletLedger.get(userId) || [];
+  const ledgerSum = ledger.reduce(
+    (sum, e) => sum + (e.kind === 'credit' ? e.amount : -e.amount),
+    0,
+  );
+  res.json({
+    ok: check.ok && (check.derivedBalance == null || check.derivedBalance === row.coinBalance),
+    userId,
+    walletBalance: row.coinBalance,
+    derivedFromCoinTxns: check.derivedBalance,
+    ledgerEntrySum: ledgerSum,
+    ledgerMatchesWallet: ledgerSum === row.coinBalance,
+    recentTransactions: listCoinTxns({ userId, limit: 25 }),
+  });
+});
+
 app.get('/api/admin/coin-audit', (req, res) => {
   if (!requireStaff(req, res)) return;
   const sample = dumpCoinTxns().slice(0, 500);
@@ -3634,9 +3661,22 @@ app.post('/api/admin/withdrawals/:id/status', (req, res) => {
   const prev = row.status;
   row.status = status;
   if (status === 'failed' && prev !== 'failed' && prev !== 'paid') {
-    const wallet = ensureWallet(row.hostId, { role: 'host' });
-    wallet.coinBalance += row.amountCoins;
-    wallets.set(row.hostId, wallet);
+    const refunded = mintCoins(coinDeps(), {
+      txnKey: `withdrawal_refund:${row.id}`,
+      type: 'withdrawal_refund',
+      userId: row.hostId,
+      amount: row.amountCoins,
+      reason: `withdrawal_refund_${row.id}`,
+      meta: { withdrawalId: row.id },
+    });
+    if (!refunded.ok) {
+      res.status(refunded.code).json({
+        error: refunded.txn.error || 'Refund failed',
+        txn: refunded.txn,
+      });
+      return;
+    }
+    broadcastWallet(row.hostId);
   }
   broadcastWs({ type: 'withdrawal:updated', payload: row });
   res.json({ ok: true, withdrawal: row });
@@ -4098,8 +4138,11 @@ type DmMessageRow = {
   fromName: string;
   fromAvatar?: string;
   text: string;
+  imageUrl?: string;
   createdAt: number;
   kind: 'text' | 'image';
+  deliveredAt?: number;
+  readAt?: number;
 };
 type DmThreadMeta = {
   id: string;
@@ -4145,18 +4188,21 @@ function upsertDmThread(input: {
   return dmThreads.get(id)!;
 }
 
-function pushDmMessage(row: Omit<DmMessageRow, 'id' | 'createdAt'> & { createdAt?: number }) {
+function pushDmMessage(row: Omit<DmMessageRow, 'id' | 'createdAt' | 'deliveredAt'> & { createdAt?: number }) {
   const chatId = dmChatId(row.fromId, row.toId);
   const list = dmMessages.get(chatId) || [];
+  const now = row.createdAt || Date.now();
   const msg: DmMessageRow = {
     id: randomUUID().slice(0, 12),
-    createdAt: row.createdAt || Date.now(),
+    createdAt: now,
+    deliveredAt: now,
     fromId: row.fromId,
     toId: row.toId,
     fromName: row.fromName,
     fromAvatar: row.fromAvatar,
     text: row.text,
-    kind: row.kind || 'text',
+    imageUrl: row.imageUrl,
+    kind: row.kind || (row.imageUrl ? 'image' : 'text'),
   };
   list.push(msg);
   while (list.length > 200) list.shift();
@@ -5182,14 +5228,17 @@ app.post('/api/dm/send', (req, res) => {
   const fromId = String(req.body?.fromId || '').trim();
   const toId = String(req.body?.toId || '').trim();
   const text = String(req.body?.text || '').trim().slice(0, 500);
+  const imageUrl = req.body?.imageUrl
+    ? String(req.body.imageUrl).slice(0, 2000)
+    : undefined;
   const fromName = String(req.body?.fromName || 'User').trim().slice(0, 40) || 'User';
   const fromAvatar = req.body?.fromAvatar ? String(req.body.fromAvatar).slice(0, 500) : undefined;
   const fromRole = String(req.body?.fromRole || 'user') === 'host' ? 'host' : 'user';
   const peerName = String(req.body?.peerName || '').trim().slice(0, 40);
   const peerAvatar = req.body?.peerAvatar ? String(req.body.peerAvatar).slice(0, 500) : undefined;
 
-  if (!fromId || !toId || !text) {
-    res.status(400).json({ error: 'fromId, toId, text required' });
+  if (!fromId || !toId || (!text && !imageUrl)) {
+    res.status(400).json({ error: 'fromId, toId, text or imageUrl required' });
     return;
   }
 
@@ -5198,8 +5247,9 @@ app.post('/api/dm/send', (req, res) => {
     toId,
     fromName,
     fromAvatar,
-    text,
-    kind: 'text',
+    text: text || (imageUrl ? '📷 Photo' : ''),
+    imageUrl,
+    kind: imageUrl ? 'image' : 'text',
   });
 
   const userId = fromRole === 'user' ? fromId : toId;
@@ -5245,9 +5295,17 @@ app.get('/api/dm/messages', (req, res) => {
     return;
   }
   const chatId = dmChatId(a, b);
+  const viewerId = String(req.query.viewerId || req.headers['x-user-id'] || '').trim();
+  const list = (dmMessages.get(chatId) || []).map((m) => {
+    if (viewerId && m.toId === viewerId && !m.readAt) {
+      m.readAt = Date.now();
+    }
+    return m;
+  });
+  if (viewerId) dmMessages.set(chatId, list);
   res.json({
     chatId,
-    messages: dmMessages.get(chatId) || [],
+    messages: list,
   });
 });
 

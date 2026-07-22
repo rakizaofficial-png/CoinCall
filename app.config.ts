@@ -38,6 +38,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   android: {
     package: 'com.coincall.host',
     versionCode: Number(process.env.ANDROID_VERSION_CODE || 1),
+    softwareKeyboardLayoutMode: 'resize',
     adaptiveIcon: {
       backgroundColor: '#1A0F16',
       foregroundImage: './assets/android-icon-foreground.png',

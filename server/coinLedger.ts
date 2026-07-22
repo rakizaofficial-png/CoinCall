@@ -141,6 +141,9 @@ export function getCoinTxnByKey(txnKey: string): CoinTxn | undefined {
 }
 
 function remember(txn: CoinTxn, deps: LedgerDeps) {
+  if (!txn.createdAt) txn.createdAt = Date.now();
+  // Preserve insertion order when multiple txns share the same millisecond
+  txn.createdAt += txns.length;
   txns.unshift(txn);
   if (txns.length > MAX_TXNS) txns.length = MAX_TXNS;
   if (txn.status === 'completed') byKey.set(txn.txnKey, txn.id);
@@ -512,6 +515,49 @@ export function debitOnly(
   };
   remember(txn, deps);
   return { ok: true, txn };
+}
+
+export function deriveWalletBalanceFromTxns(
+  userId: string,
+  rows: CoinTxn[] = txns,
+): { balance: number | null; lastTxnAt: number | null } {
+  let balance = 0;
+  let touched = false;
+  let lastTxnAt: number | null = null;
+  const sorted = [...rows]
+    .filter((t) => t.status === 'completed')
+    .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+  for (const t of sorted) {
+    if (t.userId === userId) {
+      balance = t.userBalanceAfter;
+      touched = true;
+      lastTxnAt = t.createdAt;
+    }
+    if (t.hostId === userId && t.hostBalanceAfter != null) {
+      balance = t.hostBalanceAfter;
+      touched = true;
+      lastTxnAt = t.createdAt;
+    }
+  }
+  return { balance: touched ? balance : null, lastTxnAt };
+}
+
+export function reconcileWalletBalance(
+  deps: LedgerDeps,
+  userId: string,
+): { ok: boolean; walletBalance: number; derivedBalance: number | null } {
+  const row = deps.ensureWallet(userId);
+  const { balance: derived } = deriveWalletBalanceFromTxns(userId);
+  if (derived != null && derived !== row.coinBalance) {
+    row.coinBalance = derived;
+    deps.setWallet(row);
+    deps.persist();
+  }
+  return {
+    ok: derived == null || derived === row.coinBalance,
+    walletBalance: row.coinBalance,
+    derivedBalance: derived,
+  };
 }
 
 /** Audit helpers for tests / admin */

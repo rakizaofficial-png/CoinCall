@@ -1,19 +1,30 @@
 "use client";
 
-import { use, useEffect, useMemo, useState } from "react";
+import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { motion } from "framer-motion";
-import { ArrowLeft, Gift, Send, Video } from "lucide-react";
+import { ArrowLeft, Gift, Video } from "lucide-react";
 import { creators, getCreator, threads } from "@/lib/data";
 import { useApp } from "@/lib/store";
 import { GiftSheet } from "@/components/GiftSheet";
-import { VipChatBubble } from "@/components/VipChatBubble";
 import { WalletDiamond } from "@/components/WalletDiamond";
 import { requireApiBase } from "@/config/apiConfig";
 import { getDeviceUserId } from "@/lib/walletApi";
+import { ChatBubble, type ChatBubbleMessage } from "@/components/chat/ChatBubble";
+import { ChatComposer } from "@/components/chat/ChatComposer";
+import { ChatThreadLayout } from "@/components/chat/ChatThreadLayout";
+import { ImageViewerModal } from "@/components/chat/ImageViewerModal";
+import { TypingIndicator } from "@/components/chat/TypingIndicator";
+import { CHAT_THEME } from "@/components/chat/chatTheme";
 
-type ChatLine = { from: "me" | "them"; text: string };
+type ApiMessage = {
+  id: string;
+  fromId: string;
+  toId: string;
+  text: string;
+  createdAt: number;
+  imageUrl?: string;
+};
 
 export default function ChatThreadPage({
   params,
@@ -22,6 +33,9 @@ export default function ChatThreadPage({
 }) {
   const { id } = use(params);
   const { vipTier, triggerEntranceBlast, inbox, pushToast } = useApp();
+  const userId = getDeviceUserId();
+  const listEndRef = useRef<HTMLDivElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const hostIdFromRoute = id.startsWith("host_")
     ? decodeURIComponent(id.slice(5))
@@ -45,28 +59,86 @@ export default function ChatThreadPage({
     () =>
       inbox
         .filter((m) => m.hostId === hostId)
-        .map((m) => ({ from: "them" as const, text: m.text })),
-    [inbox, hostId],
+        .map((m) => ({
+          id: `mass_${m.at}`,
+          fromId: hostId,
+          toId: userId,
+          text: m.text,
+          createdAt: m.at,
+        })),
+    [hostId, inbox, userId],
   );
 
-  const [messages, setMessages] = useState<ChatLine[]>(() => massNotes);
+  const [apiMessages, setApiMessages] = useState<ApiMessage[]>([]);
+  const [pending, setPending] = useState<ChatBubbleMessage[]>([]);
   const [text, setText] = useState("");
   const [giftOpen, setGiftOpen] = useState(false);
   const [sending, setSending] = useState(false);
+  const [viewerUri, setViewerUri] = useState<string | null>(null);
+  const [peerTyping, setPeerTyping] = useState(false);
+
+  const loadMessages = useCallback(async () => {
+    try {
+      const res = await fetch(
+        `${requireApiBase()}/dm/messages?a=${encodeURIComponent(userId)}&b=${encodeURIComponent(hostId)}&viewerId=${encodeURIComponent(userId)}`,
+        { cache: "no-store" },
+      );
+      const data = (await res.json()) as { messages?: ApiMessage[] };
+      if (data.messages?.length) setApiMessages(data.messages);
+    } catch {
+      /* keep local */
+    }
+  }, [hostId, userId]);
 
   useEffect(() => {
-    if (massNotes.length) setMessages(massNotes);
-  }, [massNotes]);
+    void loadMessages();
+    const t = setInterval(() => void loadMessages(), 4000);
+    return () => clearInterval(t);
+  }, [loadMessages]);
 
-  const send = async () => {
+  const bubbles = useMemo<ChatBubbleMessage[]>(() => {
+    const mergedMap = new Map<string, ChatBubbleMessage>();
+    for (const m of [...massNotes, ...apiMessages]) {
+      mergedMap.set(m.id, {
+        id: m.id,
+        text: m.text,
+        createdAt: m.createdAt,
+        imageUrl: (m as ApiMessage).imageUrl,
+        fromMe: m.fromId === userId,
+        status:
+          m.fromId === userId
+            ? (m as ApiMessage & { readAt?: number }).readAt
+              ? "read"
+              : "delivered"
+            : undefined,
+      });
+    }
+    for (const p of pending) mergedMap.set(p.id, p);
+    return [...mergedMap.values()].sort((a, b) => a.createdAt - b.createdAt);
+  }, [apiMessages, massNotes, pending, userId]);
+
+  useEffect(() => {
+    listEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [bubbles.length, text]);
+
+  const send = async (imageUrl?: string) => {
     const body = text.trim();
-    if (!body || sending) return;
+    if (!body && !imageUrl) return;
+    if (sending) return;
     if (vipTier === "diamond") triggerEntranceBlast();
-    setSending(true);
-    setMessages((m) => [...m, { from: "me", text: body }]);
+    const tempId = `pending_${Date.now()}`;
+    const optimistic: ChatBubbleMessage = {
+      id: tempId,
+      text: body || "📷 Photo",
+      createdAt: Date.now(),
+      imageUrl,
+      fromMe: true,
+      status: "sending",
+    };
+    setPending((p) => [...p, optimistic]);
     setText("");
+    setSending(true);
     try {
-      const userId = getDeviceUserId();
       const res = await fetch(`${requireApiBase()}/dm/send`, {
         method: "POST",
         headers: {
@@ -76,7 +148,8 @@ export default function ChatThreadPage({
         body: JSON.stringify({
           fromId: userId,
           toId: hostId,
-          text: body,
+          text: body || "📷 Photo",
+          imageUrl,
           fromName: "Luma Fan",
           fromRole: "user",
           peerName: hostName,
@@ -84,94 +157,104 @@ export default function ChatThreadPage({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Message failed");
+      setPending((p) => p.filter((m) => m.id !== tempId));
+      await loadMessages();
     } catch (e) {
+      setPending((p) =>
+        p.map((m) => (m.id === tempId ? { ...m, status: "failed" } : m)),
+      );
       pushToast?.(e instanceof Error ? e.message : "Could not send message");
     } finally {
       setSending(false);
     }
   };
 
-  return (
-    <main className="flex min-h-dvh flex-col bg-[#06040b]">
-      <header className="sticky top-0 z-20 flex items-center gap-3 border-b border-cyan/15 bg-[#06040b]/90 px-3 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur-xl">
-        <Link href="/messages" className="rounded-full bg-ink-3 p-2 text-cyan">
-          <ArrowLeft className="h-5 w-5" />
-        </Link>
-        <Image
-          src={hostImage}
-          alt={hostName}
-          width={40}
-          height={40}
-          unoptimized
-          className="h-10 w-10 rounded-full object-cover ring-2 ring-cyan/40"
-        />
-        <div className="min-w-0 flex-1">
-          <p className="font-display font-bold leading-tight">{hostName}</p>
-          <p className="text-[11px] font-semibold text-cyan">Host chat</p>
-        </div>
-        <WalletDiamond compact />
-        <Link
-          href={`/call/${encodeURIComponent(hostId)}?live=1`}
-          className="rounded-full bg-coral p-2.5 shadow-[0_0_16px_rgba(255,42,122,0.4)]"
-        >
-          <Video className="h-4 w-4" />
-        </Link>
-      </header>
-
-      <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
-        {messages.length === 0 ? (
-          <p className="text-center text-sm text-muted">Say hi to start the chat</p>
-        ) : null}
-        {messages.map((m, i) => (
-          <motion.div
-            key={`${m.from}-${i}-${m.text.slice(0, 12)}`}
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            className={`flex ${m.from === "me" ? "justify-end" : "justify-start"}`}
-          >
-            <VipChatBubble tier={vipTier} fromMe={m.from === "me"}>
-              {m.text}
-            </VipChatBubble>
-          </motion.div>
-        ))}
-      </div>
-
-      <div className="border-t border-line bg-ink-2 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3">
-        <div className="mb-2 flex gap-2">
-          <button
-            type="button"
-            onClick={() => setGiftOpen(true)}
-            className="rounded-full bg-ink-3 p-2.5 text-coral"
-          >
-            <Gift className="h-4 w-4" />
-          </button>
-        </div>
-        <div className="flex items-center gap-2">
-          <input
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void send();
-            }}
-            placeholder="Message…"
-            className="flex-1 rounded-full border border-line bg-ink-3 px-4 py-2.5 text-sm outline-none focus:border-cyan"
-          />
-          <button
-            type="button"
-            disabled={sending}
-            onClick={() => void send()}
-            className="rounded-full bg-cyan p-2.5 text-ink disabled:opacity-50"
-          >
-            <Send className="h-4 w-4" />
-          </button>
-        </div>
-      </div>
-
-      <GiftSheet
-        open={giftOpen}
-        onClose={() => setGiftOpen(false)}
-        hostId={hostId}
+  const header = (
+    <div className="flex items-center gap-3 px-3 pb-3">
+      <Link href="/messages" className="rounded-full p-2" style={{ backgroundColor: CHAT_THEME.theirsBubble, color: CHAT_THEME.accent }}>
+        <ArrowLeft className="h-5 w-5" />
+      </Link>
+      <Image
+        src={hostImage}
+        alt={hostName}
+        width={40}
+        height={40}
+        unoptimized
+        className="h-10 w-10 rounded-full object-cover ring-2"
+        style={{ borderColor: CHAT_THEME.border }}
       />
-    </main>
+      <div className="min-w-0 flex-1">
+        <p className="font-display font-bold leading-tight text-sand">{hostName}</p>
+        <p className="text-[11px] font-semibold" style={{ color: CHAT_THEME.accent }}>
+          {peerTyping ? "typing…" : "Host chat"}
+        </p>
+      </div>
+      <WalletDiamond compact />
+      <Link
+        href={`/call/${encodeURIComponent(hostId)}?live=1`}
+        className="rounded-full p-2.5"
+        style={{ backgroundColor: CHAT_THEME.coral, color: "#fff" }}
+      >
+        <Video className="h-4 w-4" />
+      </Link>
+    </div>
+  );
+
+  return (
+    <>
+      <ChatThreadLayout
+        header={header}
+        composer={
+          <>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                const url = URL.createObjectURL(file);
+                void send(url);
+                e.target.value = "";
+              }}
+            />
+            <ChatComposer
+              value={text}
+              onChange={setText}
+              onSend={() => void send()}
+              onPickImage={() => fileRef.current?.click()}
+              sending={sending}
+            />
+            <div className="px-3 pb-2">
+              <button
+                type="button"
+                onClick={() => setGiftOpen(true)}
+                className="inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-bold"
+                style={{ backgroundColor: CHAT_THEME.theirsBubble, color: CHAT_THEME.coral }}
+              >
+                <Gift className="h-3.5 w-3.5" /> Send gift
+              </button>
+            </div>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          {bubbles.length === 0 ? (
+            <p className="text-center text-sm" style={{ color: CHAT_THEME.muted }}>
+              Say hi to start the chat
+            </p>
+          ) : null}
+          {bubbles.map((m) => (
+            <ChatBubble key={m.id} message={m} onImagePress={setViewerUri} />
+          ))}
+          {peerTyping ? <TypingIndicator /> : null}
+          <div ref={listEndRef} />
+        </div>
+      </ChatThreadLayout>
+
+      <GiftSheet open={giftOpen} onClose={() => setGiftOpen(false)} hostId={hostId} />
+      <ImageViewerModal uri={viewerUri} onClose={() => setViewerUri(null)} />
+    </>
   );
 }

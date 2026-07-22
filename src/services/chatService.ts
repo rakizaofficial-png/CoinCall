@@ -18,6 +18,8 @@ export type ChatMessage = {
   imageUrl?: string;
   kind?: 'text' | 'image' | 'support';
   fromName?: string;
+  deliveredAt?: number;
+  readAt?: number;
 };
 
 export type DmThreadRow = {
@@ -55,10 +57,12 @@ export async function fetchDmThreadsForHost(hostId: string): Promise<DmThreadRow
 export async function fetchDmMessages(
   a: string,
   b: string,
+  viewerId?: string,
 ): Promise<ChatMessage[]> {
   try {
+    const viewer = viewerId ? `&viewerId=${encodeURIComponent(viewerId)}` : '';
     const res = await fetch(
-      `${api()}/dm/messages?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`,
+      `${api()}/dm/messages?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}${viewer}`,
     );
     const data = (await res.json()) as {
       messages?: Array<{
@@ -68,6 +72,9 @@ export async function fetchDmMessages(
         text: string;
         createdAt: number;
         fromName?: string;
+        imageUrl?: string;
+        deliveredAt?: number;
+        readAt?: number;
       }>;
     };
     return (data.messages || []).map((m) => ({
@@ -77,7 +84,10 @@ export async function fetchDmMessages(
       text: m.text,
       createdAt: m.createdAt,
       fromName: m.fromName,
-      kind: 'text' as const,
+      imageUrl: m.imageUrl,
+      deliveredAt: m.deliveredAt,
+      readAt: m.readAt,
+      kind: m.imageUrl ? ('image' as const) : ('text' as const),
     }));
   } catch {
     return [];
@@ -107,7 +117,7 @@ export function listenChatMessages(
   };
 
   const pollApi = async () => {
-    const rows = await fetchDmMessages(myId, peerId);
+    const rows = await fetchDmMessages(myId, peerId, myId);
     ingest(rows);
   };
 

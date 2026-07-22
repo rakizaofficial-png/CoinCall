@@ -567,42 +567,15 @@ export function AppProvider({
   useEffect(() => {
     if (!call || call.status !== 'active') return;
 
-    const peer = hosts.find((h) => h.id === call.hostId);
-    if (!peer) return;
-
     const interval = setInterval(() => {
       setCall((prev) => {
         if (!prev || prev.status !== 'active') return prev;
-        const nextSeconds = prev.seconds + 1;
-        const shouldEarn = nextSeconds % 10 === 0;
-        if (!shouldEarn) {
-          return { ...prev, seconds: nextSeconds };
-        }
-
-        const tickEarn = Math.max(1, Math.round(peer.ratePerMinute / 6));
-        setUser((u) => ({ ...u, coinBalance: u.coinBalance + tickEarn }));
-        setHostEarnings((e) => ({ ...e, call: e.call + tickEarn }));
-        setTransactions((txs) => [
-          {
-            id: `tx_${Date.now()}`,
-            type: 'earn',
-            amount: tickEarn,
-            label: `Call earnings · ${peer.name}`,
-            timestamp: Date.now(),
-          },
-          ...txs,
-        ]);
-
-        return {
-          ...prev,
-          seconds: nextSeconds,
-          coinsSpent: prev.coinsSpent + tickEarn,
-        };
+        return { ...prev, seconds: prev.seconds + 1 };
       });
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [call?.status, call?.hostId, hosts]);
+  }, [call?.status, call?.hostId]);
 
   const updateUser = useCallback((patch: Partial<User>) => {
     setUser((u) => ({ ...u, ...patch }));
@@ -646,24 +619,12 @@ export function AppProvider({
         };
       }
 
-      setUser((u) => ({ ...u, coinBalance: u.coinBalance + peer.ratePerMinute }));
-      setHostEarnings((e) => ({ ...e, call: e.call + peer.ratePerMinute }));
       setCallsToday((n) => n + 1);
-      setTransactions((txs) => [
-        {
-          id: `tx_${Date.now()}`,
-          type: 'earn',
-          amount: peer.ratePerMinute,
-          label: `Call started · ${peer.name}`,
-          timestamp: Date.now(),
-        },
-        ...txs,
-      ]);
       setCall({
         hostId,
         startedAt: Date.now(),
         seconds: 0,
-        coinsSpent: peer.ratePerMinute,
+        coinsSpent: 0,
         status: 'active',
       });
       setWorkspaceModeState('solo_calling');
@@ -890,7 +851,7 @@ export function AppProvider({
   const creditBridgeMinute = useCallback((amount: number) => {
     const n = Math.max(0, Math.floor(amount));
     if (n <= 0) return;
-    setUser((u) => ({ ...u, coinBalance: u.coinBalance + n }));
+    // Balance updates only via server wallet:updated / billing SSE — avoid double credit.
     setHostEarnings((e) => ({ ...e, call: e.call + n }));
     setMyTodayMinutes((m) => m + 1);
     setTransactions((txs) => [
@@ -966,8 +927,6 @@ export function AppProvider({
           const bal = payload.hostWallet?.coinBalance;
           if (typeof bal === 'number' && Number.isFinite(bal)) {
             setUser((u) => ({ ...u, coinBalance: Math.max(0, bal) }));
-          } else if (amount > 0) {
-            setUser((u) => ({ ...u, coinBalance: u.coinBalance + amount }));
           }
           if (amount > 0) {
             setHostEarnings((e) => ({ ...e, call: e.call + amount }));
