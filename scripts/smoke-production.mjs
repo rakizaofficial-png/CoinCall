@@ -99,7 +99,7 @@ async function main() {
   });
 
   await check('POST /host/mass-text', async () => {
-    await json('/host/mass-text', {
+    const res = await fetch(`${API}/host/mass-text`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -108,6 +108,11 @@ async function main() {
         text: 'Smoke mass text',
       }),
     });
+    // 409 = no active fans online (valid empty-state), 200 = delivered
+    if (res.status !== 200 && res.status !== 409) {
+      const body = await res.text();
+      throw new Error(`${res.status} ${body.slice(0, 200)}`);
+    }
   });
 
   await check('Luma HTTP 200', async () => {

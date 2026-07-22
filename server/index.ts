@@ -5277,6 +5277,55 @@ wss.on('connection', (socket, req) => {
   });
 });
 
+/** Static help-center articles for Host app (admin-managed copy) */
+const HELP_CENTER_ARTICLES = [
+  {
+    id: 'go-online',
+    title: 'Go online for 1:1 calls',
+    category: 'Getting started',
+    body: 'Open Home → toggle Available for 1:1 ON. Keep the app open so fans can reach you. Android may pause background apps — disable battery optimization for CoinCall Host.',
+  },
+  {
+    id: 'go-live',
+    title: 'Start a live stream',
+    category: 'Live',
+    body: 'Tap Go Live, set your title, then Start. Use Lock Live to add gift-gated photos. Fans unlock them with gifts.',
+  },
+  {
+    id: 'gifts',
+    title: 'Gifting & earnings',
+    category: 'Gifts',
+    body: 'During a call or live, gifts transfer coins from the fan wallet to your host wallet (minus platform commission). Check Earnings for history.',
+  },
+  {
+    id: 'mass-text',
+    title: 'Message online users',
+    category: 'Chat',
+    body: 'Messages tab shows Active fans. Tap a fan to DM, or use Mass Texting to reach everyone currently online.',
+  },
+  {
+    id: 'withdraw',
+    title: 'Withdraw earnings',
+    category: 'Wallet',
+    body: 'Home → Withdraw. Submit payout details and wait for Finance approval. Check notifications for status updates.',
+  },
+  {
+    id: 'contact-support',
+    title: 'Contact admin support',
+    category: 'Support',
+    body: 'Open Help / Support and create a ticket. You get a reply notification when admin answers.',
+  },
+];
+
+app.get('/api/help-center', (_req, res) => {
+  res.json({ ok: true, articles: HELP_CENTER_ARTICLES });
+});
+
+app.get('/api/admin/help-center', (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  res.json({ ok: true, articles: HELP_CENTER_ARTICLES });
+});
+
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`CoinCall API listening on http://0.0.0.0:${PORT}`);
   console.log(`WS:     ws://0.0.0.0:${PORT}/ws`);
@@ -5285,6 +5334,7 @@ httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`Payout: POST /api/host/withdrawals`);
   console.log(`Hosts:  GET /api/hosts`);
   console.log(`Calls:  POST /api/calls`);
+  console.log(`Help:   GET /api/help-center`);
   console.log(`AutoCall: scheduler every 20s`);
   console.log(`Persist: ${persistenceLabel()}`);
 });

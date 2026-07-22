@@ -199,13 +199,14 @@ export const threads: ChatThread[] = [
   },
 ];
 
+/** Prices must match server GIFT_CATALOG_SERVER (legacy aliases). */
 export const gifts: Gift[] = [
-  { id: "rose", name: "Rose", emoji: "🌹", coins: 1 },
-  { id: "heart", name: "Heart", emoji: "💖", coins: 5 },
-  { id: "kiss", name: "Kiss", emoji: "💋", coins: 10 },
-  { id: "star", name: "Star", emoji: "⭐", coins: 20 },
-  { id: "diamond", name: "Diamond", emoji: "💎", coins: 99 },
-  { id: "crown", name: "Crown", emoji: "👑", coins: 199 },
+  { id: "rose", name: "Rose Bouquet", emoji: "🌹", coins: 10 },
+  { id: "heart", name: "Neon Heart", emoji: "💗", coins: 99 },
+  { id: "kiss", name: "Kiss Heart", emoji: "💋", coins: 99 },
+  { id: "star", name: "Golden Butterfly", emoji: "⭐", coins: 199 },
+  { id: "diamond", name: "Diamond Ring", emoji: "💎", coins: 299 },
+  { id: "crown", name: "Diamond Crown", emoji: "👑", coins: 1999 },
 ];
 
 export const giftTickerLines = [

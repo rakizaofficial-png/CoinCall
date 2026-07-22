@@ -691,21 +691,16 @@ export function AppProvider({
         : 'Stay longer next time to beat other hosts';
     notify('Call ended', `You earned ${earned} coins. ${tip}`);
 
-    if (earned > 0) {
-      void import('../services/walletSyncService').then(({ creditHostEarnings, syncHostWalletBalance }) => {
-        const next = user.coinBalance;
-        void syncHostWalletBalance({
-          hostId: user.id,
-          coinBalance: next,
-          displayName: user.name,
-        });
-        void creditHostEarnings({
-          hostId: user.id,
-          amount: earned,
-          reason: 'call_end',
-          displayName: user.name,
-        }).catch(() => undefined);
+    // Live bridge earnings are minted only via /api/calls/:id/minute → SSE.
+    // Never mint host_earn:call_end here (double-credit bug vs Luma billing).
+    void import('../services/walletSyncService').then(({ syncHostWalletBalance }) => {
+      void syncHostWalletBalance({
+        hostId: user.id,
+        coinBalance: user.coinBalance,
+        displayName: user.name,
       });
+    });
+    if (earned > 0) {
       void import('../services/notificationInboxService').then(({ pushHostNotification }) => {
         void pushHostNotification(user.id, {
           type: 'call',

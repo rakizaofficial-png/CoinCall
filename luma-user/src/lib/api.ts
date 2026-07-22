@@ -132,11 +132,61 @@ export async function createCall(input: {
 }): Promise<BridgeCall> {
   const res = await fetch(`${requireApiBase()}/calls`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "X-User-Id": input.userId,
+    },
     body: JSON.stringify(input),
   });
   const data = await parse<{ call: BridgeCall }>(res);
   return data.call;
+}
+
+/** Authoritative per-minute bill: deducts user coins + credits host (platform cut). */
+export async function billCallMinute(input: {
+  callId: string;
+  userId: string;
+  minuteIndex?: number;
+}): Promise<{
+  ok: boolean;
+  amount: number;
+  hostCredited: number;
+  billedMinutes: number;
+  error?: string;
+}> {
+  const res = await fetch(`${requireApiBase()}/calls/${input.callId}/minute`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-User-Id": input.userId,
+    },
+    body: JSON.stringify({
+      userId: input.userId,
+      minuteIndex: input.minuteIndex,
+    }),
+  });
+  const data = (await res.json().catch(() => ({}))) as {
+    ok?: boolean;
+    amount?: number;
+    hostCredited?: number;
+    billedMinutes?: number;
+    error?: string;
+  };
+  if (!res.ok) {
+    return {
+      ok: false,
+      amount: 0,
+      hostCredited: 0,
+      billedMinutes: 0,
+      error: data.error || `Bill failed (${res.status})`,
+    };
+  }
+  return {
+    ok: true,
+    amount: Number(data.amount) || 0,
+    hostCredited: Number(data.hostCredited) || 0,
+    billedMinutes: Number(data.billedMinutes) || 0,
+  };
 }
 
 export async function getCall(callId: string): Promise<BridgeCall> {

@@ -1,6 +1,7 @@
 import {
   createUserWithEmailAndPassword,
   onAuthStateChanged,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut as fbSignOut,
   updateProfile,
@@ -113,6 +114,13 @@ export async function firebaseEmailSignIn(input: { email: string; password: stri
   const auth = getFirebaseAuth();
   const cred = await signInWithEmailAndPassword(auth, input.email.trim(), input.password);
   return loadHostProfile(cred.user);
+}
+
+export async function firebaseSendPasswordReset(email: string) {
+  if (!isFirebaseReady()) throw new Error('Firebase is not configured.');
+  const trimmed = email.trim();
+  if (!trimmed.includes('@')) throw new Error('Enter a valid email address.');
+  await sendPasswordResetEmail(getFirebaseAuth(), trimmed);
 }
 
 export async function firebaseSignOut() {
