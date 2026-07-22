@@ -10,3 +10,10 @@ captures/
 *.aab
 *.keystore
 google-services.json
+
+# local SDK + build outputs
+local.properties
+.gradle/
+**/build/
+*.apk
+*.aab

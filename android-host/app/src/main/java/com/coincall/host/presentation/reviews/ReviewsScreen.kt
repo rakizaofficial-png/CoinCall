@@ -19,7 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier.Modifier
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.coincall.host.core.ui.components.HostCard
@@ -39,7 +39,7 @@ private val SAMPLE_REVIEWS = listOf(
 @Composable
 fun ReviewsScreen(onBack: () -> Unit, vm: DashboardViewModel = hiltViewModel()) {
     val state by vm.state.collectAsState()
-    Column(Modifier = Modifier.fillMaxSize().padding(16.dp)) {
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         SectionTitle("Reviews & ranking")
         MetricRow(
             listOf(
