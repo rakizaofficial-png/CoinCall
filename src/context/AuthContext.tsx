@@ -1,4 +1,3 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, {
   createContext,
   useCallback,
@@ -28,6 +27,11 @@ import {
   confirmPhoneOtp,
   sendPhoneOtp,
 } from '../services/phoneAuthService';
+import {
+  clearHostSession,
+  loadHostSession,
+  saveHostSession,
+} from '../services/sessionStore';
 import type { User } from '../types/models';
 import { callPriceForLevel } from '../utils/hostPricing';
 import { Platform } from 'react-native';
@@ -151,8 +155,6 @@ type AuthContextValue = {
   ) => Promise<User>;
 };
 
-const STORAGE_KEY = 'coincall_host_user_v1';
-
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 function createMockUser(
@@ -174,46 +176,56 @@ function createMockUser(
   };
 }
 
-async function persistMock(user: User | null) {
-  if (user) await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(user));
-  else await AsyncStorage.removeItem(STORAGE_KEY);
-}
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const usingFirebase = isFirebaseReady();
 
   useEffect(() => {
-    if (usingFirebase) {
-      const unsub = listenAuth((profile) => {
-        setUser(profile);
-        setAuthReady(true);
-      });
-      return unsub;
-    }
-
     let cancelled = false;
+    let unsub: (() => void) | undefined;
+
     (async () => {
-      try {
-        const raw = await AsyncStorage.getItem(STORAGE_KEY);
-        if (!cancelled && raw) {
-          const parsed = JSON.parse(raw) as User;
-          setUser({ ...parsed, hostStatus: parsed.hostStatus || 'none', role: 'host' });
-        }
-      } finally {
-        if (!cancelled) setAuthReady(true);
+      // Instant restore from secure/local session (auto-login)
+      const cached = await loadHostSession();
+      if (!cancelled && cached?.user) {
+        setUser({
+          ...cached.user,
+          hostStatus: cached.user.hostStatus || 'none',
+          role: 'host',
+        });
       }
+
+      if (usingFirebase) {
+        unsub = listenAuth((profile) => {
+          if (cancelled) return;
+          if (profile) {
+            setUser(profile);
+            void saveHostSession(profile, true);
+          }
+          // Keep cached session on null until explicit signOut clears it
+          setAuthReady(true);
+        });
+        setTimeout(() => {
+          if (!cancelled) setAuthReady(true);
+        }, 2500);
+        return;
+      }
+
+      if (!cancelled) setAuthReady(true);
     })();
+
     return () => {
       cancelled = true;
+      unsub?.();
     };
   }, [usingFirebase]);
 
   const setAuthUser = useCallback((next: User | null) => {
     setUser(next);
-    if (!usingFirebase) void persistMock(next);
-  }, [usingFirebase]);
+    if (next) void saveHostSession(next, true);
+    else void clearHostSession();
+  }, []);
 
   const signIn = useCallback(async (input: SignInInput) => {
     if (input.method === 'phone') {
@@ -225,6 +237,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       const profile = await confirmPhoneOtp(input.otp);
       setUser(profile);
+      void saveHostSession(profile, true);
       return;
     }
     if (!input.email?.trim() || !input.password?.trim()) {
@@ -237,6 +250,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         password: input.password,
       });
       setUser(profile);
+      void saveHostSession(profile, true);
       return;
     }
 
@@ -287,6 +301,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         password: input.password,
       });
       setUser(profile);
+      void saveHostSession(profile, true);
       return;
     }
 
@@ -303,8 +318,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (usingFirebase) {
       void firebaseSignOut();
     }
-    setAuthUser(null);
-  }, [setAuthUser, usingFirebase]);
+    void clearHostSession();
+    setUser(null);
+  }, [usingFirebase]);
 
   const submitHostApplication = useCallback(
     async (
@@ -410,6 +426,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           console.warn('Firebase save failed, keeping local pending state', fbErr);
         }
         setUser(patch);
+        void saveHostSession(patch, true);
         return;
       }
 

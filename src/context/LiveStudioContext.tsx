@@ -313,10 +313,11 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
           };
           if (p.toHostId && p.toHostId !== user.id) return;
           if (p.roomId && activeRoomId && p.roomId !== activeRoomId) return;
-          const overlay = {
+          const overlay: LiveGiftEvent = {
             id: `ws_${Date.now()}`,
-            fromUserId: String((event.payload as { fromUserId?: string }).fromUserId || 'fan'),
+            fromId: String((event.payload as { fromUserId?: string }).fromUserId || 'fan'),
             fromName: p.fromName || 'Fan',
+            fromAvatar: '',
             giftId: p.giftId || 'rose',
             giftName: p.giftName || 'Gift',
             giftEmoji: p.giftEmoji || '🎁',

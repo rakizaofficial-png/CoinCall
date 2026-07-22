@@ -14,7 +14,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   name: 'CoinCall Beauty',
   slug: 'coin-call',
   owner: 'salman112211',
-  version: '1.0.3',
+  version: '1.0.4',
   orientation: 'portrait',
   icon: './assets/icon.png',
   userInterfaceStyle: 'dark',
@@ -37,7 +37,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   android: {
     package: 'com.coincall.host',
-    versionCode: Number(process.env.ANDROID_VERSION_CODE || 4),
+    versionCode: Number(process.env.ANDROID_VERSION_CODE || 5),
     softwareKeyboardLayoutMode: 'resize',
     adaptiveIcon: {
       backgroundColor: '#1A0F16',
@@ -70,6 +70,15 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     'expo-dev-client',
     'expo-font',
     'expo-video',
+    'expo-secure-store',
+    [
+      'expo-notifications',
+      {
+        icon: './assets/icon.png',
+        color: '#F5C14C',
+        sounds: [],
+      },
+    ],
     [
       'expo-image-picker',
       {

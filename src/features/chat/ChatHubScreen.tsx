@@ -2,8 +2,10 @@ import { LinearGradient } from 'expo-linear-gradient';
 import {
   Bell,
   Headphones,
-  Mail,
+  Lock,
   Megaphone,
+  Pin,
+  ShieldCheck,
   X,
 } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
@@ -17,6 +19,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
@@ -59,6 +62,38 @@ function formatTime(ts: number) {
   }
   return `${mm}-${dd} ${hh}:${mi}`;
 }
+
+/** Always-pinned WhatsApp-style official chats */
+const PINNED = [
+  {
+    key: 'support',
+    title: 'Customer Support',
+    body: 'Help Center · tickets · admin chat',
+    color: '#3B82F6',
+    Icon: Headphones,
+    verified: true,
+    screen: 'HelpCenter' as const,
+    chat: {
+      peerId: 'admin_support',
+      peerName: 'Customer Support',
+      peerAvatar: '',
+    },
+  },
+  {
+    key: 'system',
+    title: 'System Information',
+    body: 'FAQ · App info · Report · Legal',
+    color: '#A855F7',
+    Icon: Bell,
+    verified: true,
+    screen: 'SystemInformation' as const,
+    chat: {
+      peerId: 'system_info',
+      peerName: 'System Information',
+      peerAvatar: '',
+    },
+  },
+];
 
 export function ChatHubScreen({ navigation }: { navigation: any }) {
   const insets = useSafeAreaInsets();
@@ -138,13 +173,6 @@ export function ChatHubScreen({ navigation }: { navigation: any }) {
   const adminUnread = inbox.filter(
     (i) => (i.type === 'support' || i.type === 'admin') && !i.read,
   ).length;
-  const stationUnread = inbox.filter(
-    (i) => i.type === 'live' || i.type === 'room' || i.type === 'station',
-  ).length;
-
-  const adminPreview =
-    inbox.find((i) => i.type === 'support' || i.type === 'admin')?.body ||
-    'Hi, Welcome to CoinCall';
 
   const sendMass = async () => {
     const text = massText.trim();
@@ -175,42 +203,6 @@ export function ChatHubScreen({ navigation }: { navigation: any }) {
     }
   };
 
-  const rows = [
-    {
-      key: 'station',
-      title: 'Station information',
-      body: '⚽ Live streamer ranking & room updates',
-      time: formatTime(Date.now()),
-      badge: stationUnread || undefined,
-      color: '#22C55E',
-      Icon: Mail,
-      onPress: () => navigation.navigate('Notifications'),
-    },
-    {
-      key: 'system',
-      title: 'System information',
-      body: 'App version · Host ID · server · legal',
-      time: formatTime(Date.now()),
-      badge: undefined,
-      color: '#A855F7',
-      Icon: Bell,
-      onPress: () => navigation.navigate('SystemInformation'),
-    },
-    {
-      key: 'admin',
-      title: 'Administrator',
-      body: adminPreview,
-      time: formatTime(
-        inbox.find((i) => i.type === 'support' || i.type === 'admin')?.createdAt ||
-          Date.now(),
-      ),
-      badge: adminUnread || undefined,
-      color: '#3B82F6',
-      Icon: Headphones,
-      onPress: () => navigation.navigate('HelpCenter'),
-    },
-  ];
-
   const massBadge = Math.max(activeCount, rechargeUsers.length, lastSent || 0, 1);
 
   return (
@@ -221,12 +213,55 @@ export function ChatHubScreen({ navigation }: { navigation: any }) {
         pointerEvents="none"
       />
 
-      <Text style={[styles.pageTitle, { color: colors.text }]}>Messages</Text>
+      <Text style={[styles.pageTitle, { color: colors.text }]}>Chats</Text>
+
+      {/* Pinned — cannot move */}
+      <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>
+        <Pin size={11} color={colors.textMuted} /> Pinned
+      </Text>
+      {PINNED.map((row, index) => (
+        <Animated.View key={row.key} entering={FadeInDown.delay(index * 60).springify()}>
+          <Pressable
+            onPress={() => {
+              navigation.navigate('DirectChat', row.chat);
+            }}
+            onLongPress={() => navigation.navigate(row.screen)}
+            style={[styles.row, styles.pinnedRow]}
+          >
+            <View style={[styles.iconOrb, { backgroundColor: row.color }]}>
+              <row.Icon size={22} color="#fff" />
+              <View style={styles.lockBadge}>
+                <Lock size={8} color="#fff" />
+              </View>
+            </View>
+            <View style={styles.rowBody}>
+              <View style={styles.rowTop}>
+                <View style={styles.titleRow}>
+                  <Text style={[styles.rowTitle, { color: colors.text }]}>{row.title}</Text>
+                  {row.verified ? <ShieldCheck size={14} color="#3B82F6" /> : null}
+                  <Pin size={12} color="rgba(255,255,255,0.35)" />
+                </View>
+                <Text style={styles.rowTime}>{formatTime(Date.now())}</Text>
+              </View>
+              <Text style={styles.rowPreview} numberOfLines={1}>
+                {row.body}
+              </Text>
+            </View>
+            {row.key === 'support' && adminUnread ? (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>
+                  {adminUnread > 99 ? '99+' : adminUnread}
+                </Text>
+              </View>
+            ) : null}
+          </Pressable>
+        </Animated.View>
+      ))}
 
       {activeFans.length > 0 ? (
-        <View style={{ marginBottom: 10 }}>
+        <View style={{ marginBottom: 10, marginTop: 8 }}>
           <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>
-            Active fans · tap to message
+            Active fans
           </Text>
           <FlatList
             horizontal
@@ -260,85 +295,55 @@ export function ChatHubScreen({ navigation }: { navigation: any }) {
         </View>
       ) : null}
 
-      {dmThreads.length > 0 ? (
-        <View style={{ marginBottom: 8 }}>
-          <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>Fan chats</Text>
-          {dmThreads.slice(0, 20).map((t) => {
+      <Text style={[styles.sectionLabel, { color: colors.textMuted, marginTop: 4 }]}>
+        Messages
+      </Text>
+
+      <View style={[styles.list, { paddingBottom: tabScreenBottomPad(insets.bottom) + 72 }]}>
+        {dmThreads.length > 0 ? (
+          dmThreads.slice(0, 40).map((t) => {
             const photo =
               t.userAvatar ||
               `https://api.dicebear.com/9.x/avataaars/png?seed=${encodeURIComponent(t.userId)}&size=128`;
             return (
-            <Pressable
-              key={t.id}
-              onPress={() =>
-                navigation.navigate('DirectChat', {
-                  peerId: t.userId,
-                  peerName: t.userName,
-                  peerAvatar: t.userAvatar || photo,
-                })
-              }
-              style={[styles.row, { borderBottomColor: 'rgba(255,255,255,0.06)' }]}
-            >
-              <Image source={{ uri: photo }} style={styles.threadAvatar} />
-              <View style={styles.rowBody}>
-                <View style={styles.rowTop}>
-                  <Text style={[styles.rowTitle, { color: colors.text }]}>
-                    {t.userName || 'Fan'}
+              <Pressable
+                key={t.id}
+                onPress={() =>
+                  navigation.navigate('DirectChat', {
+                    peerId: t.userId,
+                    peerName: t.userName,
+                    peerAvatar: t.userAvatar || photo,
+                  })
+                }
+                style={[styles.row, { borderBottomColor: 'rgba(255,255,255,0.06)' }]}
+              >
+                <Image source={{ uri: photo }} style={styles.threadAvatar} />
+                <View style={styles.rowBody}>
+                  <View style={styles.rowTop}>
+                    <Text style={[styles.rowTitle, { color: colors.text }]}>
+                      {t.userName || 'Fan'}
+                    </Text>
+                    <Text style={styles.rowTime}>{formatTime(t.updatedAt)}</Text>
+                  </View>
+                  <Text style={styles.rowPreview} numberOfLines={1}>
+                    {t.lastMessage}
                   </Text>
-                  <Text style={styles.rowTime}>{formatTime(t.updatedAt)}</Text>
                 </View>
-                <Text style={styles.rowPreview} numberOfLines={1}>
-                  {t.lastMessage}
-                </Text>
-              </View>
-            </Pressable>
+              </Pressable>
             );
-          })}
-        </View>
-      ) : (
-        <Text style={[styles.emptyFans, { color: colors.textMuted }]}>
-          Fan messages from Luma appear here.
-        </Text>
-      )}
-
-      <View style={[styles.list, { paddingBottom: tabScreenBottomPad(insets.bottom) + 72 }]}>
-        {rows.map((row) => (
-          <Pressable
-            key={row.key}
-            onPress={row.onPress}
-            style={[styles.row, { borderBottomColor: 'rgba(255,255,255,0.06)' }]}
-          >
-            <View style={[styles.iconOrb, { backgroundColor: row.color }]}>
-              <row.Icon size={22} color="#fff" />
-            </View>
-            <View style={styles.rowBody}>
-              <View style={styles.rowTop}>
-                <Text style={[styles.rowTitle, { color: colors.text }]}>{row.title}</Text>
-                <Text style={styles.rowTime}>{row.time}</Text>
-              </View>
-              <Text style={styles.rowPreview} numberOfLines={1}>
-                {row.body}
-              </Text>
-            </View>
-            {row.badge ? (
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>
-                  {row.badge > 99 ? '99+' : row.badge}
-                </Text>
-              </View>
-            ) : null}
-          </Pressable>
-        ))}
+          })
+        ) : (
+          <Text style={[styles.emptyFans, { color: colors.textMuted }]}>
+            Fan messages from Luma appear here.
+          </Text>
+        )}
       </View>
 
       <Pressable
         style={[styles.fabWrap, { bottom: tabScreenBottomPad(insets.bottom) }]}
         onPress={() => setMassOpen(true)}
       >
-        <LinearGradient
-          colors={['#FF4D8D', '#FF2A7A', '#C026D3']}
-          style={styles.fab}
-        >
+        <LinearGradient colors={['#FF4D8D', '#FF2A7A', '#C026D3']} style={styles.fab}>
           <Megaphone size={28} color="#fff" />
           <View style={styles.fabBadge}>
             <Text style={styles.fabBadgeText}>{massBadge > 99 ? '99+' : massBadge}</Text>
@@ -359,7 +364,6 @@ export function ChatHubScreen({ navigation }: { navigation: any }) {
             <Text style={styles.sheetSub}>
               Send one message to active users only
               {activeCount ? ` · ${activeCount} online` : ' · none online'}
-              {rechargeUsers.length ? ` · ${rechargeUsers.length} rechargers (not targeted)` : ''}
             </Text>
             <TextInput
               style={styles.massInput}
@@ -392,7 +396,7 @@ export function ChatHubScreen({ navigation }: { navigation: any }) {
 
 const styles = StyleSheet.create({
   root: { flex: 1, paddingHorizontal: 16 },
-  pageTitle: { fontSize: 28, fontWeight: '900', marginBottom: 12 },
+  pageTitle: { fontSize: 28, fontWeight: '900', marginBottom: 8 },
   sectionLabel: {
     fontSize: 12,
     fontWeight: '700',
@@ -408,7 +412,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
     gap: 12,
+  },
+  pinnedRow: {
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    marginHorizontal: -8,
+    paddingHorizontal: 8,
+    borderRadius: 14,
+    borderBottomWidth: 0,
+    marginBottom: 4,
   },
   iconOrb: {
     width: 52,
@@ -417,16 +430,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  lockBadge: {
+    position: 'absolute',
+    right: -2,
+    bottom: -2,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#111827',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 4, flexShrink: 1 },
   threadAvatar: {
     width: 52,
     height: 52,
     borderRadius: 26,
     backgroundColor: 'rgba(255,255,255,0.08)',
   },
-  fanChip: {
-    width: 76,
-    alignItems: 'center',
-  },
+  fanChip: { width: 76, alignItems: 'center' },
   fanChipAvatar: {
     width: 58,
     height: 58,
@@ -495,8 +519,6 @@ const styles = StyleSheet.create({
     color: '#F5C14C',
     fontWeight: '900',
     fontSize: 12,
-    textShadowColor: 'rgba(255,42,122,0.6)',
-    textShadowRadius: 6,
   },
   modalBg: {
     flex: 1,
@@ -539,15 +561,4 @@ const styles = StyleSheet.create({
   },
   sendMassText: { color: '#1a1200', fontWeight: '900', fontSize: 15 },
   sentHint: { color: '#34D399', textAlign: 'center', marginTop: 10, fontWeight: '700' },
-  rechargeRow: {
-    flexDirection: 'row',
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(255,255,255,0.08)',
-    gap: 10,
-  },
-  rechargeId: { color: '#F5C14C', fontWeight: '800', fontSize: 13 },
-  rechargeName: { color: 'rgba(255,255,255,0.6)', fontSize: 12, marginTop: 2 },
-  rechargeCoins: { color: '#fff', fontWeight: '900', fontSize: 16 },
-  rechargeTotal: { color: 'rgba(255,255,255,0.45)', fontSize: 11, marginTop: 2 },
 });

@@ -150,19 +150,25 @@ export async function startAgoraCall(options: StartAgoraCallOptions) {
     throw new Error('Missing API base URL for Agora token');
   }
 
-  await stopAgoraCall();
-
-  const tokenPayload =
+  // Fetch token in parallel with engine warm-up to cut black-screen delay
+  const tokenPromise =
     options.token && options.appId
-      ? {
+      ? Promise.resolve({
           token: options.token,
           appId: options.appId,
           uid: options.uid ?? 0,
           channel: options.channel,
-        }
-      : await fetchRtcToken(options.channel, options.uid ?? 0, 'publisher');
+        })
+      : fetchRtcToken(options.channel, options.uid ?? 0, 'publisher');
 
-  const appId = tokenPayload.appId || env.agora.appId;
+  // Keep existing engine if already warm — avoid destroy/recreate flash
+  const appIdHint = options.appId || env.agora.appId;
+  if (engine && joined) {
+    await stopAgoraCall();
+  }
+
+  const tokenPayload = await tokenPromise;
+  const appId = tokenPayload.appId || appIdHint;
   if (!appId) {
     throw new Error('Missing Agora App ID');
   }
@@ -177,6 +183,7 @@ export async function startAgoraCall(options: StartAgoraCallOptions) {
       : Math.floor(100000 + Math.random() * 800000);
   localUid = uid;
 
+  // Preview first so surface paints immediately (no black frame)
   rtc.enableLocalVideo(true);
   rtc.startPreview();
   applyNativeBeauty(preset);

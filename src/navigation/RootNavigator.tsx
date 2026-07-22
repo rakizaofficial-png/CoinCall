@@ -4,6 +4,7 @@ import {
   NavigationContainer,
 } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { useEffect } from 'react';
 import { IncomingCallModal } from '../components/IncomingCallModal';
 import { SplashScreen } from '../components/ui/SplashScreen';
 import { AppProvider, useApp } from '../context/AppContext';
@@ -65,6 +66,18 @@ function GoLiveRoute({ navigation }: any) {
 
 function AuthenticatedApp() {
   const { user } = useAuth();
+  useEffect(() => {
+    if (!user?.id) return;
+    let unsub: (() => void) | undefined;
+    void import('../services/hostPushService').then(({ registerHostPushToken, listenHostPush }) => {
+      void registerHostPushToken(user.id);
+      unsub = listenHostPush((title, body) => {
+        void import('../utils/notify').then(({ notify }) => notify(title, body));
+      });
+    });
+    return () => unsub?.();
+  }, [user?.id]);
+
   if (!user) return null;
 
   return (

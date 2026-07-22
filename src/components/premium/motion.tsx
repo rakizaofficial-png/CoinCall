@@ -61,7 +61,7 @@ export function PressableScale({
   children,
   style,
   ...rest
-}: PressableProps & { children: ReactNode }) {
+}: PressableProps & { children: ReactNode; style?: ViewStyle }) {
   const scale = useSharedValue(1);
   const anim = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
 
@@ -77,7 +77,7 @@ export function PressableScale({
         rest.onPressOut?.(e);
       }}
     >
-      <Animated.View style={[style, anim]}>{children}</Animated.View>
+      <Animated.View style={[style as ViewStyle, anim]}>{children}</Animated.View>
     </Pressable>
   );
 }

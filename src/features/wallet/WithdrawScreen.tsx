@@ -21,6 +21,10 @@ import {
 import { radii } from '../../theme/colors';
 import { useTheme } from '../../theme/ThemeContext';
 import { notify } from '../../utils/notify';
+import {
+  WithdrawPremiumModal,
+  type WithdrawModalState,
+} from './WithdrawPremiumModal';
 
 type HistoryItem = {
   id: string;
@@ -51,6 +55,7 @@ export function WithdrawScreen({ navigation }: { navigation: any }) {
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [filter, setFilter] = useState<'all' | 'pending' | 'paid' | 'failed'>('all');
+  const [modal, setModal] = useState<WithdrawModalState>({ visible: false });
 
   const refresh = useCallback(async () => {
     try {
@@ -69,7 +74,15 @@ export function WithdrawScreen({ navigation }: { navigation: any }) {
     const code = String(100000 + Math.floor(Math.random() * 900000));
     setOtpCode(code);
     setOtpSent(true);
-    notify('OTP sent', `Verification code: ${code}`);
+    setOtp(code);
+    setModal({
+      visible: true,
+      mode: 'otp',
+      title: 'Verify withdrawal',
+      message: 'Enter this one-time code to protect your cash-out.',
+      otpHint: code,
+      amountCoins: Math.floor(Number(amount) || 0) || undefined,
+    });
   };
 
   const submit = async () => {
@@ -122,7 +135,13 @@ export function WithdrawScreen({ navigation }: { navigation: any }) {
         displayName: user.name,
       });
       if (!result.ok) {
-        notify('Failed', result.error || 'Payout rejected');
+        setModal({
+          visible: true,
+          mode: 'error',
+          title: 'Withdrawal failed',
+          message: result.error || 'Payout rejected by server.',
+          amountCoins: coins,
+        });
         return;
       }
       const next = result.wallet?.coinBalance ?? user.coinBalance - coins;
@@ -132,13 +151,24 @@ export function WithdrawScreen({ navigation }: { navigation: any }) {
         title: 'Withdrawal submitted',
         body: `${coins} coins via ${gateway} · ${result.withdrawal?.status}`,
       });
-      notify('Submitted', `Status: ${result.withdrawal?.status}`);
+      setModal({
+        visible: true,
+        mode: 'success',
+        title: 'Submitted successfully',
+        message: `Status: ${result.withdrawal?.status}. Coins reserved pending admin review.`,
+        amountCoins: coins,
+      });
       setOtp('');
       setOtpSent(false);
       setAmount(String(Math.max(0, next)));
       await refresh();
     } catch (e) {
-      notify('Error', e instanceof Error ? e.message : 'Network error');
+      setModal({
+        visible: true,
+        mode: 'error',
+        title: 'Network error',
+        message: e instanceof Error ? e.message : 'Could not reach payout server.',
+      });
     } finally {
       setBusy(false);
     }
@@ -154,6 +184,7 @@ export function WithdrawScreen({ navigation }: { navigation: any }) {
   });
 
   return (
+    <>
     <Screen
       scroll
       contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 40 }}
@@ -295,6 +326,18 @@ export function WithdrawScreen({ navigation }: { navigation: any }) {
         ))
       )}
     </Screen>
+    <WithdrawPremiumModal
+      state={modal}
+      onClose={() => setModal({ visible: false })}
+      onConfirm={() => {
+        setModal({ visible: false });
+        if (modal.visible && modal.mode === 'otp') {
+          void submit();
+        }
+      }}
+      onViewHistory={() => setModal({ visible: false })}
+    />
+    </>
   );
 }
 

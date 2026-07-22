@@ -17,6 +17,7 @@ import {
   Wallet,
 } from 'lucide-react-native';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Avatar } from '../../components/ui/Avatar';
 import { GlassCard } from '../../components/ui/GlassCard';
@@ -68,6 +69,7 @@ export function ProfileScreen({ navigation }: { navigation: any }) {
 
   return (
     <Screen tabBar scroll skipTopInset contentContainerStyle={{ paddingTop: 0 }}>
+      <Animated.View entering={FadeInDown.springify().damping(18)}>
       <LinearGradient
         colors={[`${colors.primary}88`, `${colors.accent}33`, colors.bg]}
         style={[styles.heroBg, { paddingTop: insets.top + 10 }]}
@@ -126,6 +128,7 @@ export function ProfileScreen({ navigation }: { navigation: any }) {
           style={{ marginTop: 14, alignSelf: 'stretch', marginHorizontal: 8 }}
         />
       </LinearGradient>
+      </Animated.View>
 
       <View style={styles.stats}>
         {[

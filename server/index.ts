@@ -884,6 +884,39 @@ function handleHostProfileUpdate(req: express.Request, res: express.Response) {
 app.put('/api/hosts/:hostId/profile', handleHostProfileUpdate);
 app.post('/api/hosts/:hostId/profile', handleHostProfileUpdate);
 
+/** Register Expo/FCM push token for host notifications */
+const hostPushTokens = new Map<string, { token: string; platform: string; updatedAt: number; categories: string[] }>();
+
+app.post('/api/hosts/:hostId/push-token', (req, res) => {
+  const hostId = String(req.params.hostId || '').trim();
+  if (!hostId) {
+    res.status(400).json({ error: 'hostId required' });
+    return;
+  }
+  if (!requireUserMatch(req, res, hostId)) return;
+  const token = String(req.body?.token || '').trim();
+  if (!token) {
+    res.status(400).json({ error: 'token required' });
+    return;
+  }
+  hostPushTokens.set(hostId, {
+    token,
+    platform: String(req.body?.platform || 'unknown'),
+    updatedAt: Date.now(),
+    categories: Array.isArray(req.body?.categories)
+      ? req.body.categories.map(String)
+      : ['chat', 'call', 'gift', 'coin', 'withdrawal', 'announcement', 'live'],
+  });
+  persist();
+  res.json({ ok: true });
+});
+
+app.get('/api/hosts/:hostId/push-token', (req, res) => {
+  const hostId = String(req.params.hostId || '').trim();
+  const row = hostPushTokens.get(hostId);
+  res.json({ ok: true, registered: Boolean(row), token: row || null });
+});
+
 /** Host SSE stream for incoming user calls */
 app.get('/api/hosts/:hostId/stream', (req, res) => {
   const hostId = String(req.params.hostId);

@@ -286,9 +286,9 @@ export function GoLiveScreen({ navigation, mode = 'solo' }: Props) {
             <View style={styles.lockLeft}>
               <Lock size={18} color={goLiveDraft.entryLocked ? '#F5C14C' : colors.textMuted} />
               <View style={{ flex: 1 }}>
-                <Text style={[styles.lockTitle, { color: colors.text }]}>Lock Live by Coins</Text>
+                <Text style={[styles.lockTitle, { color: colors.text }]}>Premium Live Lock</Text>
                 <Text style={[styles.hint, { color: colors.textMuted, marginTop: 2 }]}>
-                  Fans pay coins before entering your room
+                  Fans must pay coins before entering
                 </Text>
               </View>
             </View>
@@ -301,17 +301,29 @@ export function GoLiveScreen({ navigation, mode = 'solo' }: Props) {
           </View>
 
           {goLiveDraft.entryLocked ? (
-            <View style={styles.feeRow}>
-              <Text style={[styles.label, { color: colors.textSecondary }]}>Entry fee (coins)</Text>
-              <TextInput
-                style={[styles.feeInput, { color: colors.text, borderColor: colors.border }]}
-                keyboardType="number-pad"
-                value={String(goLiveDraft.entryFee || 50)}
-                onChangeText={(v) => {
-                  const n = Math.max(10, Math.min(9999, Number(v.replace(/\D/g, '')) || 0));
-                  setGoLiveDraft({ entryFee: n });
-                }}
-              />
+            <View style={styles.feePresets}>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>
+                Entry fee
+              </Text>
+              <View style={styles.presetRow}>
+                {[50, 100, 500, 1000, 5000].map((fee) => {
+                  const on = goLiveDraft.entryFee === fee;
+                  return (
+                    <Pressable
+                      key={fee}
+                      onPress={() => setGoLiveDraft({ entryFee: fee, entryLocked: true })}
+                      style={[styles.presetChip, on && styles.presetChipOn]}
+                    >
+                      <Text style={[styles.presetText, on && styles.presetTextOn]}>
+                        {fee >= 1000 ? `${fee / 1000}k` : fee}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <Text style={[styles.hint, { color: '#F5C14C', marginTop: 8 }]}>
+                🔒 {goLiveDraft.entryFee} coins required · verified on server
+              </Text>
             </View>
           ) : null}
 
@@ -428,14 +440,22 @@ const styles = StyleSheet.create({
   },
   lockLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
   lockTitle: { fontWeight: '800', fontSize: 14 },
-  feeRow: { marginTop: 10 },
-  feeInput: {
-    borderWidth: 1,
-    borderRadius: 14,
+  feePresets: { marginTop: 10 },
+  presetRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  presetChip: {
     paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontWeight: '800',
-    fontSize: 18,
-    backgroundColor: 'rgba(245,193,76,0.08)',
+    paddingVertical: 10,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    minWidth: 58,
+    alignItems: 'center',
   },
+  presetChipOn: {
+    backgroundColor: 'rgba(245,193,76,0.18)',
+    borderColor: '#F5C14C',
+  },
+  presetText: { color: 'rgba(255,255,255,0.7)', fontWeight: '800', fontSize: 14 },
+  presetTextOn: { color: '#F5C14C' },
 });

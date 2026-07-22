@@ -1,7 +1,15 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
-import { getAuth, type Auth } from 'firebase/auth';
+import {
+  getAuth,
+  initializeAuth,
+  // @ts-expect-error — RN persistence export exists in firebase/auth for react-native
+  getReactNativePersistence,
+  type Auth,
+} from 'firebase/auth';
 import { getDatabase, type Database } from 'firebase/database';
 import { getStorage, type FirebaseStorage } from 'firebase/storage';
+import { Platform } from 'react-native';
 import { env } from '../config/env';
 
 let app: FirebaseApp | null = null;
@@ -40,8 +48,25 @@ export function getFirebaseApp() {
   return app;
 }
 
+/**
+ * Persistent Firebase Auth on native — survives app kill/relaunch.
+ * Web uses default IndexedDB persistence via getAuth().
+ */
 export function getFirebaseAuth() {
-  if (!auth) auth = getAuth(getFirebaseApp());
+  if (auth) return auth;
+  const firebaseApp = getFirebaseApp();
+  if (Platform.OS === 'web') {
+    auth = getAuth(firebaseApp);
+    return auth;
+  }
+  try {
+    auth = initializeAuth(firebaseApp, {
+      persistence: getReactNativePersistence(AsyncStorage),
+    });
+  } catch {
+    // Already initialized (Fast Refresh / second call)
+    auth = getAuth(firebaseApp);
+  }
   return auth;
 }
 
