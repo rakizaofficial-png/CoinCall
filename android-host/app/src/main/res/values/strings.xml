@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">CoinCall Host</string>
+    <string name="nav_home">Home</string>
+    <string name="nav_calls">Calls</string>
+    <string name="nav_wallet">Wallet</string>
+    <string name="nav_chat">Chat</string>
+    <string name="nav_profile">Profile</string>
+    <string name="go_online">Go Online</string>
+    <string name="go_offline">Go Offline</string>
+    <string name="today_earnings">Today\'s earnings</string>
+    <string name="withdraw">Withdraw</string>
+    <string name="help_center">Help Center</string>
+    <string name="secure_session">Secure host session</string>
+</resources>
