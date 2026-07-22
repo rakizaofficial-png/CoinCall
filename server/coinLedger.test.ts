@@ -246,4 +246,36 @@ function seed(userId: string, coins: number) {
   assert.equal(store.get('u1')!.coinBalance, 220);
 }
 
+// --- live_entry transfer (pay-to-enter live) ---
+{
+  reset();
+  seed('viewer', 500);
+  seed('host', 0);
+  const d = deps();
+  const xfer = transferUserToHost(d, {
+    txnKey: 'live_entry:room1:viewer:1000',
+    type: 'live_entry',
+    userId: 'viewer',
+    hostId: 'host',
+    gross: 100,
+    reason: 'live_entry_room1',
+    meta: { roomId: 'live_host', sessionStartedAt: 1000 },
+  });
+  assert.equal(xfer.ok, true);
+  assert.equal(store.get('viewer')!.coinBalance, 400);
+  assert.equal(xfer.txn.coinsCreditedHost, 70); // 30% platform cut default
+  assert.equal(xfer.txn.coinsCreditedPlatform, 30);
+  // idempotent replay
+  const again = transferUserToHost(d, {
+    txnKey: 'live_entry:room1:viewer:1000',
+    type: 'live_entry',
+    userId: 'viewer',
+    hostId: 'host',
+    gross: 100,
+    reason: 'live_entry_room1',
+  });
+  assert.equal(again.ok, true);
+  assert.equal(store.get('viewer')!.coinBalance, 400);
+}
+
 console.log('coinLedger.test.ts: all scenarios passed');
