@@ -203,6 +203,7 @@ export async function runHostAction(
     reason?: string;
     docsMessage?: string;
     commissionRate?: number;
+    callPrice?: number;
     coinBalance?: number;
     name?: string;
     hostId?: string;

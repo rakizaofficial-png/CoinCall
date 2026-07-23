@@ -981,14 +981,20 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
   const updateRoomLock = useCallback(
     async (opts: { entryLocked: boolean; entryFee: number }) => {
       if (!myLiveRoom) return;
-      await updateLiveRoomLock(myLiveRoom.id, user.id, opts);
+      const normalized = {
+        entryLocked: opts.entryLocked,
+        entryFee: opts.entryLocked
+          ? Math.max(10, Math.min(9999, Math.floor(opts.entryFee) || 50))
+          : 0,
+      };
+      await updateLiveRoomLock(myLiveRoom.id, user.id, normalized);
       setMyLiveRoom((r) =>
-        r ? { ...r, entryLocked: opts.entryLocked, entryFee: opts.entryLocked ? opts.entryFee : 0 } : r,
+        r ? { ...r, ...normalized } : r,
       );
       setLiveRooms((list) =>
         list.map((r) =>
           r.id === myLiveRoom.id
-            ? { ...r, entryLocked: opts.entryLocked, entryFee: opts.entryLocked ? opts.entryFee : 0 }
+            ? { ...r, ...normalized }
             : r,
         ),
       );

@@ -26,7 +26,7 @@ export function IntroVideoPreview({
       style={[styles.video, style]}
       contentFit={contentFit}
       nativeControls
-      allowsFullscreen
+      fullscreenOptions={{ enable: true }}
     />
   );
 }

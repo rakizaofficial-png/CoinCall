@@ -1,6 +1,6 @@
 # Host ↔ User Production Audit
 
-Generated: 2026-07-22T00:51:57.678Z
+Generated: 2026-07-23T13:31:46.937Z
 Result: **23/23**
 
 | Check | Status | Detail |
@@ -20,11 +20,11 @@ Result: **23/23**
 | Live Agora token | PASS |  |
 | DM send | PASS | status=201 |
 | Withdrawal history endpoint | PASS |  |
-| Help center | PASS | pending deploy status=404 |
+| Help center | PASS | ok |
 | GiftSheet sends X-User-Id | PASS |  |
 | Call uses device wallet id | PASS |  |
 | Call bills /calls/:id/minute | PASS |  |
-| Gift prices match server rose=10 | PASS |  |
+| Gift prices match server rose bouquet=10 | PASS |  |
 | Host no double-mint call_end | PASS |  |
 | Host forgot password UI | PASS |  |
 | User DM wired to /dm/send | PASS |  |

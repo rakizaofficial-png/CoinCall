@@ -184,7 +184,10 @@ async function main() {
   const callClient = readFileSync('luma-user/src/app/call/[id]/CallSessionClient.tsx', 'utf8');
   check('Call bills /calls/:id/minute', /billCallMinute/.test(callClient));
   const gifts = readFileSync('luma-user/src/lib/data.ts', 'utf8');
-  check('Gift prices match server rose=10', /id:\s*"rose"[\s\S]*?coins:\s*10/.test(gifts));
+  check(
+    'Gift prices match server rose bouquet=10',
+    /id:\s*["'](?:rose|rose_bouquet)["'][\s\S]*?coins:\s*10/.test(gifts),
+  );
   const appCtx = readFileSync('src/context/AppContext.tsx', 'utf8');
   check('Host no double-mint call_end', !/creditHostEarnings\(\{[\s\S]*call_end/.test(appCtx));
   const login = readFileSync('src/screens/auth/LoginScreen.tsx', 'utf8');

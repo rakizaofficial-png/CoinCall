@@ -3626,17 +3626,11 @@ app.get('/api/admin/stats', (req, res) => {
       .filter((e) => e.at >= dayStart - dayMs && e.at < dayStart + dayMs)
       .reduce((s, e) => s + e.amount, 0);
     const dayTotal = dayPaid + dayGifts;
-    seriesRevenue.push(
-      dayTotal > 0 ? dayTotal : Math.max(40, Math.round((7 - i) * 120 + onlineHosts * 15)),
-    );
+    seriesRevenue.push(dayTotal);
     seriesUsers.push(
-      Math.max(
-        1,
-        Math.round(
-          (userWallets.length || 8) * (0.45 + (6 - i) * 0.07) +
-            (recentlyActive || 0) * 0.25,
-        ),
-      ),
+      [...activeUsers.values()].filter(
+        (u) => u.lastSeen >= dayStart - dayMs && u.lastSeen < dayStart + dayMs,
+      ).length,
     );
   }
   res.json({

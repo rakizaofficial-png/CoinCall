@@ -455,6 +455,7 @@ export type HostAction =
   | 'block_withdrawals'
   | 'enable_gifts'
   | 'disable_gifts'
+  | 'set_call_price'
   | 'set_commission'
   | 'set_coins'
   | 'record_login';
@@ -468,6 +469,7 @@ export function applyHostAction(
     reason?: string;
     docsMessage?: string;
     commissionRate?: number;
+    callPrice?: number;
     coinBalance?: number;
     login?: { ip?: string; device?: string; platform?: string; model?: string; appVersion?: string };
     broadcast?: Broadcast;
@@ -644,6 +646,19 @@ export function applyHostAction(
       break;
     case 'disable_gifts':
       row.giftsEnabled = false;
+      break;
+    case 'set_call_price':
+      if (
+        typeof opts.callPrice === 'number' &&
+        Number.isFinite(opts.callPrice)
+      ) {
+        row.callPrice = Math.min(9999, Math.max(1, Math.floor(opts.callPrice)));
+        notifyHost(hostUid, {
+          type: 'call_price_updated',
+          title: 'Call price updated',
+          body: `Your call rate is now ${row.callPrice} coins per minute.`,
+        });
+      }
       break;
     case 'set_commission':
       if (typeof opts.commissionRate === 'number') {
@@ -980,6 +995,7 @@ export function registerHostManagementRoutes(
     }
     if (
       (action === 'reset_earnings' ||
+        action === 'set_call_price' ||
         action === 'set_commission' ||
         action === 'freeze_wallet') &&
       !canFinance(adminRole)
@@ -1012,6 +1028,8 @@ export function registerHostManagementRoutes(
         req.body?.commissionRate != null
           ? Number(req.body.commissionRate)
           : undefined,
+      callPrice:
+        req.body?.callPrice != null ? Number(req.body.callPrice) : undefined,
       coinBalance:
         req.body?.coinBalance != null ? Number(req.body.coinBalance) : undefined,
       broadcast: broadcastWs,

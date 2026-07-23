@@ -119,7 +119,7 @@ export function HostManagementPanel({
   const [msg, setMsg] = useState('');
   const [form, setForm] = useState<
     | null
-    | { type: 'docs' | 'commission' | 'coins'; host: ManagedHost }
+    | { type: 'docs' | 'price' | 'commission' | 'coins'; host: ManagedHost }
   >(null);
   const [formValue, setFormValue] = useState('');
   const optimisticRef = useRef<Map<string, Partial<ManagedHost>>>(new Map());
@@ -291,6 +291,7 @@ export function HostManagementPanel({
       reason?: string;
       docsMessage?: string;
       commissionRate?: number;
+      callPrice?: number;
       coinBalance?: number;
     },
   ) => {
@@ -418,6 +419,13 @@ export function HostManagementPanel({
       await act(host.id, 'request_docs', {
         docsMessage: formValue.trim() || 'Please upload verification documents',
       });
+    } else if (type === 'price') {
+      const n = Number(formValue);
+      if (!Number.isFinite(n) || n < 1 || n > 9999) {
+        flash('Price must be between 1 and 9,999 coins');
+        return;
+      }
+      await act(host.id, 'set_call_price', { callPrice: n });
     } else if (type === 'commission') {
       const n = Number(formValue);
       if (!Number.isFinite(n)) {
@@ -768,7 +776,9 @@ export function HostManagementPanel({
                 onOpenForm={(type) => {
                   setForm({ type, host: detail });
                   setFormValue(
-                    type === 'commission'
+                    type === 'price'
+                      ? String(detail.callPrice ?? 80)
+                      : type === 'commission'
                       ? String(detail.commissionRate ?? 0.3)
                       : type === 'coins'
                         ? String(detail.coinBalance ?? 0)
@@ -821,6 +831,8 @@ export function HostManagementPanel({
         title={
           form?.type === 'docs'
             ? 'Request documents'
+            : form?.type === 'price'
+              ? 'Set host call price'
             : form?.type === 'commission'
               ? 'Set commission'
               : 'Set coin balance'
@@ -846,6 +858,8 @@ export function HostManagementPanel({
           label={
             form?.type === 'docs'
               ? 'Message to host'
+              : form?.type === 'price'
+                ? 'Coins per minute (1–9,999)'
               : form?.type === 'commission'
                 ? 'Rate (0–1)'
                 : 'Coin balance'
@@ -896,7 +910,7 @@ function HostDetail({
       coinBalance?: number;
     },
   ) => void;
-  onOpenForm: (type: 'docs' | 'commission' | 'coins') => void;
+  onOpenForm: (type: 'docs' | 'price' | 'commission' | 'coins') => void;
 }) {
   const photos = host.photoUrls?.length
     ? host.photoUrls
@@ -1137,6 +1151,14 @@ function HostDetail({
 
               <h4>Controls</h4>
               <div className="actions hm-perm">
+                <button
+                  type="button"
+                  disabled={busy}
+                  className="btn-pink"
+                  onClick={() => onOpenForm('price')}
+                >
+                  Call price · {host.callPrice ?? 80}/min
+                </button>
                 <button
                   type="button"
                   disabled={busy}

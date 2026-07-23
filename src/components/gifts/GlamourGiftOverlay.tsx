@@ -204,13 +204,21 @@ export function GlamourGiftOverlay({ item, onDone }: Props) {
 
 const styles = StyleSheet.create({
   root: {
-    ...StyleSheet.absoluteFillObject,
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
     zIndex: 80,
     justifyContent: 'center',
     alignItems: 'center',
   },
   vignette: {
-    ...StyleSheet.absoluteFillObject,
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
   },
   center: {
     width: '100%',

@@ -262,7 +262,7 @@ export async function postRoomComment(roomId: string, comment: Omit<LiveComment,
     const r = push(ref(getFirebaseDb(), `liveRooms/${roomId}/comments`));
     await set(r, comment);
   }
-  await fetch(`${api()}/live/rooms/${encodeURIComponent(roomId)}/comments`, {
+  const response = await fetch(`${api()}/live/rooms/${encodeURIComponent(roomId)}/comments`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -271,7 +271,11 @@ export async function postRoomComment(roomId: string, comment: Omit<LiveComment,
       text: comment.text,
       hostId: roomId.replace(/^live_/, ''),
     }),
-  }).catch(() => undefined);
+  });
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new Error(body || `Chat failed (${response.status})`);
+  }
 }
 
 export function listenRoomGifts(
@@ -422,13 +426,10 @@ export async function updateLiveRoomLock(
   hostId: string,
   opts: { entryLocked: boolean; entryFee: number },
 ) {
-  if (isFirebaseReady()) {
-    await update(ref(getFirebaseDb(), `liveRooms/${roomId}`), {
-      entryLocked: opts.entryLocked,
-      entryFee: opts.entryLocked ? Math.max(1, opts.entryFee) : 0,
-    }).catch(() => undefined);
-  }
-  await fetch(`${api()}/live/rooms/${encodeURIComponent(roomId)}/lock`, {
+  const entryFee = opts.entryLocked
+    ? Math.max(10, Math.min(9999, Math.floor(opts.entryFee) || 50))
+    : 0;
+  const response = await fetch(`${api()}/live/rooms/${encodeURIComponent(roomId)}/lock`, {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
@@ -436,7 +437,17 @@ export async function updateLiveRoomLock(
     },
     body: JSON.stringify({
       entryLocked: opts.entryLocked,
-      entryFee: opts.entryLocked ? Math.max(1, opts.entryFee) : 0,
+      entryFee,
     }),
-  }).catch(() => undefined);
+  });
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new Error(body || `Live lock failed (${response.status})`);
+  }
+  if (isFirebaseReady()) {
+    await update(ref(getFirebaseDb(), `liveRooms/${roomId}`), {
+      entryLocked: opts.entryLocked,
+      entryFee,
+    });
+  }
 }
