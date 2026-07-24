@@ -155,7 +155,9 @@ function PageHead({
 
 /** Modern agency-grade web admin control center */
 export default function App() {
-  const agencyPortal = window.location.pathname.startsWith('/agency');
+  const agencyPortal =
+  window.location.hostname === 'agency.nexcapital.xyz' ||
+  window.location.pathname.startsWith('/agency');
   const [authed, setAuthed] = useState(() => localStorage.getItem('cc_admin') === '1');
   const [loginMode] = useState<'admin' | 'agency'>(
     agencyPortal ? 'agency' : 'admin',
