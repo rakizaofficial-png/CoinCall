@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { fetchBridgeHosts, fetchManagedHosts } from './hostApi';
 import {
-  adminLogin,
+  staffLogin,
   connectAdminRealtime,
   endBridgeCallAdmin,
   endCallRemote,
@@ -38,10 +38,11 @@ import {
 } from './components/LiveMonitorDock';
 import { MoneyDesk } from './components/MoneyDesk';
 import { RevenuePanel } from './components/RevenuePanel';
+import { PricingPanel } from './components/PricingPanel';
 import { UsersWalletsPanel } from './components/UsersWallets';
 import { VideoLibraryPanel } from './components/VideoLibraryPanel';
 import { HomeBannersPanel } from './components/HomeBannersPanel';
-import { adminKey, firebaseReady } from './firebase';
+import { firebaseReady } from './firebase';
 import {
   canAccess,
   sectionsForRole,
@@ -79,6 +80,7 @@ const ICONS: Partial<Record<Tab, string>> = {
   hosts: 'M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75',
   users: 'M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 11a4 4 0 100-8 4 4 0 000 8z',
   revenue: 'M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6',
+  pricing: 'M4 7h16M7 4v6M4 17h16M17 14v6',
   referrals: 'M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71',
   inbox: 'M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2zM22 6l-10 7L2 6',
   calls: 'M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z',
@@ -99,6 +101,7 @@ const LABELS: Record<Tab, string> = {
   hosts: 'Host List',
   users: 'User List',
   revenue: 'Revenue',
+  pricing: 'Pricing',
   referrals: 'Referrals',
   inbox: 'Inbox',
   calls: 'Live Monitor',
@@ -119,6 +122,7 @@ const GROUPS: Record<Tab, string> = {
   hosts: 'Management',
   users: 'Management',
   revenue: 'Finance',
+  pricing: 'Finance',
   referrals: 'Growth',
   inbox: 'Growth',
   payouts: 'Finance',
@@ -151,9 +155,13 @@ function PageHead({
 
 /** Modern agency-grade web admin control center */
 export default function App() {
+  const agencyPortal = window.location.pathname.startsWith('/agency');
   const [authed, setAuthed] = useState(() => localStorage.getItem('cc_admin') === '1');
-  const [loginMode, setLoginMode] = useState<'admin' | 'agency'>('admin');
-  const [key, setKey] = useState(adminKey);
+  const [loginMode] = useState<'admin' | 'agency'>(
+    agencyPortal ? 'agency' : 'admin',
+  );
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [adminRole, setAdminRole] = useState<AdminRole>(
     () => (localStorage.getItem('cc_admin_role') as AdminRole) || 'super_admin',
   );
@@ -204,7 +212,8 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
-    if (!authed || !firebaseReady) return;
+    // Agencies must never subscribe to the platform-wide Firebase trees.
+    if (!authed || !firebaseReady || adminRole === 'agency') return;
     const u1 = listenHosts(setHosts);
     const u2 = listenActiveCalls(setCalls);
     const u3 = listenReports(setReports);
@@ -213,7 +222,7 @@ export default function App() {
       u2();
       u3();
     };
-  }, [authed]);
+  }, [authed, adminRole]);
 
   const refreshSessions = async () => {
     try {
@@ -294,6 +303,20 @@ export default function App() {
       clearInterval(t);
       off();
     };
+  }, [authed]);
+
+  useEffect(() => {
+    if (!authed) return;
+    const timer = setInterval(() => {
+      setBridgeCalls((current) =>
+        current.map((call) =>
+          call.status === 'accepted'
+            ? { ...call, seconds: Number(call.seconds || 0) + 1 }
+            : call,
+        ),
+      );
+    }, 1000);
+    return () => clearInterval(timer);
   }, [authed]);
 
   useEffect(() => {
@@ -427,7 +450,13 @@ export default function App() {
     setLoginError('');
     try {
       const role = loginMode === 'agency' ? 'agency' : adminRole;
-      const data = (await adminLogin(key.trim(), role)) as {
+      const data = (await staffLogin(
+        loginMode,
+        email.trim(),
+        password,
+        role,
+      )) as {
+        token: string;
         role: AdminRole;
         agencyId?: string;
         agency?: { id: string; name: string };
@@ -435,7 +464,7 @@ export default function App() {
         adminId?: string;
       };
       localStorage.setItem('cc_admin', '1');
-      localStorage.setItem('cc_admin_key', key.trim());
+      localStorage.setItem('cc_admin_key', data.token);
       localStorage.setItem('cc_admin_role', data.role || role);
       localStorage.setItem(
         'cc_admin_id',
@@ -512,44 +541,30 @@ export default function App() {
           transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
         >
           <p className="login-eyebrow">CoinCall · Command</p>
-          <h1>Control Center</h1>
+          <h1>{agencyPortal ? 'Agency Portal' : 'Control Center'}</h1>
           <p>
             Professional ops console for hosts, agencies, live calls, and
             revenue — powered for real-time decisions.
           </p>
 
-          <div className="login-modes">
-            <button
-              type="button"
-              className={`login-mode ${loginMode === 'admin' ? 'on' : ''}`}
-              onClick={() => setLoginMode('admin')}
-            >
-              Platform admin
-            </button>
-            <button
-              type="button"
-              className={`login-mode ${loginMode === 'agency' ? 'on' : ''}`}
-              onClick={() => {
-                setLoginMode('agency');
-                setKey('agency-nova');
-              }}
-            >
-              Agency portal
-            </button>
-          </div>
-
-          <label htmlFor="admin-key">
-            {loginMode === 'agency' ? 'Agency key' : 'Admin key'}
-          </label>
+          <label htmlFor="staff-email">Email</label>
           <input
-            id="admin-key"
-            type="password"
-            value={key}
-            onChange={(e) => setKey(e.target.value)}
-            placeholder={
-              loginMode === 'agency' ? 'agency-nova' : 'coincall-admin'
-            }
+            id="staff-email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="name@example.com"
+            autoComplete="username"
             autoFocus
+          />
+          <label htmlFor="staff-password">Password</label>
+          <input
+            id="staff-password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="••••••••••••"
+            autoComplete="current-password"
           />
           {loginMode === 'admin' ? (
             <>
@@ -569,8 +584,9 @@ export default function App() {
           <button type="submit">Launch console</button>
           {loginError ? <div className="error">{loginError}</div> : null}
           <p className="login-hint">
-            Admin: <code>coincall-admin</code> · Agency demo:{' '}
-            <code>agency-nova</code> / <code>agency-luxe</code>
+            {agencyPortal
+              ? 'Use the email and password issued by your platform admin.'
+              : 'Restricted platform administration access.'}
           </p>
         </motion.form>
       </div>
@@ -841,6 +857,7 @@ export default function App() {
             {tab === 'videos' ? <VideoLibraryPanel /> : null}
             {tab === 'banners' ? <HomeBannersPanel /> : null}
             {tab === 'revenue' ? <RevenuePanel agencyId={agencyId} /> : null}
+            {tab === 'pricing' ? <PricingPanel /> : null}
             {tab === 'referrals' ? (
               <AgencyReferralsPanel agencyId={agencyId || ''} />
             ) : null}
@@ -962,7 +979,9 @@ export default function App() {
                               <td>{coins}</td>
                               <td>
                                 <span className="badge solid live">
-                                  {status === 'ringing' ? 'Ringing' : '1:1'}
+                                  {status === 'ringing'
+                                    ? 'Ringing'
+                                    : 'Call in progress'}
                                 </span>
                               </td>
                               <td>

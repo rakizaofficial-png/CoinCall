@@ -34,13 +34,21 @@ export function AgenciesPanel({
     name: '',
     ownerName: '',
     email: '',
+    password: '',
+    phone: '',
+    country: '',
+    address: '',
+    nationalId: '',
+    passportNumber: '',
+    passportDocument: '',
+    passportDocumentName: '',
     commissionPercent: '30',
     minWithdrawCoins: '500',
     maxWithdrawCoins: '50000',
     dailyWithdrawCap: '100000',
   });
   const [createdCreds, setCreatedCreds] = useState<{
-    loginKey: string;
+    email: string;
     referralCode: string;
     referralLink: string;
   } | null>(null);
@@ -70,9 +78,9 @@ export function AgenciesPanel({
 
   async function onCreate() {
     if (limited) return;
-    const { name, ownerName, email } = createForm;
-    if (!name.trim() || !ownerName.trim() || !email.trim()) {
-      setMsg('Name, owner, and email are required');
+    const { name, ownerName, email, password } = createForm;
+    if (!name.trim() || !ownerName.trim() || !email.trim() || !password) {
+      setMsg('Name, owner, email and password are required');
       return;
     }
     const commissionPercent = Number(createForm.commissionPercent);
@@ -82,6 +90,14 @@ export function AgenciesPanel({
         name: name.trim(),
         ownerName: ownerName.trim(),
         email: email.trim(),
+        password,
+        phone: createForm.phone.trim(),
+        country: createForm.country.trim(),
+        address: createForm.address.trim(),
+        nationalId: createForm.nationalId.trim(),
+        passportNumber: createForm.passportNumber.trim(),
+        passportDocument: createForm.passportDocument,
+        passportDocumentName: createForm.passportDocumentName,
         commissionPercent: Number.isFinite(commissionPercent)
           ? commissionPercent
           : 30,
@@ -90,7 +106,7 @@ export function AgenciesPanel({
         dailyWithdrawCap: Number(createForm.dailyWithdrawCap) || 100000,
       });
       setCreatedCreds({
-        loginKey: res.loginKey,
+        email: res.email,
         referralCode: res.referralCode,
         referralLink: res.referralLink,
       });
@@ -100,6 +116,14 @@ export function AgenciesPanel({
         name: '',
         ownerName: '',
         email: '',
+        password: '',
+        phone: '',
+        country: '',
+        address: '',
+        nationalId: '',
+        passportNumber: '',
+        passportDocument: '',
+        passportDocumentName: '',
         commissionPercent: '30',
         minWithdrawCoins: '500',
         maxWithdrawCoins: '50000',
@@ -210,10 +234,10 @@ export function AgenciesPanel({
         <div className="agency-card" style={{ marginBottom: 16 }}>
           <div className="agency-card-top">
             <h3>Agency credentials</h3>
-            <p>Share once securely — login key is not shown again in the table</p>
+            <p>Password is encrypted and never shown again.</p>
           </div>
           <p>
-            <strong>Login key:</strong> <code>{createdCreds.loginKey}</code>
+            <strong>Login email:</strong> <code>{createdCreds.email}</code>
           </p>
           <p>
             <strong>Referral code:</strong> <code>{createdCreds.referralCode}</code>
@@ -324,7 +348,7 @@ export function AgenciesPanel({
       <DeskModal
         open={createOpen}
         title="Create agency"
-        subtitle="Issues login key + referral code"
+        subtitle="Creates secure email/password access + referral code"
         onClose={() => setCreateOpen(false)}
         footer={
           <>
@@ -370,6 +394,95 @@ export function AgenciesPanel({
               setCreateForm((f) => ({ ...f, email: e.target.value }))
             }
           />
+        </DeskField>
+        <DeskField label="Password">
+          <input
+            type="password"
+            value={createForm.password}
+            onChange={(e) =>
+              setCreateForm((f) => ({ ...f, password: e.target.value }))
+            }
+            placeholder="12+ chars, upper/lowercase, number, symbol"
+            autoComplete="new-password"
+          />
+        </DeskField>
+        <div className="agency-form-grid">
+          <DeskField label="Phone number">
+            <input
+              value={createForm.phone}
+              onChange={(e) =>
+                setCreateForm((f) => ({ ...f, phone: e.target.value }))
+              }
+              placeholder="+92..."
+            />
+          </DeskField>
+          <DeskField label="Country">
+            <input
+              value={createForm.country}
+              onChange={(e) =>
+                setCreateForm((f) => ({ ...f, country: e.target.value }))
+              }
+              placeholder="Pakistan"
+            />
+          </DeskField>
+          <DeskField label="National ID / CNIC">
+            <input
+              value={createForm.nationalId}
+              onChange={(e) =>
+                setCreateForm((f) => ({ ...f, nationalId: e.target.value }))
+              }
+              placeholder="Identity card number"
+            />
+          </DeskField>
+          <DeskField label="Passport number">
+            <input
+              value={createForm.passportNumber}
+              onChange={(e) =>
+                setCreateForm((f) => ({
+                  ...f,
+                  passportNumber: e.target.value,
+                }))
+              }
+              placeholder="Passport number"
+            />
+          </DeskField>
+        </div>
+        <DeskField label="Business / residential address">
+          <textarea
+            rows={2}
+            value={createForm.address}
+            onChange={(e) =>
+              setCreateForm((f) => ({ ...f, address: e.target.value }))
+            }
+          />
+        </DeskField>
+        <DeskField label="Passport copy (image or PDF, max 1.5 MB)">
+          <input
+            type="file"
+            accept="image/*,.pdf,application/pdf"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              if (file.size > 1_500_000) {
+                setMsg('Passport file must be 1.5 MB or smaller');
+                e.target.value = '';
+                return;
+              }
+              const reader = new FileReader();
+              reader.onload = () =>
+                setCreateForm((f) => ({
+                  ...f,
+                  passportDocument: String(reader.result || ''),
+                  passportDocumentName: file.name,
+                }));
+              reader.readAsDataURL(file);
+            }}
+          />
+          {createForm.passportDocumentName ? (
+            <span className="agency-file-ready">
+              ✓ {createForm.passportDocumentName}
+            </span>
+          ) : null}
         </DeskField>
         <DeskField label="Commission %">
           <input
@@ -489,6 +602,41 @@ export function AgenciesPanel({
                 ) : null}
               </p>
             ) : null}
+            <div className="agency-identity-card">
+              <div>
+                <span>Phone</span>
+                <strong>{manageTarget.phone || 'Not provided'}</strong>
+              </div>
+              <div>
+                <span>Country</span>
+                <strong>{manageTarget.country || 'Not provided'}</strong>
+              </div>
+              <div>
+                <span>National ID / CNIC</span>
+                <strong>{manageTarget.nationalId || 'Not provided'}</strong>
+              </div>
+              <div>
+                <span>Passport</span>
+                <strong>{manageTarget.passportNumber || 'Not provided'}</strong>
+              </div>
+              <div className="agency-identity-wide">
+                <span>Address</span>
+                <strong>{manageTarget.address || 'Not provided'}</strong>
+              </div>
+              <div className="agency-identity-wide">
+                <span>Passport document</span>
+                {manageTarget.passportDocument ? (
+                  <a
+                    href={manageTarget.passportDocument}
+                    download={manageTarget.passportDocumentName || 'passport'}
+                  >
+                    View / download {manageTarget.passportDocumentName || 'passport'}
+                  </a>
+                ) : (
+                  <strong>Not uploaded</strong>
+                )}
+              </div>
+            </div>
             <DeskField label="Commission % (0–80)">
               <input
                 value={cutValue}

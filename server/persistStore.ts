@@ -56,6 +56,7 @@ export type PersistedSnapshot = {
   coinTxns?: Array<Record<string, unknown>>;
   /** Luma home hero + swipe promo banners */
   homeBanners?: Record<string, unknown>;
+  pricingConfig?: Record<string, unknown>;
   /** Agency registry + host attribution + announcements */
   agencies?: Array<Record<string, unknown>>;
   hostAgency?: Array<{ hostId?: string; agencyId?: string }>;

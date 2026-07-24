@@ -54,14 +54,22 @@ function requireDb(): Database {
   return db;
 }
 
-export async function adminLogin(key: string, role = 'super_admin') {
-  const res = await fetch(`${apiBaseUrl}/admin/login`, {
+export async function staffLogin(
+  mode: 'admin' | 'agency',
+  email: string,
+  password: string,
+  role = 'super_admin',
+) {
+  const res = await fetch(
+    `${apiBaseUrl}${mode === 'agency' ? '/admin/agency-login' : '/admin/login'}`,
+    {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ key, role, adminId: `admin_${role}` }),
-  });
+    body: JSON.stringify({ email, password, role, adminId: `admin_${role}` }),
+    },
+  );
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || 'Wrong admin key');
+  if (!res.ok) throw new Error(data.error || 'Invalid email or password');
   return data;
 }
 

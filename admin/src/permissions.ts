@@ -17,6 +17,7 @@ export type AdminSection =
   | 'hosts'
   | 'users'
   | 'revenue'
+  | 'pricing'
   | 'referrals'
   | 'inbox'
   | 'calls'
@@ -44,6 +45,7 @@ const FULL: AdminSection[] = [
   'hosts',
   'users',
   'revenue',
+  'pricing',
   'referrals',
   'inbox',
   'calls',
@@ -70,7 +72,7 @@ const ROLE_SECTIONS: Record<AdminRole, AdminSection[]> = {
     'banners',
     'inbox',
   ],
-  finance: ['dashboard', 'revenue', 'payouts', 'users', 'agencies', 'referrals'],
+  finance: ['dashboard', 'revenue', 'pricing', 'payouts', 'users', 'agencies', 'referrals'],
   support: [
     'dashboard',
     'users',

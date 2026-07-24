@@ -69,9 +69,9 @@ function photoOf(h: ManagedHost) {
 }
 
 function PresencePill({ bridge, online }: { bridge?: BridgeHostStatus; online?: boolean }) {
-  if (bridge?.readyToCall) return <span className="badge online">Ready</span>;
-  if (bridge?.isLive) return <span className="badge live">Live</span>;
   if (bridge?.isOnCall) return <span className="badge under_review">On call</span>;
+  if (bridge?.isLive) return <span className="badge live">Live</span>;
+  if (bridge?.readyToCall) return <span className="badge online">Ready</span>;
   if (bridge?.isOnline || online) return <span className="badge online">Online</span>;
   return <span className="badge none">Offline</span>;
 }

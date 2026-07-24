@@ -125,6 +125,12 @@ import {
   mongoConfigured,
   persistenceLabel,
 } from './mongoStore.ts';
+import {
+  issueStaffToken,
+  requestStaffToken,
+  verifyAdminCredentials,
+  verifyStaffToken,
+} from './staffAuth.ts';
 
 const { RtcRole, RtcTokenBuilder } = agoraToken as {
   RtcRole: { PUBLISHER: number; SUBSCRIBER: number };
@@ -150,6 +156,13 @@ const APP_ID = process.env.AGORA_APP_ID || '';
 const APP_CERT = process.env.AGORA_APP_CERTIFICATE || '';
 const PORT = Number(process.env.PORT || 4000);
 const ADMIN_KEY = process.env.ADMIN_API_KEY || 'coincall-admin';
+function isAdminCredential(value: unknown) {
+  const credential = String(value || '').trim();
+  return (
+    credential === ADMIN_KEY ||
+    verifyStaffToken(credential)?.kind === 'admin'
+  );
+}
 if (!process.env.ADMIN_API_KEY) {
   console.warn(
     '[security] ADMIN_API_KEY unset — using demo default. Set a strong key before real money.',
@@ -446,7 +459,7 @@ function isListablePresence(h: HostPresence): boolean {
 function requireUserMatch(req: express.Request, res: express.Response, userId: string): boolean {
   const headerId = String(req.headers['x-user-id'] || '').trim();
   const adminKeyHdr = String(req.headers['x-admin-key'] || req.query.key || '').trim();
-  if (adminKeyHdr && adminKeyHdr === ADMIN_KEY) return true;
+  if (adminKeyHdr && isAdminCredential(adminKeyHdr)) return true;
   if (!userId) {
     res.status(400).json({ error: 'userId required' });
     return false;
@@ -458,8 +471,9 @@ function requireUserMatch(req: express.Request, res: express.Response, userId: s
 
 /** Platform master key only — never accept agency login keys here */
 function requireAdmin(req: express.Request, res: express.Response): boolean {
+  const token = verifyStaffToken(requestStaffToken(req));
   const key = String(req.headers['x-admin-key'] || req.query.key || '');
-  if (key !== ADMIN_KEY) {
+  if (!isAdminCredential(key) && token?.kind !== 'admin') {
     res.status(401).json({ error: 'Unauthorized admin' });
     return false;
   }
@@ -469,7 +483,7 @@ function requireAdmin(req: express.Request, res: express.Response): boolean {
 
 function isPlatformAdmin(req: express.Request): boolean {
   const key = String(req.headers['x-admin-key'] || req.query.key || '').trim();
-  return key === ADMIN_KEY;
+  return isAdminCredential(key);
 }
 
 /** Platform admin OR active agency — binds agency identity server-side */
@@ -608,7 +622,9 @@ app.get('/api/agora/token', (req, res) => {
       res.status(400).json({ error: 'channel is required' });
       return;
     }
-    const adminOk = String(req.query.key || req.headers['x-admin-key'] || '') === ADMIN_KEY;
+    const adminOk = isAdminCredential(
+      req.query.key || req.headers['x-admin-key'],
+    );
     if (!adminOk && !channel.startsWith('call_') && !channel.startsWith('live_') && !channel.startsWith('party_')) {
       res.status(403).json({ error: 'Channel not allowed' });
       return;
@@ -1804,43 +1820,19 @@ app.post('/api/gifts/send', (req, res) => {
 });
 
 app.post('/api/admin/login', (req, res) => {
-  const key = String(req.body?.key || '');
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const password = String(req.body?.password || '');
   const roleWanted = String(req.body?.role || 'super_admin');
 
-  if (roleWanted === 'agency' || String(key).startsWith('agency-')) {
-    const agency = findAgencyByLoginKey(key);
-    if (!agency || agency.status !== 'active') {
-      res.status(401).json({
-        ok: false,
-        error:
-          agency?.status === 'pending'
-            ? 'Agency pending activation by admin'
-            : agency?.status === 'suspended'
-              ? 'Agency suspended'
-              : 'Invalid agency key',
-      });
-      return;
-    }
-    res.json({
-      ok: true,
-      role: 'agency',
-      roles: ['agency'],
-      adminId: `agency_${agency.id}`,
-      agencyId: agency.id,
-      agency: publicAgency(agency),
-      permissions: agency.permissions,
-    });
-    return;
-  }
-
-  if (key !== ADMIN_KEY) {
-    res.status(401).json({ ok: false, error: 'Wrong admin key' });
+  if (!verifyAdminCredentials(email, password)) {
+    res.status(401).json({ ok: false, error: 'Invalid email or password' });
     return;
   }
   const allowed = ['super_admin', 'moderator', 'finance', 'support'];
   const role = allowed.includes(roleWanted) ? roleWanted : 'super_admin';
   res.json({
     ok: true,
+    token: issueStaffToken({ kind: 'admin', role }),
     role,
     roles: allowed,
     adminId: String(req.body?.adminId || 'admin'),
@@ -2516,6 +2508,68 @@ const IAP_PRODUCTS = [
     title: 'Elite 2500',
   },
 ];
+let VIP_PLANS = [
+  { id: 'week', name: 'VIP Week', priceLabel: '$4.99', period: '/ week', coins: 200 },
+  { id: 'month', name: 'VIP Month', priceLabel: '$12.99', period: '/ month', coins: 800 },
+  { id: 'year', name: 'VIP Year', priceLabel: '$79.99', period: '/ year', coins: 12000 },
+];
+
+function publicPricingConfig() {
+  return {
+    updatedAt: pricingUpdatedAt,
+    coinPackages: IAP_PRODUCTS,
+    vipPlans: VIP_PLANS,
+  };
+}
+
+let pricingUpdatedAt = Date.now();
+
+app.get('/api/config/pricing', (_req, res) => {
+  res.json(publicPricingConfig());
+});
+
+app.post('/api/admin/config/pricing', (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const packages = Array.isArray(req.body?.coinPackages)
+    ? req.body.coinPackages
+    : null;
+  const plans = Array.isArray(req.body?.vipPlans) ? req.body.vipPlans : null;
+  if (!packages?.length || !plans?.length) {
+    res.status(400).json({ error: 'coinPackages and vipPlans are required' });
+    return;
+  }
+  const nextPackages = packages.slice(0, 12).map((p: Record<string, unknown>) => ({
+    productId: String(p.productId || '').trim(),
+    title: String(p.title || '').trim().slice(0, 60),
+    coins: Math.max(1, Math.floor(Number(p.coins) || 0)),
+    bonusCoins: Math.max(0, Math.floor(Number(p.bonusCoins) || 0)),
+    priceLabel: String(p.priceLabel || '').trim().slice(0, 24),
+    popular: Boolean(p.popular),
+  }));
+  const nextPlans = plans.slice(0, 8).map((p: Record<string, unknown>) => ({
+    id: String(p.id || '').trim(),
+    name: String(p.name || '').trim().slice(0, 60),
+    priceLabel: String(p.priceLabel || '').trim().slice(0, 24),
+    period: String(p.period || '').trim().slice(0, 24),
+    coins: Math.max(0, Math.floor(Number(p.coins) || 0)),
+  }));
+  if (
+    nextPackages.some((p: { productId: string; title: string; priceLabel: string }) =>
+      !p.productId || !p.title || !p.priceLabel,
+    ) ||
+    nextPlans.some((p: { id: string; name: string; priceLabel: string }) =>
+      !p.id || !p.name || !p.priceLabel,
+    )
+  ) {
+    res.status(400).json({ error: 'Every pricing row needs id, name and price' });
+    return;
+  }
+  IAP_PRODUCTS.splice(0, IAP_PRODUCTS.length, ...nextPackages);
+  VIP_PLANS = nextPlans;
+  pricingUpdatedAt = Date.now();
+  persist();
+  res.json({ ok: true, ...publicPricingConfig() });
+});
 
 function allocateAppId(): string {
   for (let i = 0; i < 40; i++) {
@@ -2764,7 +2818,7 @@ app.post('/api/wallet/credit', (req, res) => {
   }
   if (!requireUserMatch(req, res, userId)) return;
   const adminOk =
-    String(req.headers['x-admin-key'] || req.query.key || '').trim() === ADMIN_KEY;
+    isAdminCredential(req.headers['x-admin-key'] || req.query.key);
   const floored = Math.floor(amount);
   if (!adminOk) {
     // User engagement must use /api/rewards/* — never forge via this path
@@ -3130,7 +3184,7 @@ app.post('/api/wallet/premium', (req, res) => {
   }
   if (!requireUserMatch(req, res, userId)) return;
   const adminOk =
-    String(req.headers['x-admin-key'] || req.query.key || '').trim() === ADMIN_KEY;
+    isAdminCredential(req.headers['x-admin-key'] || req.query.key);
   const allowFreeVip =
     process.env.ALLOW_FREE_VIP === '1' || process.env.NODE_ENV !== 'production';
   if (isPremium && !adminOk && !allowFreeVip) {
@@ -3476,7 +3530,7 @@ app.get('/api/host/withdrawals/:hostId', (req, res) => {
 
 app.get('/api/admin/wallets', (req, res) => {
   const key = String(req.query.key || req.headers['x-admin-key'] || '');
-  if (key !== ADMIN_KEY) {
+  if (!isAdminCredential(key)) {
     res.status(401).json({ error: 'Unauthorized' });
     return;
   }
@@ -3492,7 +3546,7 @@ app.get('/api/admin/wallets', (req, res) => {
 
 app.post('/api/admin/wallets/:userId/status', (req, res) => {
   const key = String(req.body?.key || req.headers['x-admin-key'] || '');
-  if (key !== ADMIN_KEY) {
+  if (!isAdminCredential(key)) {
     res.status(401).json({ error: 'Unauthorized' });
     return;
   }
@@ -3511,15 +3565,24 @@ app.post('/api/admin/wallets/:userId/status', (req, res) => {
 
 /** Admin: live 1:1 + live rooms for Monitor / Remote Control */
 app.get('/api/admin/active-sessions', (req, res) => {
-  const key = String(req.query.key || req.headers['x-admin-key'] || '');
-  if (key !== ADMIN_KEY) {
-    res.status(401).json({ error: 'Unauthorized' });
+  if (!requireStaff(req, res)) return;
+  const staff = getAgencyAuth(req);
+  if (
+    staff?.kind === 'agency' &&
+    (!staff.agency?.permissions.canViewCalls || !staff.agency?.id)
+  ) {
+    res.status(403).json({ error: 'Live call access is not enabled' });
     return;
   }
+  const allowedHostIds =
+    staff?.kind === 'agency' && staff.agency
+      ? new Set(staff.agency.hostIds)
+      : null;
   pruneHosts();
   const nowTs = Date.now();
   const activeCalls = [...calls.values()]
     .filter((c) => c.status === 'ringing' || c.status === 'accepted')
+    .filter((c) => !allowedHostIds || allowedHostIds.has(c.hostId))
     .map((c) => {
       const startedAt = c.acceptedAt || c.createdAt;
       return {
@@ -3541,6 +3604,7 @@ app.get('/api/admin/active-sessions', (req, res) => {
     });
   const rooms = [...liveRooms.values()]
     .filter((r) => r.isLive && String(r.mode || '') !== 'party')
+    .filter((r) => !allowedHostIds || allowedHostIds.has(String(r.hostId || '')))
     .map((r) => ({
       id: String(r.id),
       kind: 'live' as const,
@@ -3567,7 +3631,7 @@ app.get('/api/admin/active-sessions', (req, res) => {
 /** Admin force-end a bridge call (syncs both sides) */
 app.post('/api/admin/calls/:id/end', (req, res) => {
   const key = String(req.body?.key || req.headers['x-admin-key'] || '');
-  if (key !== ADMIN_KEY) {
+  if (!isAdminCredential(key)) {
     res.status(401).json({ error: 'Unauthorized' });
     return;
   }
@@ -3583,7 +3647,7 @@ app.post('/api/admin/calls/:id/end', (req, res) => {
 /** Super-admin scannable analytics snapshot */
 app.get('/api/admin/stats', (req, res) => {
   const key = String(req.query.key || req.headers['x-admin-key'] || '');
-  if (key !== ADMIN_KEY) {
+  if (!isAdminCredential(key)) {
     res.status(401).json({ error: 'Unauthorized' });
     return;
   }
@@ -3660,7 +3724,7 @@ app.get('/api/admin/stats', (req, res) => {
 
 app.post('/api/admin/wallets/:userId/credit', (req, res) => {
   const key = String(req.body?.key || req.headers['x-admin-key'] || '');
-  if (key !== ADMIN_KEY) {
+  if (!isAdminCredential(key)) {
     res.status(401).json({ error: 'Unauthorized' });
     return;
   }
@@ -3802,7 +3866,7 @@ app.post('/api/reports', (req, res) => {
 
 app.get('/api/admin/reports', (req, res) => {
   const key = String(req.query.key || req.headers['x-admin-key'] || '');
-  if (key !== ADMIN_KEY) {
+  if (!isAdminCredential(key)) {
     res.status(401).json({ error: 'Unauthorized' });
     return;
   }
@@ -3811,7 +3875,7 @@ app.get('/api/admin/reports', (req, res) => {
 
 app.post('/api/admin/reports/:id/resolve', (req, res) => {
   const key = String(req.body?.key || req.headers['x-admin-key'] || '');
-  if (key !== ADMIN_KEY) {
+  if (!isAdminCredential(key)) {
     res.status(401).json({ error: 'Unauthorized' });
     return;
   }
@@ -4432,6 +4496,7 @@ function buildSnapshot(): PersistedSnapshot {
     })),
     coinTxns: dumpCoinTxns() as unknown as Array<Record<string, unknown>>,
     homeBanners: dumpHomeBannersForSnapshot() as unknown as Record<string, unknown>,
+    pricingConfig: publicPricingConfig() as unknown as Record<string, unknown>,
     installUserMap: [...installUserMap.entries()].map(([installId, userId]) => ({
       installId,
       userId,
@@ -4516,6 +4581,20 @@ function restoreFromDisk() {
     loadCoinTxns(snap.coinTxns as unknown as CoinTxn[]);
   }
   if (snap.homeBanners) loadHomeBannersFromSnapshot(snap.homeBanners);
+  if (snap.pricingConfig) {
+    const raw = snap.pricingConfig as {
+      coinPackages?: typeof IAP_PRODUCTS;
+      vipPlans?: typeof VIP_PLANS;
+      updatedAt?: number;
+    };
+    if (Array.isArray(raw.coinPackages) && raw.coinPackages.length) {
+      IAP_PRODUCTS.splice(0, IAP_PRODUCTS.length, ...raw.coinPackages);
+    }
+    if (Array.isArray(raw.vipPlans) && raw.vipPlans.length) {
+      VIP_PLANS = raw.vipPlans;
+    }
+    pricingUpdatedAt = Number(raw.updatedAt) || pricingUpdatedAt;
+  }
   if (Array.isArray(snap.withdrawals)) {
     withdrawals.length = 0;
     withdrawals.push(...(snap.withdrawals as unknown as WithdrawalRequest[]));
@@ -5350,7 +5429,9 @@ app.get('/api/live/token', (req, res) => {
       res.status(400).json({ error: 'hostId or channel required' });
       return;
     }
-    const adminOk = String(req.query.key || req.headers['x-admin-key'] || '') === ADMIN_KEY;
+    const adminOk = isAdminCredential(
+      req.query.key || req.headers['x-admin-key'],
+    );
     if (
       !adminOk &&
       !channel.startsWith('live_') &&

@@ -1349,6 +1349,61 @@ html[data-theme='light'] body,
   }
 }
 
+.agency-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 14px;
+}
+
+.agency-file-ready {
+  display: block;
+  margin-top: 8px;
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.agency-identity-card {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 14px;
+  margin: 14px 0;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel-2);
+}
+
+.agency-identity-card > div {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.agency-identity-card span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.agency-identity-card strong,
+.agency-identity-card a {
+  color: var(--text);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.agency-identity-card a {
+  color: var(--nexus);
+  font-weight: 700;
+}
+
+.agency-identity-wide {
+  grid-column: 1 / -1;
+}
+
 .analytics-card {
   background: var(--card);
   border: 1px solid var(--line);
@@ -2398,3 +2453,263 @@ html[data-theme='dark'] body {
   color: #6b7280 !important;
 }
 
+/* ——— Desktop-only administration workspace ———
+   The admin console intentionally keeps its laptop/desktop information density.
+   Small viewports scroll the desktop canvas instead of switching to card/mobile UI. */
+.shell {
+  --side-w: 272px;
+  grid-template-columns: var(--side-w) minmax(0, 1fr) !important;
+  min-width: 1180px;
+}
+
+.side {
+  position: sticky !important;
+  top: 0;
+  height: 100vh !important;
+  padding: 22px 16px;
+  border-right: 1px solid rgba(148, 163, 184, 0.13);
+  box-shadow: 12px 0 36px rgba(15, 23, 42, 0.04);
+  z-index: 20;
+}
+
+.main {
+  width: 100%;
+  min-width: 0;
+  max-width: none !important;
+  padding: 24px clamp(24px, 2.4vw, 46px) 64px !important;
+}
+
+.topbar {
+  position: sticky;
+  top: 12px;
+  z-index: 15;
+  margin: -2px 0 26px;
+  padding: 13px 18px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--card) 84%, transparent);
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 12px 30px rgba(15, 23, 42, 0.06);
+}
+
+.desk-root,
+.desk-root--wide {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+}
+
+.desk-header {
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.desk-header h2 {
+  font-size: clamp(26px, 2vw, 34px);
+  letter-spacing: -0.045em;
+}
+
+.desk-header-actions {
+  gap: 10px;
+}
+
+.desk-toolbar {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.85fr) minmax(500px, 2fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  margin-bottom: 12px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+}
+
+.desk-search {
+  width: 100%;
+  max-width: none;
+  min-height: 40px;
+}
+
+.desk-filters,
+.desk-sorts {
+  flex-wrap: nowrap;
+  align-items: center;
+  margin: 0;
+}
+
+.desk-sorts {
+  justify-content: flex-end;
+}
+
+.desk-bulk {
+  align-items: center;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--card) 92%, var(--nexus-soft));
+}
+
+/* Host table and review panel both use the complete content width. */
+.desk-layout,
+.desk-layout.single {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: 18px;
+}
+
+.desk-table-wrap--enterprise {
+  width: 100%;
+  min-height: 480px;
+  max-height: calc(100vh - 290px);
+  border-radius: 18px;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 18px 44px rgba(15, 23, 42, 0.06);
+}
+
+.desk-table--enterprise {
+  min-width: 1120px;
+}
+
+.desk-table--enterprise th {
+  padding: 13px 15px;
+}
+
+.desk-table--enterprise td {
+  padding: 13px 15px;
+}
+
+.desk-side {
+  position: relative !important;
+  top: auto !important;
+  width: 100%;
+  max-height: none !important;
+  overflow: visible;
+  padding: 22px;
+  border-radius: 18px;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 18px 44px rgba(15, 23, 42, 0.06);
+}
+
+.hm-detail-top {
+  padding-bottom: 14px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.hm-detail-top h3 {
+  margin: 0;
+  font-size: 24px;
+  letter-spacing: -0.03em;
+}
+
+.hm-detail > .meta {
+  line-height: 2;
+}
+
+.hm-detail .photos {
+  display: flex;
+  gap: 12px;
+}
+
+.hm-detail .photos img {
+  width: 112px;
+  height: 112px;
+  border-radius: 15px;
+  object-fit: cover;
+  border: 1px solid var(--line);
+}
+
+.hm-bio {
+  max-width: 900px;
+  font-size: 14px;
+}
+
+.hm-metrics {
+  grid-template-columns: repeat(6, minmax(120px, 1fr));
+  gap: 12px;
+}
+
+.hm-metrics > div {
+  padding: 15px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 13px;
+}
+
+.hm-metrics span {
+  color: var(--muted);
+  opacity: 1;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.hm-metrics b {
+  display: block;
+  margin-top: 7px;
+  font-size: 20px;
+  letter-spacing: -0.025em;
+}
+
+.hm-detail h4 {
+  margin-top: 22px;
+}
+
+.hm-perm {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.hm-audit ul {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.hm-audit li {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--panel-2);
+}
+
+/* Override all legacy responsive rules: this product is a desktop console. */
+@media (max-width: 1100px) {
+  .shell {
+    grid-template-columns: var(--side-w) minmax(0, 1fr) !important;
+  }
+
+  .side {
+    position: sticky !important;
+    height: 100vh !important;
+    border-right: 1px solid rgba(148, 163, 184, 0.13);
+    border-bottom: 0;
+  }
+
+  .nav-group {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    overflow: auto;
+  }
+
+  .nav-label,
+  .nav-btn {
+    width: 100%;
+  }
+
+  .main {
+    padding: 24px 28px 56px !important;
+  }
+
+  .desk-layout {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}

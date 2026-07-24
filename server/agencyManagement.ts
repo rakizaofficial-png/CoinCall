@@ -5,6 +5,15 @@
 
 import { randomUUID, createHash } from 'crypto';
 import type { Express, Request, Response, NextFunction } from 'express';
+import {
+  hashPassword,
+  issueStaffToken,
+  requestStaffToken,
+  strongPassword,
+  validEmail,
+  verifyPassword,
+  verifyStaffToken,
+} from './staffAuth.ts';
 
 export type AgencyStatus = 'pending' | 'active' | 'suspended';
 
@@ -23,12 +32,19 @@ export type Agency = {
   email: string;
   phone?: string;
   country?: string;
+  address?: string;
+  nationalId?: string;
+  passportNumber?: string;
+  passportDocument?: string;
+  passportDocumentName?: string;
   status: AgencyStatus;
   commissionPercent: number;
   hostIds: string[];
   permissions: AgencyPermissions;
   /** Portal secret — never returned in publicAgency */
   loginKey: string;
+  /** Password verifier only; plaintext is never stored */
+  passwordHash?: string;
   referralCode: string;
   /** Host app join deep-link base is applied when serializing */
   minWithdrawCoins: number;
@@ -152,7 +168,7 @@ function seed() {
   for (const a of [a1, a2, a3]) agencies.set(a.id, a);
 }
 
-seed();
+if (process.env.SEED_DEMO_AGENCIES === 'true') seed();
 
 function makeReferralCode(name: string) {
   const base = String(name || 'AG')
@@ -215,7 +231,7 @@ export function creditAgencyRevenue(hostId: string, amount: number) {
 }
 
 export function publicAgency(a: Agency) {
-  const { loginKey: _k, ...rest } = a;
+  const { loginKey: _k, passwordHash: _passwordHash, ...rest } = a;
   return {
     ...rest,
     referralLink: referralLinkFor(a.referralCode),
@@ -331,8 +347,21 @@ export function resolveStaffAuth(
   req: Request,
   adminKey: string,
 ): AgencyAuthContext | null {
-  const key = String(req.headers['x-admin-key'] || req.query.key || '').trim();
+  const key = requestStaffToken(req);
   if (!key) return null;
+  const token = verifyStaffToken(key);
+  if (token?.kind === 'admin') {
+    const ctx: AgencyAuthContext = { kind: 'admin' };
+    agencyAuthByReq.set(req, ctx);
+    return ctx;
+  }
+  if (token?.kind === 'agency') {
+    const agency = getAgency(token.agencyId);
+    if (!agency || agency.status !== 'active') return null;
+    const ctx: AgencyAuthContext = { kind: 'agency', agency };
+    agencyAuthByReq.set(req, ctx);
+    return ctx;
+  }
   if (key === adminKey) {
     const ctx: AgencyAuthContext = { kind: 'admin' };
     agencyAuthByReq.set(req, ctx);
@@ -383,8 +412,16 @@ export function registerAgencyRoutes(app: Express, ctx: Ctx) {
     const name = String(req.body?.name || '').trim();
     const ownerName = String(req.body?.ownerName || '').trim();
     const email = String(req.body?.email || '').trim();
-    if (!name || !ownerName || !email) {
-      res.status(400).json({ error: 'name, ownerName, email required' });
+    const password = String(req.body?.password || '');
+    if (!name || !ownerName || !validEmail(email) || !strongPassword(password)) {
+      res.status(400).json({
+        error:
+          'Valid name, owner, email and a 12+ character password with upper/lowercase, number and symbol are required',
+      });
+      return;
+    }
+    if (listAgencies().some((a) => a.email.toLowerCase() === email.toLowerCase())) {
+      res.status(409).json({ error: 'Agency email already in use' });
       return;
     }
     const id = `ag_${randomUUID().slice(0, 8)}`;
@@ -402,6 +439,14 @@ export function registerAgencyRoutes(app: Express, ctx: Ctx) {
       email,
       phone: String(req.body?.phone || '').trim() || undefined,
       country: String(req.body?.country || '').trim() || undefined,
+      address: String(req.body?.address || '').trim() || undefined,
+      nationalId: String(req.body?.nationalId || '').trim() || undefined,
+      passportNumber:
+        String(req.body?.passportNumber || '').trim() || undefined,
+      passportDocument:
+        String(req.body?.passportDocument || '').trim() || undefined,
+      passportDocumentName:
+        String(req.body?.passportDocumentName || '').trim() || undefined,
       status: (req.body?.status as AgencyStatus) || 'active',
       commissionPercent: Math.min(
         80,
@@ -413,6 +458,7 @@ export function registerAgencyRoutes(app: Express, ctx: Ctx) {
         ...(req.body?.permissions || {}),
       },
       loginKey: String(req.body?.loginKey || `agency-${id.slice(3)}`),
+      passwordHash: hashPassword(password),
       referralCode,
       minWithdrawCoins: Math.max(
         100,
@@ -438,7 +484,7 @@ export function registerAgencyRoutes(app: Express, ctx: Ctx) {
     res.json({
       ok: true,
       agency: publicAgency(row),
-      loginKey: row.loginKey,
+      email: row.email,
       referralCode: row.referralCode,
       referralLink: referralLinkFor(row.referralCode),
     });
@@ -457,9 +503,27 @@ export function registerAgencyRoutes(app: Express, ctx: Ctx) {
     if (req.body?.name) row.name = String(req.body.name);
     if (req.body?.ownerName) row.ownerName = String(req.body.ownerName);
     if (req.body?.email) row.email = String(req.body.email);
+    if (req.body?.password !== undefined) {
+      const password = String(req.body.password || '');
+      if (!strongPassword(password)) {
+        res.status(400).json({ error: 'Password does not meet security requirements' });
+        return;
+      }
+      row.passwordHash = hashPassword(password);
+    }
     if (req.body?.phone !== undefined) row.phone = String(req.body.phone || '');
     if (req.body?.country !== undefined)
       row.country = String(req.body.country || '');
+    if (req.body?.address !== undefined)
+      row.address = String(req.body.address || '');
+    if (req.body?.nationalId !== undefined)
+      row.nationalId = String(req.body.nationalId || '');
+    if (req.body?.passportNumber !== undefined)
+      row.passportNumber = String(req.body.passportNumber || '');
+    if (req.body?.passportDocument !== undefined)
+      row.passportDocument = String(req.body.passportDocument || '');
+    if (req.body?.passportDocumentName !== undefined)
+      row.passportDocumentName = String(req.body.passportDocumentName || '');
     if (req.body?.status) row.status = req.body.status as AgencyStatus;
     if (req.body?.commissionPercent != null) {
       row.commissionPercent = Math.min(
@@ -557,20 +621,28 @@ export function registerAgencyRoutes(app: Express, ctx: Ctx) {
   });
 
   app.post('/api/admin/agency-login', (req, res) => {
-    const key = String(req.body?.key || '').trim();
-    const agency = findAgencyByLoginKey(key);
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const password = String(req.body?.password || '');
+    const agency = listAgencies().find(
+      (a) => a.email.toLowerCase() === email,
+    );
     if (!agency || agency.status !== 'active') {
       res.status(401).json({
         ok: false,
         error:
           agency?.status === 'pending'
             ? 'Agency pending activation'
-            : 'Invalid agency key',
+            : 'Invalid email or password',
       });
+      return;
+    }
+    if (!agency.passwordHash || !verifyPassword(password, agency.passwordHash)) {
+      res.status(401).json({ ok: false, error: 'Invalid email or password' });
       return;
     }
     res.json({
       ok: true,
+      token: issueStaffToken({ kind: 'agency', agencyId: agency.id }),
       role: 'agency',
       agencyId: agency.id,
       agency: publicAgency(agency),

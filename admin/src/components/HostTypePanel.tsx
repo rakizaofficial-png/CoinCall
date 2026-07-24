@@ -16,9 +16,9 @@ function appIdOf(hostId: string) {
 }
 
 function PresenceCell({ bridge }: { bridge?: BridgeHostStatus }) {
-  if (bridge?.readyToCall) return <span className="badge online">Ready</span>;
-  if (bridge?.isLive) return <span className="badge live">Live</span>;
   if (bridge?.isOnCall) return <span className="badge under_review">On call</span>;
+  if (bridge?.isLive) return <span className="badge live">Live</span>;
+  if (bridge?.readyToCall) return <span className="badge online">Ready</span>;
   if (bridge?.isOnline) return <span className="badge online">Online</span>;
   return <span className="badge none">Offline</span>;
 }

@@ -10,6 +10,11 @@ export type Agency = {
   email: string;
   phone?: string;
   country?: string;
+  address?: string;
+  nationalId?: string;
+  passportNumber?: string;
+  passportDocument?: string;
+  passportDocumentName?: string;
   status: AgencyStatus;
   commissionPercent: number;
   hostIds: string[];
@@ -93,14 +98,21 @@ export async function createAgency(input: {
   email: string;
   commissionPercent?: number;
   country?: string;
+  phone?: string;
+  address?: string;
+  nationalId?: string;
+  passportNumber?: string;
+  passportDocument?: string;
+  passportDocumentName?: string;
   minWithdrawCoins?: number;
   maxWithdrawCoins?: number;
   dailyWithdrawCap?: number;
+  password: string;
 }) {
   return post<{
     ok: boolean;
     agency: Agency;
-    loginKey: string;
+    email: string;
     referralCode: string;
     referralLink: string;
   }>('/admin/agencies', input);
