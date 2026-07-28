@@ -104,6 +104,7 @@ function applyNativeBeauty(preset: BeautyPreset) {
     }
     const opts = BEAUTY_PRESETS[preset];
     engine.setBeautyEffectOptions(true, {
+      lighteningContrastLevel: opts.lighteningContrastLevel,
       lighteningLevel: opts.lighteningLevel,
       smoothnessLevel: opts.smoothnessLevel,
       rednessLevel: opts.rednessLevel,

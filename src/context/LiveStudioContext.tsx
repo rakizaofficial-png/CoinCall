@@ -8,6 +8,8 @@ import React, {
   useState,
 } from 'react';
 import { GIFT_CATALOG, PHOTO_UNLOCK_MIN_COINS } from '../data/gifts';
+import { DEFAULT_LIVE_FILTER } from '../data/liveFilters';
+import type { BeautyPreset } from '../services/agoraTypes';
 import { useApp } from '../context/AppContext';
 import {
   endLiveRoom,
@@ -48,6 +50,7 @@ type GoLiveDraft = {
   language: string;
   thumbnailUrl: string;
   beautyOn: boolean;
+  beautyPreset: BeautyPreset;
   facing: 'user' | 'environment';
   entryLocked: boolean;
   entryFee: number;
@@ -180,6 +183,7 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
     language: 'English',
     thumbnailUrl: user.avatarUrl,
     beautyOn: true,
+    beautyPreset: DEFAULT_LIVE_FILTER,
     facing: 'user',
     entryLocked: false,
     entryFee: 50,

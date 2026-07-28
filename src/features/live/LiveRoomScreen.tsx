@@ -32,7 +32,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GlamourGiftOverlay } from '../../components/gifts/GlamourGiftOverlay';
 import { useLiveStudio } from '../../context/LiveStudioContext';
 import { useApp } from '../../context/AppContext';
+import { LIVE_FILTERS } from '../../data/liveFilters';
 import {
+  beautyCssFilter,
   setAgoraBeauty,
   setAgoraCameraOff,
   setAgoraMuted,
@@ -40,6 +42,7 @@ import {
   stopAgoraCall,
   switchAgoraCamera,
 } from '../../services/agoraService';
+import type { BeautyPreset } from '../../services/agoraTypes';
 import { useTheme } from '../../theme/ThemeContext';
 import { notify } from '../../utils/notify';
 import { LiveBroadcastSurface } from './LiveBroadcastSurface';
@@ -57,7 +60,7 @@ function formatLive(sec: number) {
   return `${m}:${s}`;
 }
 
-type Sheet = 'none' | 'gifts' | 'chat' | 'lock';
+type Sheet = 'none' | 'gifts' | 'chat' | 'lock' | 'filters';
 
 export function LiveRoomScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
@@ -75,6 +78,8 @@ export function LiveRoomScreen({ navigation, route }: Props) {
     sendComment,
     updateRoomLock,
     livePausedForCall,
+    goLiveDraft,
+    setGoLiveDraft,
   } = useLiveStudio();
 
   const roomId = route.params.roomId;
@@ -86,7 +91,10 @@ export function LiveRoomScreen({ navigation, route }: Props) {
 
   const [muted, setMuted] = useState(false);
   const [cameraOff, setCameraOff] = useState(false);
-  const [beauty, setBeauty] = useState(true);
+  const [beauty, setBeauty] = useState(goLiveDraft.beautyOn);
+  const [beautyPreset, setBeautyPreset] = useState<BeautyPreset>(
+    goLiveDraft.beautyPreset,
+  );
   const [sheet, setSheet] = useState<Sheet>('none');
   const [cameraReady, setCameraReady] = useState(false);
   const [chatText, setChatText] = useState('');
@@ -134,22 +142,33 @@ export function LiveRoomScreen({ navigation, route }: Props) {
         await startAgoraLiveBroadcast({
           channel: room.channel,
           localVideoEl: el,
-          beauty: 'snap',
+          beauty: beauty ? beautyPreset : 'off',
         });
       } else {
         await startAgoraLiveBroadcast({
           channel: room.channel,
-          beauty: 'snap',
+          beauty: beauty ? beautyPreset : 'off',
         });
       }
-      await setAgoraBeauty(beauty ? 'snap' : 'off');
+      await setAgoraBeauty(beauty ? beautyPreset : 'off');
       setCameraReady(true);
     } catch (e) {
       broadcastStarted.current = false;
       setCameraReady(false);
       notify('Live video', e instanceof Error ? e.message : 'Camera failed');
     }
-  }, [beauty, hostMode, room?.channel]);
+  }, [beauty, beautyPreset, hostMode, room?.channel]);
+
+  useEffect(() => {
+    if (!hostMode || !cameraReady) return;
+    void setAgoraBeauty(beauty ? beautyPreset : 'off');
+    if (Platform.OS === 'web') {
+      const el = document.getElementById('live-local');
+      if (el && 'style' in el) {
+        (el as HTMLElement).style.filter = beauty ? beautyCssFilter(beautyPreset) : 'none';
+      }
+    }
+  }, [beauty, beautyPreset, cameraReady, hostMode]);
 
   // Start broadcast immediately on mount — don't block on UI render
   useEffect(() => {
@@ -351,11 +370,7 @@ export function LiveRoomScreen({ navigation, route }: Props) {
           <Fab
             icon={Sparkles}
             active={beauty}
-            onPress={async () => {
-              const next = !beauty;
-              setBeauty(next);
-              await setAgoraBeauty(next ? 'snap' : 'off');
-            }}
+            onPress={() => setSheet(sheet === 'filters' ? 'none' : 'filters')}
           />
           <Fab
             icon={entryLocked ? Lock : LockOpen}
@@ -489,6 +504,49 @@ export function LiveRoomScreen({ navigation, route }: Props) {
           <Pressable style={styles.saveBtn} onPress={() => void onSaveLock()}>
             <Text style={styles.saveBtnText}>Apply</Text>
           </Pressable>
+        </BottomSheet>
+      )}
+
+      {/* Filter sheet */}
+      {sheet === 'filters' && (
+        <BottomSheet onClose={() => setSheet('none')} title="Deep AR filters">
+          <View style={styles.filterHead}>
+            <Text style={styles.filterHint}>
+              Free heavy beauty presets for live camera
+            </Text>
+            <Switch
+              value={beauty}
+              onValueChange={(next) => {
+                setBeauty(next);
+                setGoLiveDraft({ beautyOn: next });
+              }}
+              trackColor={{ false: '#334155', true: '#A78BFA' }}
+              thumbColor="#fff"
+            />
+          </View>
+          <View style={styles.filterGrid}>
+            {LIVE_FILTERS.map((filter) => {
+              const on = beauty && beautyPreset === filter.id;
+              return (
+                <Pressable
+                  key={filter.id}
+                  onPress={() => {
+                    setBeauty(true);
+                    setBeautyPreset(filter.id);
+                    setGoLiveDraft({ beautyOn: true, beautyPreset: filter.id });
+                  }}
+                  style={[styles.filterCard, on && styles.filterCardOn]}
+                >
+                  <Text style={[styles.filterName, on && styles.filterNameOn]}>
+                    {filter.label}
+                  </Text>
+                  <Text style={styles.filterDesc} numberOfLines={2}>
+                    {filter.description}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
         </BottomSheet>
       )}
     </View>
@@ -777,6 +835,41 @@ const styles = StyleSheet.create({
   },
   presetText: { color: 'rgba(255,255,255,0.7)', fontWeight: '800', fontSize: 14 },
   presetTextOn: { color: '#F5C14C' },
+  filterHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 12,
+  },
+  filterHint: {
+    color: 'rgba(255,255,255,0.62)',
+    fontSize: 12,
+    fontWeight: '700',
+    flex: 1,
+  },
+  filterGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  filterCard: {
+    width: '31%',
+    minHeight: 74,
+    borderRadius: 14,
+    padding: 10,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  filterCardOn: {
+    backgroundColor: 'rgba(167,139,250,0.2)',
+    borderColor: '#A78BFA',
+  },
+  filterName: { color: '#fff', fontWeight: '900', fontSize: 12 },
+  filterNameOn: { color: '#F8FAFC' },
+  filterDesc: {
+    color: 'rgba(255,255,255,0.52)',
+    fontSize: 10,
+    lineHeight: 13,
+    marginTop: 4,
+  },
   saveBtn: {
     backgroundColor: '#FF4D8D',
     borderRadius: 14,

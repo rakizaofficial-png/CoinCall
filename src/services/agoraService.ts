@@ -1,6 +1,11 @@
 import type { IAgoraRTCClient, ICameraVideoTrack, IMicrophoneAudioTrack } from 'agora-rtc-sdk-ng';
 import { Platform } from 'react-native';
 import { env } from '../config/env';
+import {
+  BEAUTY_PRESETS,
+  beautyCssFilter,
+  type BeautyPreset,
+} from './agoraTypes';
 
 export function isAgoraConfigured() {
   return Boolean(env.apiBaseUrl);
@@ -18,57 +23,8 @@ export function subscribeNativeRemoteUid(
   return () => undefined;
 }
 
-/** Snapchat-style beauty presets — applied to the published video track */
-export type BeautyPreset = 'off' | 'natural' | 'glamour' | 'snap';
-
-export const BEAUTY_PRESETS: Record<
-  Exclude<BeautyPreset, 'off'>,
-  {
-    lighteningContrastLevel: 0 | 1 | 2;
-    lighteningLevel: number;
-    smoothnessLevel: number;
-    sharpnessLevel: number;
-    rednessLevel: number;
-  }
-> = {
-  // Soft daily look
-  natural: {
-    lighteningContrastLevel: 1,
-    lighteningLevel: 0.55,
-    smoothnessLevel: 0.55,
-    sharpnessLevel: 0.35,
-    rednessLevel: 0.12,
-  },
-  // Full glam — soft skin, bright, rosy
-  glamour: {
-    lighteningContrastLevel: 1,
-    lighteningLevel: 0.78,
-    smoothnessLevel: 0.88,
-    sharpnessLevel: 0.42,
-    rednessLevel: 0.28,
-  },
-  // Snapchat / live-app “world beauty”
-  snap: {
-    lighteningContrastLevel: 2,
-    lighteningLevel: 0.82,
-    smoothnessLevel: 0.92,
-    sharpnessLevel: 0.48,
-    rednessLevel: 0.32,
-  },
-};
-
-/** CSS for local PiP preview (little host window) */
-export function beautyCssFilter(preset: BeautyPreset): string {
-  if (preset === 'off') return 'none';
-  if (preset === 'natural') {
-    return 'brightness(1.08) contrast(1.04) saturate(1.12) blur(0.25px)';
-  }
-  if (preset === 'glamour') {
-    return 'brightness(1.14) contrast(1.06) saturate(1.22) blur(0.4px)';
-  }
-  // snap — strongest soft-glow
-  return 'brightness(1.18) contrast(1.08) saturate(1.28) blur(0.55px)';
-}
+export type { BeautyPreset } from './agoraTypes';
+export { BEAUTY_PRESETS, beautyCssFilter } from './agoraTypes';
 
 type LiveSession = {
   client: IAgoraRTCClient;

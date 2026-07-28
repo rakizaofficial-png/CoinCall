@@ -24,7 +24,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PrimaryButton } from '../../components/ui/PrimaryButton';
 import { useApp } from '../../context/AppContext';
 import { useLiveStudio } from '../../context/LiveStudioContext';
+import { LIVE_FILTERS } from '../../data/liveFilters';
 import {
+  beautyCssFilter,
   flipPreviewCamera,
   startCameraPreview,
   stopCameraPreview,
@@ -189,7 +191,7 @@ export function GoLiveScreen({ navigation, mode = 'solo' }: Props) {
 
   const beautyFilter =
     goLiveDraft.beautyOn && Platform.OS === 'web'
-      ? ({ filter: 'brightness(1.12) contrast(1.05) saturate(1.15)' } as any)
+      ? ({ filter: beautyCssFilter(goLiveDraft.beautyPreset) } as any)
       : undefined;
 
   return (
@@ -244,7 +246,7 @@ export function GoLiveScreen({ navigation, mode = 'solo' }: Props) {
           <Tool icon={FlipHorizontal} label="Flip" onPress={() => void onFlip()} />
           <Tool
             icon={Sparkles}
-            label="Beauty"
+            label="Filter"
             active={goLiveDraft.beautyOn}
             onPress={() => setGoLiveDraft({ beautyOn: !goLiveDraft.beautyOn })}
           />
@@ -284,6 +286,38 @@ export function GoLiveScreen({ navigation, mode = 'solo' }: Props) {
           <Text style={[styles.hint, { color: colors.textMuted }]}>
             Cover uses your profile photo. Language & category stay from last time.
           </Text>
+
+          <View style={styles.filterPanel}>
+            <Text style={[styles.label, { color: colors.textSecondary }]}>
+              Deep AR filters
+            </Text>
+            <View style={styles.filterRow}>
+              {LIVE_FILTERS.map((filter) => {
+                const on =
+                  goLiveDraft.beautyOn &&
+                  goLiveDraft.beautyPreset === filter.id;
+                return (
+                  <Pressable
+                    key={filter.id}
+                    onPress={() =>
+                      setGoLiveDraft({
+                        beautyOn: true,
+                        beautyPreset: filter.id,
+                      })
+                    }
+                    style={[styles.filterChip, on && styles.filterChipOn]}
+                  >
+                    <Text style={[styles.filterText, on && styles.filterTextOn]}>
+                      {filter.shortLabel}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Text style={[styles.hint, { color: '#A78BFA', marginTop: 8 }]}>
+              Free live beauty engine · no paid SDK required
+            </Text>
+          </View>
 
           <View style={[styles.lockRow, { borderColor: colors.border }]}>
             <View style={styles.lockLeft}>
@@ -444,6 +478,31 @@ const styles = StyleSheet.create({
   lockLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
   lockTitle: { fontWeight: '800', fontSize: 14 },
   feePresets: { marginTop: 10 },
+  filterPanel: {
+    marginTop: 14,
+    padding: 12,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  filterChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    minWidth: 58,
+    alignItems: 'center',
+  },
+  filterChipOn: {
+    backgroundColor: 'rgba(167,139,250,0.2)',
+    borderColor: '#A78BFA',
+  },
+  filterText: { color: 'rgba(255,255,255,0.72)', fontWeight: '900', fontSize: 12 },
+  filterTextOn: { color: '#fff' },
   presetRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   presetChip: {
     paddingHorizontal: 14,

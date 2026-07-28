@@ -4,6 +4,7 @@ import Animated, {
   Easing,
   FadeIn,
   FadeOut,
+  SlideInUp,
   ZoomIn,
   useAnimatedStyle,
   useSharedValue,
@@ -175,6 +176,19 @@ export function GlamourGiftOverlay({ item, onDone }: Props) {
           </Text>
         </Animated.View>
 
+        <Animated.View
+          entering={SlideInUp.delay(90).duration(420)}
+          style={[
+            styles.lowFaceGlow,
+            {
+              borderColor: rarityColor,
+              shadowColor: gift.glow,
+            },
+          ]}
+        >
+          <Text style={styles.lowFaceText}>LOW FACE GIFT</Text>
+        </Animated.View>
+
         {combo ? (
           <Animated.Text
             entering={ZoomIn.delay(80)}
@@ -210,7 +224,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     zIndex: 80,
-    justifyContent: 'center',
+    justifyContent: 'flex-end',
     alignItems: 'center',
   },
   vignette: {
@@ -224,6 +238,7 @@ const styles = StyleSheet.create({
     width: '100%',
     alignItems: 'center',
     paddingHorizontal: 24,
+    paddingBottom: '12%',
   },
   rarity: {
     fontSize: 10,
@@ -255,6 +270,26 @@ const styles = StyleSheet.create({
   combo: {
     marginTop: 14,
     fontSize: 36,
+    fontWeight: '900',
+    letterSpacing: 1,
+  },
+  lowFaceGlow: {
+    minWidth: 170,
+    marginTop: -4,
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    backgroundColor: 'rgba(0,0,0,0.42)',
+    shadowOpacity: 0.7,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
+    alignItems: 'center',
+  },
+  lowFaceText: {
+    color: 'rgba(255,255,255,0.92)',
+    fontSize: 10,
     fontWeight: '900',
     letterSpacing: 1,
   },
