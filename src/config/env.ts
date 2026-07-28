@@ -20,6 +20,10 @@ const PROD_FIREBASE = {
 } as const;
 
 const PROD_AGORA_APP_ID = '91b304d27075417e9b9e9b5358448656';
+const PROD_DEEPAR_WEB_KEY =
+  '47e12f169c8864a8abdde2f9ccf046a85cc81e23f1de5a9f099b05c51d8e8afa81a4663a43b2bcf3';
+const PROD_DEEPAR_ANDROID_KEY =
+  '43a06cdfc55a8d675d7dfb539e307e3847c7db98f59f19565049ec0aeb2e9350d3645eaa58bd7948';
 
 const read = (key: string, fallback = '') =>
   (process.env[key] ?? fallback).trim();
@@ -77,6 +81,22 @@ export const env = {
 
   agora: {
     appId: read('EXPO_PUBLIC_AGORA_APP_ID', PROD_AGORA_APP_ID),
+  },
+
+  deepar: {
+    webLicenseKey: read('EXPO_PUBLIC_DEEPAR_WEB_LICENSE_KEY', PROD_DEEPAR_WEB_KEY),
+    androidLicenseKey: read(
+      'EXPO_PUBLIC_DEEPAR_ANDROID_LICENSE_KEY',
+      PROD_DEEPAR_ANDROID_KEY,
+    ),
+    rootPath: read(
+      'EXPO_PUBLIC_DEEPAR_ROOT_PATH',
+      'https://cdn.jsdelivr.net/npm/deepar@5.6.22/',
+    ),
+    effectBaseUrl: read(
+      'EXPO_PUBLIC_DEEPAR_EFFECT_BASE_URL',
+      'https://cdn.jsdelivr.net/npm/deepar@5.6.22/effects/',
+    ),
   },
 
   stripe: {

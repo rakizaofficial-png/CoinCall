@@ -2,6 +2,11 @@ import type { IAgoraRTCClient, ICameraVideoTrack, IMicrophoneAudioTrack } from '
 import { Platform } from 'react-native';
 import { env } from '../config/env';
 import {
+  shouldUseDeepARWeb,
+  startDeepARWebLive,
+  type DeepARSession,
+} from './deepArService';
+import {
   BEAUTY_PRESETS,
   beautyCssFilter,
   type BeautyPreset,
@@ -32,6 +37,7 @@ type LiveSession = {
   cam: ICameraVideoTrack | null;
   beautyProcessor: any | null;
   beautyPreset: BeautyPreset;
+  deepAR?: DeepARSession | null;
 };
 
 let session: LiveSession | null = null;
@@ -358,15 +364,36 @@ export async function startAgoraLiveBroadcast(options: {
 
   const [mic, cam] = await createMicAndCam(AgoraRTC, '720p_2', 'user');
   const preset = options.beauty ?? currentPreset;
-  const beautyProcessor = await ensureBeautyProcessor(AgoraRTC);
-  if (beautyProcessor) {
-    await pipeBeauty(cam, beautyProcessor, preset);
+  let publishedCam: ICameraVideoTrack = cam;
+  let beautyProcessor: any | null = null;
+  let deepAR: DeepARSession | null = null;
+
+  if (shouldUseDeepARWeb(preset)) {
+    try {
+      deepAR = await startDeepARWebLive(localVideoEl, preset);
+      publishedCam = AgoraRTC.createCustomVideoTrack({
+        mediaStreamTrack: deepAR.videoTrack,
+      }) as ICameraVideoTrack;
+      cam.close();
+    } catch (e) {
+      console.warn('DeepAR web filter unavailable, using Agora beauty fallback', e);
+      deepAR?.stop();
+      deepAR = null;
+      publishedCam = cam;
+    }
   }
 
-  cam.play(localVideoEl, { fit: 'cover', mirror: true });
-  applyLocalCssBeauty(preset);
-  await client.publish([mic, cam]);
-  session = { client, mic, cam, beautyProcessor, beautyPreset: preset };
+  if (!deepAR) {
+    beautyProcessor = await ensureBeautyProcessor(AgoraRTC);
+    if (beautyProcessor) {
+      await pipeBeauty(publishedCam, beautyProcessor, preset);
+    }
+    publishedCam.play(localVideoEl, { fit: 'cover', mirror: true });
+    applyLocalCssBeauty(preset);
+  }
+
+  await client.publish([mic, publishedCam]);
+  session = { client, mic, cam: publishedCam, beautyProcessor, beautyPreset: preset, deepAR };
   currentPreset = preset;
   return session;
 }
@@ -417,9 +444,10 @@ export async function flipPreviewCamera(
 
 export async function stopAgoraCall() {
   if (!session) return;
-  const { client, mic, cam, beautyProcessor } = session;
+  const { client, mic, cam, beautyProcessor, deepAR } = session;
   session = null;
   try {
+    deepAR?.stop();
     if (beautyProcessor) {
       try {
         await beautyProcessor.disable?.();
