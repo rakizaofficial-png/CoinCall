@@ -138,6 +138,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           }
           if (ev.type === "mass:text") {
             const p = ev.payload;
+            if (p.userIds?.length && !p.userIds.includes(id)) return;
             prependInbox({
               id: p.id || `mt_${p.at}_${p.hostId}`,
               hostId: p.hostId,

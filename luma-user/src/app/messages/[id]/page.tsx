@@ -38,6 +38,7 @@ export default function ChatThreadPage({
   const listEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const sendLockRef = useRef(false);
 
   const hostIdFromRoute = id.startsWith("host_")
     ? decodeURIComponent(id.slice(5))
@@ -112,6 +113,17 @@ export default function ChatThreadPage({
   const bubbles = useMemo<ChatBubbleMessage[]>(() => {
     const mergedMap = new Map<string, ChatBubbleMessage>();
     for (const m of [...massNotes, ...apiMessages]) {
+      if (
+        m.id.startsWith("mass_") &&
+        apiMessages.some(
+          (apiMessage) =>
+            apiMessage.fromId === m.fromId &&
+            apiMessage.text === m.text &&
+            Math.abs(apiMessage.createdAt - m.createdAt) < 10_000,
+        )
+      ) {
+        continue;
+      }
       mergedMap.set(m.id, {
         id: m.id,
         text: m.text,
@@ -146,7 +158,8 @@ export default function ChatThreadPage({
   const send = async (imageUrl?: string) => {
     const body = text.trim();
     if (!body && !imageUrl) return;
-    if (sending) return;
+    if (sendLockRef.current) return;
+    sendLockRef.current = true;
     if (vipTier === "diamond") triggerEntranceBlast();
     const tempId = `pending_${Date.now()}`;
     const optimistic: ChatBubbleMessage = {
@@ -179,6 +192,7 @@ export default function ChatThreadPage({
           fromName: "Luma Fan",
           fromRole: "user",
           peerName: hostName,
+          clientMessageId: tempId,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -191,6 +205,7 @@ export default function ChatThreadPage({
       );
       pushToast?.(e instanceof Error ? e.message : "Could not send message");
     } finally {
+      sendLockRef.current = false;
       setSending(false);
     }
   };
@@ -245,8 +260,35 @@ export default function ChatThreadPage({
               onChange={(e) => {
                 const file = e.target.files?.[0];
                 if (!file) return;
-                const url = URL.createObjectURL(file);
-                void send(url);
+                if (file.size > 2_500_000) {
+                  pushToast?.("Photo is too large (maximum 2.5 MB)");
+                  e.target.value = "";
+                  return;
+                }
+                const reader = new FileReader();
+                reader.onload = async () => {
+                  try {
+                    const upload = await fetch(`${requireApiBase()}/chat/images`, {
+                      method: "POST",
+                      headers: {
+                        "Content-Type": "application/json",
+                        "X-User-Id": userId,
+                      },
+                      body: JSON.stringify({ ownerId: userId, image: String(reader.result || "") }),
+                    });
+                    const data = (await upload.json().catch(() => ({}))) as {
+                      imageUrl?: string;
+                      error?: string;
+                    };
+                    if (!upload.ok || !data.imageUrl) {
+                      throw new Error(data.error || "Photo upload failed");
+                    }
+                    await send(data.imageUrl);
+                  } catch (error) {
+                    pushToast?.(error instanceof Error ? error.message : "Photo upload failed");
+                  }
+                };
+                reader.readAsDataURL(file);
                 e.target.value = "";
               }}
             />
@@ -270,7 +312,7 @@ export default function ChatThreadPage({
           </>
         }
       >
-        <div className="space-y-3">
+        <div className="flex min-h-full flex-col justify-end gap-3">
           {bubbles.length === 0 ? (
             <p className="py-6 text-center text-sm" style={{ color: CHAT_THEME.muted }}>
               Say hi to start the chat 👋

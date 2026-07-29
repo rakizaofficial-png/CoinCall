@@ -31,7 +31,6 @@ import { AnimatedPage } from './components/AnimatedPage';
 import { DashboardAnalytics } from './components/DashboardAnalytics';
 import { ForceUpdatePanel } from './components/ForceUpdatePanel';
 import { HostManagementPanel } from './components/HostManagement';
-import { HostTypePanel } from './components/HostTypePanel';
 import {
   LiveMonitorDock,
   type MonitorTarget,
@@ -73,10 +72,6 @@ function Icon({ d }: { d: string }) {
 const ICONS: Partial<Record<Tab, string>> = {
   dashboard: 'M3 12l9-9 9 9M5 10v10h14V10',
   agencies: 'M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6',
-  agency_hosts: 'M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8z',
-  individual_hosts: 'M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 11a4 4 0 100-8 4 4 0 000 8z',
-  host_approver: 'M9 12l2 2 4-4M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z',
-  host_kyc: 'M12 11a4 4 0 100-8 4 4 0 000 8zM4 21v-1a6 6 0 0112 0v1M16 11l2 2 4-4',
   hosts: 'M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75',
   users: 'M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 11a4 4 0 100-8 4 4 0 000 8z',
   revenue: 'M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6',
@@ -94,10 +89,6 @@ const ICONS: Partial<Record<Tab, string>> = {
 const LABELS: Record<Tab, string> = {
   dashboard: 'Dashboard',
   agencies: 'Agencies',
-  agency_hosts: 'Agency hosts',
-  individual_hosts: 'Individual hosts',
-  host_approver: 'Host Approver',
-  host_kyc: 'Host KYC',
   hosts: 'Host List',
   users: 'User List',
   revenue: 'Revenue',
@@ -115,10 +106,6 @@ const LABELS: Record<Tab, string> = {
 const GROUPS: Record<Tab, string> = {
   dashboard: 'Management',
   agencies: 'Management',
-  agency_hosts: 'Management',
-  individual_hosts: 'Management',
-  host_approver: 'Management',
-  host_kyc: 'Management',
   hosts: 'Management',
   users: 'Management',
   revenue: 'Finance',
@@ -519,9 +506,7 @@ export default function App() {
     label: LABELS[id],
     group: GROUPS[id],
     count:
-      id === 'host_approver'
-        ? stats.pending
-        : id === 'hosts'
+      id === 'hosts'
           ? stats.total
           : id === 'calls'
             ? stats.liveCalls + stats.liveStreams
@@ -716,26 +701,6 @@ export default function App() {
                       <span>Create · commission · portal permissions</span>
                     </button>
                   ) : null}
-                  {canAccess(adminRole, 'agency_hosts', agencyPerms) ? (
-                    <button
-                      type="button"
-                      className="quick-card"
-                      onClick={() => setTab('agency_hosts')}
-                    >
-                      <strong>Agency hosts</strong>
-                      <span>Hosts managed by agencies</span>
-                    </button>
-                  ) : null}
-                  {canAccess(adminRole, 'individual_hosts', agencyPerms) ? (
-                    <button
-                      type="button"
-                      className="quick-card"
-                      onClick={() => setTab('individual_hosts')}
-                    >
-                      <strong>Individual hosts</strong>
-                      <span>Independent creators</span>
-                    </button>
-                  ) : null}
                   {canAccess(adminRole, 'hosts', agencyPerms) ? (
                     <button
                       type="button"
@@ -816,44 +781,17 @@ export default function App() {
 
             {tab === 'agencies' ? (
               <AgenciesPanel
-                onOpenHosts={() => setTab('agency_hosts')}
+                onOpenHosts={() => setTab('hosts')}
                 onOpenRevenue={() => setTab('revenue')}
               />
             ) : null}
-            {tab === 'agency_hosts' ? (
-              isAgency ? (
-                <HostManagementPanel
-                  firebaseHosts={hosts}
-                  agencyId={agencyId}
-                  canAct={!!agencyPerms?.canManageHosts}
-                  title="Agency hosts"
-                  subtitle="Live presence · earnings · lifecycle for your linked hosts only"
-                />
-              ) : (
-                <HostTypePanel mode="agency" canManage />
-              )
-            ) : null}
-            {tab === 'individual_hosts' ? (
-              <HostTypePanel mode="individual" canManage={!isAgency} />
-            ) : null}
-            {tab === 'host_approver' ? (
-              <HostManagementPanel
-                firebaseHosts={hosts}
-                title="Host Approver"
-                subtitle="Approve or reject pending host applications — KYC is a separate path"
-                initialStatus="pending"
-              />
-            ) : null}
-            {tab === 'host_kyc' ? (
-              <HostManagementPanel
-                firebaseHosts={hosts}
-                title="Host KYC"
-                subtitle="Review ID · selfie · request documents — approvals stay on Host Approver"
-                initialStatus="under_review"
-              />
-            ) : null}
             {tab === 'hosts' ? (
-              <HostManagementPanel firebaseHosts={hosts} />
+              <HostManagementPanel
+                firebaseHosts={hosts}
+                agencyId={isAgency ? agencyId : null}
+                canAct={!isAgency || !!agencyPerms?.canManageHosts}
+                title={isAgency ? 'Agency hosts' : 'Host management'}
+              />
             ) : null}
             {tab === 'users' ? <UsersWalletsPanel /> : null}
             {tab === 'videos' ? <VideoLibraryPanel /> : null}

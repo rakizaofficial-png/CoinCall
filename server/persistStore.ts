@@ -63,6 +63,8 @@ export type PersistedSnapshot = {
   announcements?: Array<Record<string, unknown>>;
   /** Host management registry (profiles, bio, DP URLs, call rates, approval) */
   managedHosts?: Array<Record<string, unknown>>;
+  /** Admin-controlled mandatory Host App release configuration */
+  hostAppUpdate?: Record<string, unknown>;
   /** installId → userId so Luma profile survives WebView wipe / reinstall */
   installUserMap?: Array<{ installId: string; userId: string }>;
 };

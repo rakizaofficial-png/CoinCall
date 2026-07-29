@@ -306,9 +306,10 @@ export type LiveRoomAdmin = {
   isLive?: boolean;
 };
 
-export async function fetchAdminWallets() {
+export async function fetchAdminWallets(query = '') {
+  const q = query.trim();
   const res = await fetch(
-    `${apiBaseUrl}/admin/wallets?key=${encodeURIComponent(adminKeyHeader())}`,
+    `${apiBaseUrl}/admin/wallets?key=${encodeURIComponent(adminKeyHeader())}${q ? `&q=${encodeURIComponent(q)}` : ''}`,
   );
   if (!res.ok) throw new Error('Could not load wallets');
   return (await res.json()) as { wallets: AdminWalletRow[]; count: number };

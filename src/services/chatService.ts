@@ -111,7 +111,15 @@ export function listenChatMessages(
 
   const ingest = (rows: ChatMessage[]) => {
     for (const m of rows) {
-      if (m?.id) merge.set(m.id, m);
+      if (m?.id) {
+        const previous = merge.get(m.id);
+        merge.set(m.id, {
+          ...previous,
+          ...m,
+          deliveredAt: m.deliveredAt ?? previous?.deliveredAt,
+          readAt: m.readAt ?? previous?.readAt,
+        });
+      }
     }
     emit();
   };
@@ -171,11 +179,14 @@ export async function sendChatMessage(input: {
   fromRole?: 'user' | 'host';
   imageUrl?: string;
   kind?: 'text' | 'image' | 'support';
+  clientMessageId?: string;
 }) {
   const text = input.text.trim();
   if (!text && !input.imageUrl) return;
 
   // Always sync via CoinCall API so Luma ↔ Host DMs work without Firebase
+  const clientMessageId =
+    input.clientMessageId || `msg_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
   const apiRes = await fetch(`${api()}/dm/send`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -188,6 +199,8 @@ export async function sendChatMessage(input: {
       peerName: input.peerName,
       peerAvatar: input.peerAvatar,
       fromRole: input.fromRole || 'host',
+      imageUrl: input.imageUrl,
+      clientMessageId,
     }),
   });
   if (!apiRes.ok) {
@@ -197,13 +210,15 @@ export async function sendChatMessage(input: {
     );
   }
 
-  if (!isFirebaseReady()) return;
+  const apiData = (await apiRes.json()) as { message?: ChatMessage };
+  if (!isFirebaseReady() || !apiData.message) return apiData;
 
   try {
     const id = chatIdFor(input.fromId, input.toId);
     const db = getFirebaseDb();
-    const msgRef = push(ref(db, `chats/${id}/messages`));
-    const createdAt = Date.now();
+    const serverMessage = apiData.message;
+    const msgRef = ref(db, `chats/${id}/messages/${serverMessage.id}`);
+    const createdAt = serverMessage.createdAt;
     const kind = input.imageUrl ? 'image' : input.kind || 'text';
     await set(msgRef, {
       fromId: input.fromId,
@@ -235,6 +250,23 @@ export async function sendChatMessage(input: {
   } catch {
     // API already delivered the DM; Firebase is optional mirror
   }
+  return apiData;
+}
+
+export async function uploadChatImage(ownerId: string, dataUrl: string) {
+  const res = await fetch(`${api()}/chat/images`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-user-id': ownerId },
+    body: JSON.stringify({ ownerId, image: dataUrl }),
+  });
+  const data = (await res.json().catch(() => ({}))) as {
+    imageUrl?: string;
+    error?: string;
+  };
+  if (!res.ok || !data.imageUrl) {
+    throw new Error(data.error || 'Image upload failed');
+  }
+  return data.imageUrl;
 }
 
 /** Host mass-texts recent viewers / gifters (1:1 fan-out). */

@@ -15,6 +15,7 @@ const EMPTY: HostAppUpdateConfig = {
     'A new CoinCall Host version is available. Please update to continue earning.',
   iosStoreUrl: '',
   androidStoreUrl: '',
+  androidApkUrl: '',
   webUpdateUrl: '',
   updatedAt: 0,
   updatedBy: '',
@@ -177,6 +178,13 @@ export function ForceUpdatePanel() {
               value={form.androidStoreUrl}
               onChange={(e) => set('androidStoreUrl')(e.target.value)}
               placeholder="https://play.google.com/…"
+            />
+          </DeskField>
+          <DeskField label="Direct Android APK URL (Host App)">
+            <input
+              value={form.androidApkUrl}
+              onChange={(e) => set('androidApkUrl')(e.target.value)}
+              placeholder="https://your-download-server/host-app.apk"
             />
           </DeskField>
           <DeskField label="Web / fallback URL">

@@ -20,11 +20,11 @@ export function UsersWalletsPanel() {
     'all',
   );
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (search = '') => {
     setLoading(true);
     setError('');
     try {
-      const data = await fetchAdminWallets();
+      const data = await fetchAdminWallets(search);
       setWallets(data.wallets || []);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load wallets');
@@ -136,7 +136,25 @@ export function UsersWalletsPanel() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search user id / name / App ID…"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') void load(query);
+          }}
         />
+        <button type="button" className="btn-pink" onClick={() => void load(query)}>
+          Search by ID
+        </button>
+        {query ? (
+          <button
+            type="button"
+            className="btn-ghost"
+            onClick={() => {
+              setQuery('');
+              void load();
+            }}
+          >
+            Clear
+          </button>
+        ) : null}
         <div className="desk-filters">
           {(['all', 'active', 'suspended', 'banned'] as const).map((f) => (
             <button

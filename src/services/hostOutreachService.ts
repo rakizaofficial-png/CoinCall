@@ -1,6 +1,6 @@
 import { env } from '../config/env';
-import { sendRealtime, subscribeRealtime } from './realtimeWs';
-import { massTextUsers, sendAdminSupportMessage } from './chatService';
+import { subscribeRealtime } from './realtimeWs';
+import { sendAdminSupportMessage } from './chatService';
 
 function apiBase() {
   const raw = (env.apiBaseUrl || 'https://coincall-api.onrender.com/api').replace(/\/$/, '');
@@ -152,26 +152,6 @@ export async function massTextAllActiveUsers(input: {
     data.userIds ||
     data.recipients?.map((r) => r.userId) ||
     [];
-
-  if (ids.length) {
-    await massTextUsers({
-      fromId: input.hostId,
-      fromName: input.hostName,
-      userIds: ids,
-      text,
-    }).catch(() => 0);
-  }
-
-  sendRealtime({
-    type: 'mass:text',
-    payload: {
-      hostId: input.hostId,
-      hostName: input.hostName,
-      text,
-      sent: data.sent ?? ids.length,
-      at: Date.now(),
-    },
-  });
 
   return Number(data.sent) || ids.length;
 }

@@ -10,10 +10,6 @@ export type AdminRole =
 export type AdminSection =
   | 'dashboard'
   | 'agencies'
-  | 'agency_hosts'
-  | 'individual_hosts'
-  | 'host_approver'
-  | 'host_kyc'
   | 'hosts'
   | 'users'
   | 'revenue'
@@ -38,10 +34,6 @@ export type AgencyPerms = {
 const FULL: AdminSection[] = [
   'dashboard',
   'agencies',
-  'agency_hosts',
-  'individual_hosts',
-  'host_approver',
-  'host_kyc',
   'hosts',
   'users',
   'revenue',
@@ -60,10 +52,6 @@ const ROLE_SECTIONS: Record<AdminRole, AdminSection[]> = {
   super_admin: FULL,
   moderator: [
     'dashboard',
-    'agency_hosts',
-    'individual_hosts',
-    'host_approver',
-    'host_kyc',
     'hosts',
     'calls',
     'control',
@@ -77,14 +65,12 @@ const ROLE_SECTIONS: Record<AdminRole, AdminSection[]> = {
     'dashboard',
     'users',
     'reports',
-    'host_approver',
-    'host_kyc',
     'hosts',
     'inbox',
   ],
   agency: [
     'dashboard',
-    'agency_hosts',
+    'hosts',
     'revenue',
     'referrals',
     'inbox',
@@ -101,7 +87,7 @@ export function sectionsForRole(
   if (role === 'agency' && agencyPerms) {
     if (!agencyPerms.canViewRevenue) list = list.filter((s) => s !== 'revenue');
     if (!agencyPerms.canManageHosts)
-      list = list.filter((s) => s !== 'agency_hosts');
+      list = list.filter((s) => s !== 'hosts');
     if (!agencyPerms.canViewCalls && !agencyPerms.canMonitor)
       list = list.filter((s) => s !== 'calls');
     if (!agencyPerms.canRequestPayout)
