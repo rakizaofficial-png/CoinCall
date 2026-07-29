@@ -20,8 +20,10 @@ import {
   FlatList,
   Image,
   Keyboard,
+  PanResponder,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Switch,
   Text,
@@ -39,6 +41,7 @@ import { useLiveRoomRtmEvents } from '../../hooks/useLiveRoomRtmEvents';
 import {
   beautyCssFilter,
   setAgoraBeauty,
+  setAgoraBeautyIntensity,
   setAgoraCameraOff,
   setAgoraMuted,
   startAgoraLiveBroadcast,
@@ -99,6 +102,7 @@ export function LiveRoomScreen({ navigation, route }: Props) {
   const [beautyPreset, setBeautyPreset] = useState<BeautyPreset>(
     goLiveDraft.beautyPreset,
   );
+  const [beautyIntensity, setBeautyIntensity] = useState(0.82);
   const [sheet, setSheet] = useState<Sheet>('none');
   const [cameraReady, setCameraReady] = useState(false);
   const [chatText, setChatText] = useState('');
@@ -166,13 +170,14 @@ export function LiveRoomScreen({ navigation, route }: Props) {
   useEffect(() => {
     if (!hostMode || !cameraReady) return;
     void setAgoraBeauty(beauty ? beautyPreset : 'off');
+    void setAgoraBeautyIntensity(beauty ? beautyIntensity : 0);
     if (Platform.OS === 'web') {
       const el = document.getElementById('live-local');
       if (el && 'style' in el) {
         (el as HTMLElement).style.filter = beauty ? beautyCssFilter(beautyPreset) : 'none';
       }
     }
-  }, [beauty, beautyPreset, cameraReady, hostMode]);
+  }, [beauty, beautyIntensity, beautyPreset, cameraReady, hostMode]);
 
   // Start broadcast immediately on mount — don't block on UI render
   useEffect(() => {
@@ -576,10 +581,10 @@ export function LiveRoomScreen({ navigation, route }: Props) {
 
       {/* Filter sheet */}
       {sheet === 'filters' && (
-        <BottomSheet onClose={() => setSheet('none')} title="Deep AR filters">
+        <BottomSheet onClose={() => setSheet('none')} title="DeepAR Glam Studio">
           <View style={styles.filterHead}>
             <Text style={styles.filterHint}>
-              Free heavy beauty presets for live camera
+              Official DeepAR effects swap instantly without stopping Agora live.
             </Text>
             <Switch
               value={beauty}
@@ -591,7 +596,11 @@ export function LiveRoomScreen({ navigation, route }: Props) {
               thumbColor="#fff"
             />
           </View>
-          <View style={styles.filterGrid}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.filterScroller}
+          >
             {LIVE_FILTERS.map((filter) => {
               const on = beauty && beautyPreset === filter.id;
               return (
@@ -601,11 +610,14 @@ export function LiveRoomScreen({ navigation, route }: Props) {
                     setBeauty(true);
                     setBeautyPreset(filter.id);
                     setGoLiveDraft({ beautyOn: true, beautyPreset: filter.id });
+                    void setAgoraBeauty(filter.id);
+                    void setAgoraBeautyIntensity(beautyIntensity);
                   }}
                   style={[styles.filterCard, on && styles.filterCardOn]}
                 >
+                  <Text style={styles.filterIcon}>{filter.icon}</Text>
                   <Text style={[styles.filterName, on && styles.filterNameOn]}>
-                    {filter.label}
+                    {filter.shortLabel}
                   </Text>
                   <Text style={styles.filterDesc} numberOfLines={2}>
                     {filter.description}
@@ -613,7 +625,18 @@ export function LiveRoomScreen({ navigation, route }: Props) {
                 </Pressable>
               );
             })}
-          </View>
+          </ScrollView>
+          <BeautyIntensitySlider
+            value={beautyIntensity}
+            disabled={!beauty}
+            onChange={(next) => {
+              setBeautyIntensity(next);
+              void setAgoraBeautyIntensity(next);
+            }}
+          />
+          <Text style={styles.filterPathHint} numberOfLines={2}>
+            Assets load from EXPO_PUBLIC_DEEPAR_EFFECT_BASE_URL / beauty + accessories folders.
+          </Text>
         </BottomSheet>
       )}
 
@@ -631,6 +654,54 @@ export function LiveRoomScreen({ navigation, route }: Props) {
           }}
         />
       )}
+    </View>
+  );
+}
+
+function BeautyIntensitySlider({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: number;
+  disabled?: boolean;
+  onChange: (value: number) => void;
+}) {
+  const barWidth = useRef(1);
+  const update = useCallback(
+    (x: number) => {
+      if (disabled) return;
+      const next = Math.max(0, Math.min(1, x / barWidth.current));
+      onChange(Number(next.toFixed(2)));
+    },
+    [disabled, onChange],
+  );
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => !disabled,
+        onMoveShouldSetPanResponder: () => !disabled,
+        onPanResponderGrant: (event) => update(event.nativeEvent.locationX),
+        onPanResponderMove: (event) => update(event.nativeEvent.locationX),
+      }),
+    [disabled, update],
+  );
+  return (
+    <View style={[styles.sliderBox, disabled && styles.sliderBoxOff]}>
+      <View style={styles.sliderLabelRow}>
+        <Text style={styles.sliderLabel}>Skin smoothing / whitening intensity</Text>
+        <Text style={styles.sliderValue}>{Math.round(value * 100)}%</Text>
+      </View>
+      <View
+        style={styles.sliderTrack}
+        onLayout={(event) => {
+          barWidth.current = Math.max(1, event.nativeEvent.layout.width);
+        }}
+        {...panResponder.panHandlers}
+      >
+        <View style={[styles.sliderFill, { width: `${Math.round(value * 100)}%` }]} />
+        <View style={[styles.sliderThumb, { left: `${Math.round(value * 100)}%` }]} />
+      </View>
     </View>
   );
 }
@@ -930,27 +1001,81 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     flex: 1,
   },
-  filterGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  filterScroller: {
+    gap: 10,
+    paddingRight: 16,
+    paddingBottom: 4,
+  },
   filterCard: {
-    width: '31%',
-    minHeight: 74,
-    borderRadius: 14,
-    padding: 10,
-    backgroundColor: 'rgba(255,255,255,0.07)',
+    width: 112,
+    minHeight: 118,
+    borderRadius: 18,
+    padding: 12,
+    backgroundColor: 'rgba(255,255,255,0.075)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
+    shadowColor: '#A78BFA',
+    shadowOpacity: 0.18,
+    shadowRadius: 14,
   },
   filterCardOn: {
-    backgroundColor: 'rgba(167,139,250,0.2)',
-    borderColor: '#A78BFA',
+    backgroundColor: 'rgba(167,139,250,0.24)',
+    borderColor: '#C4B5FD',
   },
-  filterName: { color: '#fff', fontWeight: '900', fontSize: 12 },
+  filterIcon: { fontSize: 23, marginBottom: 8 },
+  filterName: { color: '#fff', fontWeight: '900', fontSize: 12, lineHeight: 14 },
   filterNameOn: { color: '#F8FAFC' },
   filterDesc: {
     color: 'rgba(255,255,255,0.52)',
     fontSize: 10,
     lineHeight: 13,
     marginTop: 4,
+  },
+  filterPathHint: {
+    color: 'rgba(255,255,255,0.38)',
+    fontSize: 10,
+    lineHeight: 13,
+    marginTop: 10,
+  },
+  sliderBox: {
+    marginTop: 14,
+    padding: 12,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  sliderBoxOff: { opacity: 0.45 },
+  sliderLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  sliderLabel: { color: '#fff', fontSize: 12, fontWeight: '800' },
+  sliderValue: { color: '#F5C14C', fontSize: 12, fontWeight: '900' },
+  sliderTrack: {
+    height: 28,
+    borderRadius: 999,
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    overflow: 'visible',
+  },
+  sliderFill: {
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: '#C4B5FD',
+  },
+  sliderThumb: {
+    position: 'absolute',
+    top: 4,
+    width: 20,
+    height: 20,
+    marginLeft: -10,
+    borderRadius: 10,
+    backgroundColor: '#fff',
+    borderWidth: 3,
+    borderColor: '#A78BFA',
   },
   saveBtn: {
     backgroundColor: '#FF4D8D',

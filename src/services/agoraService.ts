@@ -4,6 +4,8 @@ import { env } from '../config/env';
 import {
   shouldUseDeepARWeb,
   startDeepARWebLive,
+  setDeepARBeautyIntensity,
+  switchDeepAREffect,
   type DeepARSession,
 } from './deepArService';
 import {
@@ -44,6 +46,7 @@ let session: LiveSession | null = null;
 let beautyRegistered = false;
 let beautyExtension: any = null;
 let currentPreset: BeautyPreset = 'snap';
+let currentDeepARIntensity = 0.82;
 
 function apiRoot() {
   const raw = (env.apiBaseUrl || 'https://coincall-api.onrender.com/api').replace(
@@ -302,6 +305,12 @@ export async function setAgoraBeauty(
   currentPreset = preset;
   applyLocalCssBeauty(preset);
 
+  if (session?.deepAR) {
+    const switched = await switchDeepAREffect(session.deepAR ? session.deepAR : null, preset, currentDeepARIntensity);
+    session.beautyPreset = preset;
+    if (switched) return;
+  }
+
   if (!session?.cam) return;
   const processor = session.beautyProcessor;
   if (!processor) {
@@ -320,6 +329,21 @@ export async function setAgoraBeauty(
     session.beautyPreset = preset;
   } catch (e) {
     console.warn('setAgoraBeauty failed', e);
+  }
+}
+
+export async function setAgoraBeautyIntensity(intensity: number) {
+  currentDeepARIntensity = Math.max(0, Math.min(1, intensity));
+  const preset = session?.beautyPreset ?? currentPreset;
+  if (session?.deepAR) {
+    await setDeepARBeautyIntensity(session.deepAR, preset, currentDeepARIntensity);
+    return;
+  }
+  if (session?.beautyProcessor && preset !== 'off') {
+    const opts = { ...BEAUTY_PRESETS[preset] };
+    opts.lighteningLevel = Math.min(1, opts.lighteningLevel * (0.55 + currentDeepARIntensity * 0.65));
+    opts.smoothnessLevel = Math.min(1, opts.smoothnessLevel * (0.55 + currentDeepARIntensity * 0.65));
+    session.beautyProcessor.setOptions(opts);
   }
 }
 
