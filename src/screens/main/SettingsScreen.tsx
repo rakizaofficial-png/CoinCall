@@ -206,25 +206,9 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
         <Text style={[styles.rowTitle, { color: colors.text, marginBottom: 8 }]}>
           Coins per minute
         </Text>
-        <View style={styles.chipRow}>
-          {[50, 80, 100, 150, 200].map((n) => (
-            <Pressable
-              key={n}
-              onPress={() => void patchLiveCall({ coinsPerMinute: n })}
-              style={[
-                styles.chip,
-                {
-                  backgroundColor:
-                    liveCall.coinsPerMinute === n ? `${colors.primary}44` : colors.bgSoft,
-                  borderColor:
-                    liveCall.coinsPerMinute === n ? colors.primary : colors.border,
-                },
-              ]}
-            >
-              <Text style={{ color: colors.text, fontWeight: '800', fontSize: 12 }}>{n}</Text>
-            </Pressable>
-          ))}
-        </View>
+        <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
+          {liveCall.coinsPerMinute} coins/min · managed by admin
+        </Text>
         <View style={[styles.divider, { backgroundColor: colors.border, marginTop: 12 }]} />
         <Text style={[styles.rowTitle, { color: colors.text, marginBottom: 8 }]}>
           Max waiting time

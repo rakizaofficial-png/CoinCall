@@ -71,7 +71,7 @@ export default function LivePage() {
             avatar: avatarFor(id, host?.avatarUrl || r.hostAvatar),
             title: r.title || "Live now",
             viewers: Number(r.viewers) || 0,
-            rate: host?.ratePerMinute || 80,
+            rate: host?.ratePerMinute || 40,
             entryLocked: Boolean((r as { entryLocked?: boolean }).entryLocked),
             entryFee: Number((r as { entryFee?: number }).entryFee) || 0,
           };

@@ -123,6 +123,24 @@ const auditLogs: AuditLogEntry[] = [];
 const notifications = new Map<string, HostNotification[]>();
 
 const DEFAULT_COMMISSION = 0.3;
+export const MIN_HOST_CALL_PRICE = 30;
+export const MAX_HOST_CALL_PRICE = 40;
+export const DEFAULT_HOST_CALL_PRICE = 40;
+
+export function normalizeHostCallPrice(value: unknown): number {
+  const price = Math.round(Number(value));
+  if (!Number.isFinite(price)) return DEFAULT_HOST_CALL_PRICE;
+  return Math.min(MAX_HOST_CALL_PRICE, Math.max(MIN_HOST_CALL_PRICE, price));
+}
+
+function isValidHostCallPrice(value: unknown): boolean {
+  const price = Number(value);
+  return (
+    Number.isInteger(price) &&
+    price >= MIN_HOST_CALL_PRICE &&
+    price <= MAX_HOST_CALL_PRICE
+  );
+}
 
 function now() {
   return Date.now();
@@ -155,7 +173,6 @@ export function ensureHostRecord(
       bio: patch?.bio || '',
       languages: patch?.languages || [],
       categories: patch?.categories || [],
-      callPrice: patch?.callPrice ?? 80,
       photoUrl: patch?.photoUrl,
       photoUrls: patch?.photoUrls || [],
       videoUrl: patch?.videoUrl,
@@ -185,10 +202,20 @@ export function ensureHostRecord(
       createdAt: now(),
       updatedAt: now(),
       ...patch,
+      callPrice: normalizeHostCallPrice(patch?.callPrice),
     };
     registry.set(id, row);
   } else if (patch) {
-    row = { ...row, ...patch, id, updatedAt: now() };
+    row = {
+      ...row,
+      ...patch,
+      id,
+      callPrice:
+        patch.callPrice == null
+          ? normalizeHostCallPrice(row.callPrice)
+          : normalizeHostCallPrice(patch.callPrice),
+      updatedAt: now(),
+    };
     registry.set(id, row);
   }
   return row;
@@ -700,7 +727,7 @@ export function applyHostAction(
         typeof opts.callPrice === 'number' &&
         Number.isFinite(opts.callPrice)
       ) {
-        row.callPrice = Math.min(9999, Math.max(1, Math.floor(opts.callPrice)));
+        row.callPrice = normalizeHostCallPrice(opts.callPrice);
         notifyHost(hostUid, {
           type: 'call_price_updated',
           title: 'Call price updated',
@@ -836,7 +863,6 @@ export function registerHostManagementRoutes(
       categories: Array.isArray(req.body?.categories)
         ? req.body.categories.map(String)
         : [],
-      callPrice: Number(req.body?.callPrice || 80),
       photoUrl: req.body?.photoUrl ? String(req.body.photoUrl) : undefined,
       photoUrls: Array.isArray(req.body?.photoUrls)
         ? req.body.photoUrls.map(String)
@@ -1046,13 +1072,22 @@ export function registerHostManagementRoutes(
       action === 'set_call_price' ||
       action === 'set_commission' ||
       action === 'freeze_wallet';
+    if (
+      action === 'set_call_price' &&
+      !isValidHostCallPrice(req.body?.callPrice)
+    ) {
+      res.status(400).json({
+        error: `callPrice must be an integer between ${MIN_HOST_CALL_PRICE} and ${MAX_HOST_CALL_PRICE}`,
+      });
+      return;
+    }
     if (financeAction && !canFinance(adminRole)) {
       res.status(403).json({ error: 'Finance role required' });
       return;
     }
     if (!financeAction && !canModerate(adminRole) && action !== 'record_login') {
       res.status(403).json({
-        error: priceAction ? 'Finance role required' : 'Moderator role required',
+        error: 'Moderator role required',
       });
       return;
     }
@@ -1110,6 +1145,15 @@ export function registerHostManagementRoutes(
     const reason = req.body?.reason ? String(req.body.reason) : undefined;
     if (!ids.length || !action) {
       res.status(400).json({ error: 'ids and action required' });
+      return;
+    }
+    if (
+      priceAction &&
+      !isValidHostCallPrice(req.body?.callPrice)
+    ) {
+      res.status(400).json({
+        error: `callPrice must be an integer between ${MIN_HOST_CALL_PRICE} and ${MAX_HOST_CALL_PRICE}`,
+      });
       return;
     }
     if (adminRole === 'agency') {

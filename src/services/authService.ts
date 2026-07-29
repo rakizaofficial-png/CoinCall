@@ -251,7 +251,7 @@ export async function submitHostApplicationToFirebase(
     bio: data.bio || '',
     languages: data.languages || [],
     categories: data.categories || [],
-    callPrice: data.callPrice ?? 80,
+    callPrice: data.callPrice ?? 40,
     idDocumentUrl: data.idDocumentUrl || null,
     selfieUrl: data.selfieUrl || null,
     callsEnabled: true,

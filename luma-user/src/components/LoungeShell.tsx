@@ -12,7 +12,7 @@ import { useApp } from "@/lib/store";
  */
 export function LoungeShell({
   children,
-  minuteRate = 80,
+  minuteRate = 40,
   enableAutoTopUp = true,
 }: {
   children: ReactNode;

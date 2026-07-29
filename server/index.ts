@@ -7,11 +7,13 @@ import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import {
   assertHostCanReceiveCalls,
+  DEFAULT_HOST_CALL_PRICE,
   dumpManagedHostsForSnapshot,
   ensureHostRecord,
   getHost,
   listHosts,
   loadManagedHostsFromSnapshot,
+  normalizeHostCallPrice,
   notifyHost,
   recordHostEarning,
   registerHostManagementRoutes,
@@ -370,7 +372,7 @@ function archiveCall(call: CallRecord, endReason: CallEndReason) {
   const startedAt = call.acceptedAt || call.createdAt;
   const endedAt = call.updatedAt || Date.now();
   const billedMinutes = Math.max(0, Math.floor(call.billedMinutes || 0));
-  const rate = Math.max(1, Math.floor(Number(call.ratePerMinute) || 80));
+  const rate = normalizeHostCallPrice(call.ratePerMinute);
   const row: CallHistoryRecord = {
     id: call.id,
     hostId: call.hostId,
@@ -844,7 +846,9 @@ app.post('/api/hosts/presence', (req, res) => {
     name: String(name),
     avatarUrl: safeAvatar,
     country: country ? String(country) : undefined,
-    ratePerMinute: Number(ratePerMinute) || 80,
+    ratePerMinute: normalizeHostCallPrice(
+      managed?.callPrice ?? ratePerMinute ?? DEFAULT_HOST_CALL_PRICE,
+    ),
     isOnline: true,
     isLive: Boolean(isLive),
     isOnCall: Boolean(isOnCall),
@@ -939,7 +943,9 @@ app.get('/api/hosts/:hostId/profile', (req, res) => {
       name: presence?.name || managed?.name || 'Host',
       avatarUrl,
       country: presence?.country || managed?.country,
-      ratePerMinute: presence?.ratePerMinute || managed?.callPrice || 80,
+      ratePerMinute: normalizeHostCallPrice(
+        managed?.callPrice ?? presence?.ratePerMinute,
+      ),
       isOnline: Boolean(presence?.isOnline),
       isLive: Boolean(presence?.isLive),
       isOnCall: Boolean(presence?.isOnCall),
@@ -977,16 +983,6 @@ function handleHostProfileUpdate(req: express.Request, res: express.Response) {
     ? body.photoUrls.map(String).filter(Boolean).slice(0, 12)
     : undefined;
   const photoUrl = body.photoUrl ? String(body.photoUrl) : photoUrls?.[0];
-  let callPrice: number | undefined;
-  if (body.callPrice != null && body.callPrice !== '') {
-    const n = Math.round(Number(body.callPrice));
-    if (!Number.isFinite(n) || n < 20 || n > 500) {
-      res.status(400).json({ error: 'callPrice must be between 20 and 500' });
-      return;
-    }
-    callPrice = n;
-  }
-
   const patch: Record<string, unknown> = { name };
   if (body.bio != null) patch.bio = String(body.bio).trim();
   if (body.country != null) patch.country = String(body.country).trim();
@@ -997,8 +993,6 @@ function handleHostProfileUpdate(req: express.Request, res: express.Response) {
   if (Array.isArray(body.categories)) {
     patch.categories = body.categories.map(String);
   }
-  if (callPrice != null) patch.callPrice = callPrice;
-
   const managed = ensureHostRecord(
     hostId,
     patch as Parameters<typeof ensureHostRecord>[1],
@@ -1018,7 +1012,9 @@ function handleHostProfileUpdate(req: express.Request, res: express.Response) {
       name: managed.name,
       avatarUrl,
       country: managed.country || presence.country,
-      ratePerMinute: managed.callPrice || presence.ratePerMinute || 80,
+      ratePerMinute: normalizeHostCallPrice(
+        managed.callPrice ?? presence.ratePerMinute,
+      ),
       lastSeen: Date.now(),
     };
     next.readyToCall = computeReadyToCall(next);
@@ -1055,7 +1051,7 @@ function handleHostProfileUpdate(req: express.Request, res: express.Response) {
       name: managed.name,
       avatarUrl,
       country: managed.country,
-      ratePerMinute: managed.callPrice || 80,
+      ratePerMinute: normalizeHostCallPrice(managed.callPrice),
       bio: managed.bio || '',
       photoUrls: managed.photoUrls || [],
       languages: managed.languages || [],
@@ -1162,7 +1158,7 @@ app.post('/api/calls', (req, res) => {
     return;
   }
 
-  const rate = Math.max(1, Math.floor(Number(host.ratePerMinute) || 80));
+  const rate = normalizeHostCallPrice(host.ratePerMinute);
   const userWallet = ensureWallet(String(userId), {
     role: 'user',
     displayName: String(userName),
@@ -1312,7 +1308,7 @@ app.post('/api/calls/:id/minute', (req, res) => {
   if (!requireUserMatch(req, res, userId)) return;
   if (!assertUserAccountActive(userId, res)) return;
 
-  const amount = Math.max(1, Math.floor(Number(call.ratePerMinute) || 80));
+  const amount = normalizeHostCallPrice(call.ratePerMinute);
   const expectedMinute = (call.billedMinutes || 0) + 1;
   const requestedMinute = Math.floor(Number(req.body?.minuteIndex) || 0);
   const nextMinute =
@@ -4266,7 +4262,9 @@ function buildAutoCallCandidates(): CandidateHost[] {
       country: managed?.country || p.country,
       language: managed?.languages?.[0],
       categories: managed?.categories || [],
-      ratePerMinute: managed?.callPrice || p.ratePerMinute || 80,
+      ratePerMinute: normalizeHostCallPrice(
+        managed?.callPrice ?? p.ratePerMinute,
+      ),
       isVerified: verified,
       hostStatus: status || 'approved',
       callsEnabled,
@@ -4471,7 +4469,9 @@ app.post('/api/auto-call/host-invite', (req, res) => {
         country: managed?.country || p.country,
         language: managed?.languages?.[0],
         categories: managed?.categories || [],
-        ratePerMinute: managed?.callPrice || p.ratePerMinute || 80,
+        ratePerMinute: normalizeHostCallPrice(
+          managed?.callPrice ?? p.ratePerMinute,
+        ),
         isVerified: true,
         hostStatus: 'approved',
         callsEnabled: true,
@@ -5336,7 +5336,7 @@ app.post('/api/live/rooms', (req, res) => {
         id: hostId,
         name: hostName,
         avatarUrl: room.hostAvatar ? String(room.hostAvatar) : undefined,
-        ratePerMinute: 80,
+        ratePerMinute: DEFAULT_HOST_CALL_PRICE,
         isOnline: true,
         isLive: true,
         isOnCall: false,

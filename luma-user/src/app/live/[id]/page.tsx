@@ -140,7 +140,7 @@ export default function LiveRoomPage({
         host?.avatarUrl || room?.hostAvatar || mock?.image,
       ),
       callRate:
-        host?.ratePerMinute || room?.ratePerMinute || mock?.callRate || 80,
+        host?.ratePerMinute || room?.ratePerMinute || mock?.callRate || 40,
       roomId: room?.id || `live_${hostId}`,
       channel,
     };

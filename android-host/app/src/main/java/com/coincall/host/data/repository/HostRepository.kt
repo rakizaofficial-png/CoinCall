@@ -71,7 +71,7 @@ class HostRepository @Inject constructor(
                     bio = "New CoinCall host",
                     languages = listOf("English"),
                     categories = listOf("Chat"),
-                    callPrice = 80,
+                    callPrice = 40,
                 ),
             )
             session

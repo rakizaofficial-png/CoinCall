@@ -103,7 +103,7 @@ export function CallScreen({ navigation, route }: Props) {
     peerHost?.avatarUrl ||
     `https://i.pravatar.cc/300?u=${route.params.hostId}`;
   const peerCountry = route.params.peerCountry || '—';
-  const rate = route.params.ratePerMinute || peerHost?.ratePerMinute || 80;
+  const rate = route.params.ratePerMinute || peerHost?.ratePerMinute || 40;
   const channel =
     route.params.channel || (peerHost ? `call_${peerHost.id}` : '');
 

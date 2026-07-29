@@ -140,7 +140,7 @@ export async function publishHostPresence(input: {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      ratePerMinute: 80,
+      ratePerMinute: 40,
       isLive: false,
       isOnCall: false,
       workspaceMode: 'waiting_1v1',
