@@ -1889,12 +1889,14 @@ app.post('/api/gifts/send', (req, res) => {
     combo: 1,
     createdAt: Date.now(),
     txnId: xfer.txn.id,
+    roomGiftCoins: undefined as number | undefined,
   };
 
   const resolvedRoom = roomId ? findLiveRoom(roomId) : findLiveRoom(hostId);
   if (resolvedRoom) {
     const room = resolvedRoom.room;
     room.giftCoins = Number(room.giftCoins || 0) + catalog.coins;
+    giftEvent.roomGiftCoins = room.giftCoins;
     room.updatedAt = Date.now();
     liveRooms.set(resolvedRoom.id, room);
     pushLiveComment(resolvedRoom.id, {
@@ -5221,6 +5223,42 @@ app.post('/api/live/rooms', (req, res) => {
   }
   const hostId = String(room.hostId || '');
   const hostName = String(room.hostName || 'Host');
+  const previous = liveRooms.get(id);
+  const incomingStartedAt = Number(room.startedAt || room.createdAt || 0);
+  const previousStartedAt = Number(
+    previous?.startedAt || previous?.createdAt || 0,
+  );
+  const sameSession = Boolean(
+    previous?.isLive &&
+      previousStartedAt > 0 &&
+      incomingStartedAt > 0 &&
+      Math.abs(incomingStartedAt - previousStartedAt) < 2_000,
+  );
+  if (sameSession && previous) {
+    // Server gift totals only grow during a single live session.
+    room.giftCoins = Math.max(
+      Number(previous.giftCoins || 0),
+      Number(room.giftCoins || 0),
+    );
+    // A heartbeat created before a lock action cannot revert that action.
+    const previousLockVersion = Math.max(
+      0,
+      Math.floor(Number(previous.lockVersion) || 0),
+    );
+    const incomingLockVersion = Math.max(
+      0,
+      Math.floor(Number(room.lockVersion) || 0),
+    );
+    if (previousLockVersion > incomingLockVersion) {
+      room.entryLocked = Boolean(previous.entryLocked);
+      room.entryFee = Number(previous.entryFee || 0);
+      room.lockVersion = previousLockVersion;
+      room.lockUpdatedAt = previous.lockUpdatedAt;
+    }
+  }
+  if (!Number.isFinite(Number(room.lockVersion))) {
+    room.lockVersion = room.entryLocked ? 1 : 0;
+  }
   if (hostId) {
     const gate = assertHostCanReceiveCalls(hostId);
     if (!gate.ok) {
@@ -5523,6 +5561,9 @@ app.patch('/api/live/rooms/:id/lock', (req, res) => {
     : 0;
   room.entryLocked = entryLocked;
   room.entryFee = entryFee;
+  room.lockVersion =
+    Math.max(0, Math.floor(Number(room.lockVersion) || 0)) + 1;
+  room.lockUpdatedAt = Date.now();
   room.updatedAt = Date.now();
   liveRooms.set(String(room.id || id), room);
   broadcastWs({
@@ -5534,6 +5575,7 @@ app.patch('/api/live/rooms/:id/lock', (req, res) => {
       channel: String(room.channel || room.id || id),
       entryLocked,
       entryFee,
+      lockVersion: room.lockVersion,
       updatedAt: room.updatedAt,
     },
   });
@@ -5549,6 +5591,7 @@ app.patch('/api/live/rooms/:id/lock', (req, res) => {
       entryFee,
       locked: entryLocked,
       unlockCoins: entryFee,
+      lockVersion: room.lockVersion,
       updatedAt: room.updatedAt,
     },
   });
@@ -5558,6 +5601,7 @@ app.patch('/api/live/rooms/:id/lock', (req, res) => {
     roomId: String(room.id || id),
     entryLocked,
     entryFee,
+    lockVersion: room.lockVersion,
   });
 });
 
