@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import LottieView from 'lottie-react-native';
+import { Audio } from 'expo-av';
 
 export type GiftLottieSource =
   | string
@@ -16,6 +17,7 @@ export type GiftAnimationItem = {
   giftName?: string;
   coins?: number;
   durationMs?: number;
+  soundUrl?: string;
 };
 
 type Props = {
@@ -39,12 +41,46 @@ export function GiftAnimationPlayer({ item, onFinish }: Props) {
 
   useEffect(() => {
     if (!item) return;
+    let cancelled = false;
+    let sound: Audio.Sound | null = null;
     const timeout = setTimeout(onFinish, item.durationMs || 5200);
-    requestAnimationFrame(() => {
-      lottieRef.current?.reset();
-      lottieRef.current?.play();
-    });
-    return () => clearTimeout(timeout);
+    const start = async () => {
+      if (item.soundUrl) {
+        try {
+          await Audio.setAudioModeAsync({
+            playsInSilentModeIOS: true,
+            interruptionModeIOS: 1,
+            interruptionModeAndroid: 1,
+            shouldDuckAndroid: true,
+          });
+          const loaded = await Audio.Sound.createAsync(
+            { uri: item.soundUrl },
+            { shouldPlay: false, volume: 0.78 },
+          );
+          sound = loaded.sound;
+        } catch {
+          sound = null;
+        }
+      }
+      if (cancelled) {
+        await sound?.unloadAsync().catch(() => undefined);
+        return;
+      }
+      requestAnimationFrame(() => {
+        lottieRef.current?.reset();
+        lottieRef.current?.play();
+        void sound?.playAsync();
+      });
+    };
+    void start();
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+      if (sound) {
+        void sound.stopAsync().catch(() => undefined);
+        void sound.unloadAsync().catch(() => undefined);
+      }
+    };
   }, [item, onFinish]);
 
   if (!item || !source) return null;
@@ -55,7 +91,7 @@ export function GiftAnimationPlayer({ item, onFinish }: Props) {
         ref={lottieRef}
         source={source as any}
         loop={false}
-        autoPlay
+        autoPlay={false}
         resizeMode="cover"
         onAnimationFinish={onFinish}
         style={styles.lottie}

@@ -26,6 +26,7 @@ export type LiveRoomGiftRtmEvent = {
   lottie: {
     source: string;
     durationMs: number;
+    soundUrl?: string;
   };
   totals?: {
     totalCoins?: number;
@@ -209,7 +210,7 @@ export async function publishLiveGiftRtm(input: {
   giftEmoji: string;
   coins: number;
   combo?: number;
-  lottie: { source: string; durationMs: number };
+  lottie: { source: string; durationMs: number; soundUrl?: string };
   totalCoins?: number;
   viewerCount?: number;
   hostEarnings?: number;

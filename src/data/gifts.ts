@@ -21,6 +21,9 @@ export type GiftItem = {
   particles: number;
   gradient: [string, string];
   glow: string;
+  category: 'popular' | 'vip' | 'mega';
+  animationUrl: string;
+  soundUrl: string;
 };
 
 export const GIFT_RARITY_LABEL: Record<GiftRarity, string> = {
@@ -41,7 +44,10 @@ export const GIFT_RARITY_COLOR: Record<GiftRarity, string> = {
   vip: '#ffe566',
 };
 
-export const GIFT_CATALOG: GiftItem[] = [
+const GIFT_CATALOG_BASE: Omit<
+  GiftItem,
+  'category' | 'animationUrl' | 'soundUrl'
+>[] = [
   {
     id: 'coin',
     name: 'Lucky Coin',
@@ -429,6 +435,30 @@ export const GIFT_CATALOG: GiftItem[] = [
     glow: 'rgba(255,215,0,0.95)',
   },
 ];
+
+const GIFT_MEDIA = {
+  popular: {
+    animationUrl: 'https://assets10.lottiefiles.com/packages/lf20_q5pk6p1k.json',
+    soundUrl: 'https://actions.google.com/sounds/v1/cartoon/pop.ogg',
+  },
+  vip: {
+    animationUrl: 'https://assets2.lottiefiles.com/packages/lf20_u4yrau.json',
+    soundUrl: 'https://actions.google.com/sounds/v1/cartoon/magic_chime.ogg',
+  },
+  mega: {
+    animationUrl: 'https://assets7.lottiefiles.com/packages/lf20_touohxv0.json',
+    soundUrl:
+      'https://actions.google.com/sounds/v1/transportation/sports_car_accelerating.ogg',
+  },
+} as const;
+
+export const GIFT_CATALOG: GiftItem[] = GIFT_CATALOG_BASE.map(
+  (gift): GiftItem => {
+  const category: GiftItem['category'] =
+    gift.coins >= 1200 ? 'mega' : gift.coins >= 250 ? 'vip' : 'popular';
+  return { ...gift, category, ...GIFT_MEDIA[category] };
+  },
+);
 
 const ALIASES: Record<string, string> = {
   rose: 'rose_bouquet',

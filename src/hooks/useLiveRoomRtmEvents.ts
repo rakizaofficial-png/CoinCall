@@ -45,6 +45,7 @@ export function useLiveRoomRtmEvents(input: {
         giftName: `${event.giftEmoji} ${event.giftName}${event.combo > 1 ? ` x${event.combo}` : ''}`,
         coins: event.coins * Math.max(1, event.combo || 1),
         durationMs: event.lottie.durationMs,
+        soundUrl: event.lottie.soundUrl,
       });
       setStats((current) => ({
         ...current,
