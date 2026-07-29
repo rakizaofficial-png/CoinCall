@@ -33,6 +33,33 @@ const QueueContext = createContext<QueueContextValue | null>(null);
 const animationCache = new Map<string, object>();
 const MAX_QUEUE_SIZE = 20;
 
+/** Short original in-browser chime for a sent/received gift. */
+function playGiftChime(coins = 0) {
+  try {
+    const BrowserAudioContext = window.AudioContext ||
+      (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!BrowserAudioContext) return;
+    const context = new BrowserAudioContext();
+    const now = context.currentTime;
+    const notes = coins >= 1000 ? [392, 587, 784, 1046] : [523, 784];
+    notes.forEach((frequency, index) => {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.type = coins >= 1000 ? "triangle" : "sine";
+      oscillator.frequency.setValueAtTime(frequency, now + index * 0.09);
+      gain.gain.setValueAtTime(0.0001, now + index * 0.09);
+      gain.gain.exponentialRampToValueAtTime(0.1, now + index * 0.09 + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + index * 0.09 + 0.4);
+      oscillator.connect(gain).connect(context.destination);
+      oscillator.start(now + index * 0.09);
+      oscillator.stop(now + index * 0.09 + 0.44);
+    });
+    window.setTimeout(() => void context.close(), 1200);
+  } catch {
+    // Sound is optional where a browser blocks audio playback.
+  }
+}
+
 function GiftAnimationStage({
   item,
   onDone,
@@ -65,6 +92,7 @@ function GiftAnimationStage({
   }, [item.source]);
 
   useEffect(() => {
+    playGiftChime(item.coins);
     const timer = window.setTimeout(onDone, Math.max(1800, item.durationMs || 4200));
     return () => window.clearTimeout(timer);
   }, [item.durationMs, item.id, onDone]);
