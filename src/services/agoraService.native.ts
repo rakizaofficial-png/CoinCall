@@ -16,11 +16,16 @@ import {
   type BeautyPreset,
   type StartAgoraCallOptions,
 } from './agoraTypes';
+import {
+  pauseNativeDeepAR,
+  resumeNativeDeepAR,
+  setNativeDeepARBeautyIntensity,
+  switchNativeDeepAREffect,
+} from './deepArNativeService';
 
 export type { BeautyPreset } from './agoraTypes';
 export {
   BEAUTY_PRESETS,
-  beautyCssFilter,
   type StartAgoraCallOptions,
 } from './agoraTypes';
 
@@ -91,28 +96,7 @@ async function fetchRtcToken(
 }
 
 function applyNativeBeauty(preset: BeautyPreset) {
-  if (!engine) return;
-  try {
-    if (preset === 'off') {
-      engine.setBeautyEffectOptions(false, {
-        lighteningLevel: 0,
-        smoothnessLevel: 0,
-        rednessLevel: 0,
-        sharpnessLevel: 0,
-      });
-      return;
-    }
-    const opts = BEAUTY_PRESETS[preset];
-    engine.setBeautyEffectOptions(true, {
-      lighteningContrastLevel: opts.lighteningContrastLevel,
-      lighteningLevel: opts.lighteningLevel,
-      smoothnessLevel: opts.smoothnessLevel,
-      rednessLevel: opts.rednessLevel,
-      sharpnessLevel: opts.sharpnessLevel,
-    });
-  } catch {
-    /* beauty optional on some devices */
-  }
+  switchNativeDeepAREffect(preset);
 }
 
 function ensureEngine(appId: string): IRtcEngine {
@@ -187,6 +171,7 @@ export async function startAgoraCall(options: StartAgoraCallOptions) {
   // Preview first so surface paints immediately (no black frame)
   rtc.enableLocalVideo(true);
   rtc.startPreview();
+  resumeNativeDeepAR();
   applyNativeBeauty(preset);
 
   const result = rtc.joinChannel(
@@ -239,6 +224,8 @@ export async function setAgoraMuted(muted: boolean) {
 
 export async function setAgoraCameraOff(off: boolean) {
   engine?.muteLocalVideoStream(off);
+  if (off) pauseNativeDeepAR();
+  else resumeNativeDeepAR();
 }
 
 export async function switchAgoraCamera() {
@@ -260,6 +247,10 @@ export async function setAgoraBeauty(enabledOrPreset: boolean | BeautyPreset) {
   applyNativeBeauty(preset);
 }
 
+export async function setAgoraBeautyIntensity(intensity: number) {
+  setNativeDeepARBeautyIntensity(intensity);
+}
+
 export function getAgoraBeautyPreset(): BeautyPreset {
   return currentPreset;
 }
@@ -274,6 +265,7 @@ export async function startCameraPreview() {
 
 export function stopCameraPreview() {
   try {
+    pauseNativeDeepAR();
     engine?.stopPreview();
   } catch {
     /* ignore */

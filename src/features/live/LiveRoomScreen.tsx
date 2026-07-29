@@ -39,7 +39,6 @@ import { LIVE_FILTERS } from '../../data/liveFilters';
 import { useLiveRoomLockRtm } from '../../hooks/useLiveRoomLockRtm';
 import { useLiveRoomRtmEvents } from '../../hooks/useLiveRoomRtmEvents';
 import {
-  beautyCssFilter,
   setAgoraBeauty,
   setAgoraBeautyIntensity,
   setAgoraCameraOff,
@@ -171,12 +170,6 @@ export function LiveRoomScreen({ navigation, route }: Props) {
     if (!hostMode || !cameraReady) return;
     void setAgoraBeauty(beauty ? beautyPreset : 'off');
     void setAgoraBeautyIntensity(beauty ? beautyIntensity : 0);
-    if (Platform.OS === 'web') {
-      const el = document.getElementById('live-local');
-      if (el && 'style' in el) {
-        (el as HTMLElement).style.filter = beauty ? beautyCssFilter(beautyPreset) : 'none';
-      }
-    }
   }, [beauty, beautyIntensity, beautyPreset, cameraReady, hostMode]);
 
   // Start broadcast immediately on mount — don't block on UI render

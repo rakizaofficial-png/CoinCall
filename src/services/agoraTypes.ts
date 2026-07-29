@@ -135,51 +135,6 @@ export const BEAUTY_PRESETS: Record<
   },
 };
 
-/** CSS for local PiP preview (web only) */
-export function beautyCssFilter(preset: BeautyPreset): string {
-  if (preset === 'off') return 'none';
-  if (preset === 'natural') {
-    return 'brightness(1.08) contrast(1.04) saturate(1.12) blur(0.25px)';
-  }
-  if (preset === 'glamour') {
-    return 'brightness(1.14) contrast(1.06) saturate(1.22) blur(0.4px)';
-  }
-  if (preset === 'snap') {
-    return 'brightness(1.18) contrast(1.08) saturate(1.28) blur(0.55px)';
-  }
-  if (preset === 'porcelain') {
-    return 'brightness(1.2) contrast(1.02) saturate(1.08) blur(0.8px)';
-  }
-  if (preset === 'neon') {
-    return 'brightness(1.1) contrast(1.16) saturate(1.45) hue-rotate(-8deg)';
-  }
-  if (preset === 'skin_whitening') {
-    return 'brightness(1.24) contrast(1.03) saturate(1.05) blur(0.75px)';
-  }
-  if (preset === 'soft_pink_glow') {
-    return 'brightness(1.18) contrast(1.05) saturate(1.24) hue-rotate(-4deg) blur(0.45px)';
-  }
-  if (preset === 'face_slim_young') {
-    return 'brightness(1.17) contrast(1.07) saturate(1.18) blur(0.55px)';
-  }
-  if (preset === 'bright_eyes_teeth') {
-    return 'brightness(1.18) contrast(1.13) saturate(1.12)';
-  }
-  if (preset === 'k_beauty') {
-    return 'brightness(1.26) contrast(1.02) saturate(1.04) blur(0.85px)';
-  }
-  if (preset === 'blush_highlight') {
-    return 'brightness(1.15) contrast(1.06) saturate(1.3) blur(0.42px)';
-  }
-  if (preset === 'fashion_aviators' || preset === 'golden_flower_crown') {
-    return 'brightness(1.14) contrast(1.08) saturate(1.22) blur(0.35px)';
-  }
-  if (preset === 'bokeh_blur') {
-    return 'brightness(1.12) contrast(1.08) saturate(1.16)';
-  }
-  return 'brightness(1.23) contrast(1.12) saturate(1.38) blur(0.65px)';
-}
-
 export type StartAgoraCallOptions = {
   channel: string;
   /** Web DOM surfaces — ignored on native (uses RtcSurfaceView) */

@@ -26,7 +26,6 @@ import { useApp } from '../../context/AppContext';
 import { useLiveStudio } from '../../context/LiveStudioContext';
 import { LIVE_FILTERS } from '../../data/liveFilters';
 import {
-  beautyCssFilter,
   flipPreviewCamera,
   startCameraPreview,
   stopCameraPreview,
@@ -189,14 +188,9 @@ export function GoLiveScreen({ navigation, mode = 'solo' }: Props) {
     }
   };
 
-  const beautyFilter =
-    goLiveDraft.beautyOn && Platform.OS === 'web'
-      ? ({ filter: beautyCssFilter(goLiveDraft.beautyPreset) } as any)
-      : undefined;
-
   return (
     <View style={[styles.root, { backgroundColor: '#05070F' }]}>
-      <View style={[styles.preview, { paddingTop: insets.top }, beautyFilter]}>
+      <View style={[styles.preview, { paddingTop: insets.top }]}>
         {Platform.OS === 'web' ? (
           <div id="golive-preview-mount" style={webMountStyle} />
         ) : permission?.granted && camOn ? (

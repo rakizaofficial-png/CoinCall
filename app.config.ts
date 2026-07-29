@@ -50,6 +50,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       'INTERNET',
       'ACCESS_NETWORK_STATE',
       'MODIFY_AUDIO_SETTINGS',
+      'VIBRATE',
       'BLUETOOTH',
       'BLUETOOTH_CONNECT',
       'WAKE_LOCK',
@@ -118,7 +119,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
           // Compress .so inside APK (ABI filter via withAndroidSizeOptimizations)
           useLegacyPackaging: true,
           extraProguardRules:
-            '-keep class io.agora.** { *; }\n-keep class com.facebook.react.** { *; }\n-dontwarn io.agora.**',
+            '-keep class io.agora.** { *; }\n-keep class com.facebook.react.** { *; }\n-keepclassmembers class ai.deepar.ar.DeepAR { *; }\n-keepclassmembers class ai.deepar.ar.core.videotexture.VideoTextureAndroidJava { *; }\n-keep class ai.deepar.ar.core.videotexture.VideoTextureAndroidJava\n-keep class ai.deepar.** { *; }\n-dontwarn io.agora.**\n-dontwarn ai.deepar.**',
         },
         ios: {
           deploymentTarget: '16.4',

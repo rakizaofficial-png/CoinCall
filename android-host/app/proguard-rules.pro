@@ -4,3 +4,8 @@
 -keep class com.squareup.moshi.** { *; }
 -dontwarn okhttp3.**
 -dontwarn retrofit2.**
+-keepclassmembers class ai.deepar.ar.DeepAR { *; }
+-keepclassmembers class ai.deepar.ar.core.videotexture.VideoTextureAndroidJava { *; }
+-keep class ai.deepar.ar.core.videotexture.VideoTextureAndroidJava
+-keep class ai.deepar.** { *; }
+-dontwarn ai.deepar.**

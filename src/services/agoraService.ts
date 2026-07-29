@@ -2,15 +2,7 @@ import type { IAgoraRTCClient, ICameraVideoTrack, IMicrophoneAudioTrack } from '
 import { Platform } from 'react-native';
 import { env } from '../config/env';
 import {
-  shouldUseDeepARWeb,
-  startDeepARWebLive,
-  setDeepARBeautyIntensity,
-  switchDeepAREffect,
-  type DeepARSession,
-} from './deepArService';
-import {
   BEAUTY_PRESETS,
-  beautyCssFilter,
   type BeautyPreset,
 } from './agoraTypes';
 
@@ -31,7 +23,7 @@ export function subscribeNativeRemoteUid(
 }
 
 export type { BeautyPreset } from './agoraTypes';
-export { BEAUTY_PRESETS, beautyCssFilter } from './agoraTypes';
+export { BEAUTY_PRESETS } from './agoraTypes';
 
 type LiveSession = {
   client: IAgoraRTCClient;
@@ -39,7 +31,6 @@ type LiveSession = {
   cam: ICameraVideoTrack | null;
   beautyProcessor: any | null;
   beautyPreset: BeautyPreset;
-  deepAR?: DeepARSession | null;
 };
 
 let session: LiveSession | null = null;
@@ -91,15 +82,7 @@ function prepVideoEl(el: HTMLElement) {
 }
 
 function applyLocalCssBeauty(preset: BeautyPreset) {
-  const el =
-    document.getElementById('agora-local') || document.getElementById('live-local');
-  if (!el || !('style' in el)) return;
-  const node = el as HTMLElement;
-  node.style.filter = beautyCssFilter(preset);
-  // Slight “little face” slim on self-view (Snapchat feel)
-  node.style.transform =
-    preset === 'off' ? 'scaleX(-1)' : 'scaleX(-1) scale(0.96)';
-  node.style.transformOrigin = 'center center';
+  void preset;
 }
 
 async function ensureBeautyProcessor(AgoraRTC: any) {
@@ -305,12 +288,6 @@ export async function setAgoraBeauty(
   currentPreset = preset;
   applyLocalCssBeauty(preset);
 
-  if (session?.deepAR) {
-    const switched = await switchDeepAREffect(session.deepAR ? session.deepAR : null, preset, currentDeepARIntensity);
-    session.beautyPreset = preset;
-    if (switched) return;
-  }
-
   if (!session?.cam) return;
   const processor = session.beautyProcessor;
   if (!processor) {
@@ -335,10 +312,6 @@ export async function setAgoraBeauty(
 export async function setAgoraBeautyIntensity(intensity: number) {
   currentDeepARIntensity = Math.max(0, Math.min(1, intensity));
   const preset = session?.beautyPreset ?? currentPreset;
-  if (session?.deepAR) {
-    await setDeepARBeautyIntensity(session.deepAR, preset, currentDeepARIntensity);
-    return;
-  }
   if (session?.beautyProcessor && preset !== 'off') {
     const opts = { ...BEAUTY_PRESETS[preset] };
     opts.lighteningLevel = Math.min(1, opts.lighteningLevel * (0.55 + currentDeepARIntensity * 0.65));
@@ -390,34 +363,16 @@ export async function startAgoraLiveBroadcast(options: {
   const preset = options.beauty ?? currentPreset;
   let publishedCam: ICameraVideoTrack = cam;
   let beautyProcessor: any | null = null;
-  let deepAR: DeepARSession | null = null;
 
-  if (shouldUseDeepARWeb(preset)) {
-    try {
-      deepAR = await startDeepARWebLive(localVideoEl, preset);
-      publishedCam = AgoraRTC.createCustomVideoTrack({
-        mediaStreamTrack: deepAR.videoTrack,
-      }) as ICameraVideoTrack;
-      cam.close();
-    } catch (e) {
-      console.warn('DeepAR web filter unavailable, using Agora beauty fallback', e);
-      deepAR?.stop();
-      deepAR = null;
-      publishedCam = cam;
-    }
+  beautyProcessor = await ensureBeautyProcessor(AgoraRTC);
+  if (beautyProcessor) {
+    await pipeBeauty(publishedCam, beautyProcessor, preset);
   }
-
-  if (!deepAR) {
-    beautyProcessor = await ensureBeautyProcessor(AgoraRTC);
-    if (beautyProcessor) {
-      await pipeBeauty(publishedCam, beautyProcessor, preset);
-    }
-    publishedCam.play(localVideoEl, { fit: 'cover', mirror: true });
-    applyLocalCssBeauty(preset);
-  }
+  publishedCam.play(localVideoEl, { fit: 'cover', mirror: true });
+  applyLocalCssBeauty(preset);
 
   await client.publish([mic, publishedCam]);
-  session = { client, mic, cam: publishedCam, beautyProcessor, beautyPreset: preset, deepAR };
+  session = { client, mic, cam: publishedCam, beautyProcessor, beautyPreset: preset };
   currentPreset = preset;
   return session;
 }
@@ -441,9 +396,8 @@ export async function startCameraPreview(
   videoEl.srcObject = stream;
   videoEl.muted = true;
   videoEl.playsInline = true;
-  videoEl.style.filter = beautyCssFilter(currentPreset);
   videoEl.style.transform =
-    facing === 'user' ? 'scaleX(-1) scale(0.96)' : 'none';
+    facing === 'user' ? 'scaleX(-1)' : 'none';
   await videoEl.play();
   return stream;
 }
@@ -468,10 +422,9 @@ export async function flipPreviewCamera(
 
 export async function stopAgoraCall() {
   if (!session) return;
-  const { client, mic, cam, beautyProcessor, deepAR } = session;
+  const { client, mic, cam, beautyProcessor } = session;
   session = null;
   try {
-    deepAR?.stop();
     if (beautyProcessor) {
       try {
         await beautyProcessor.disable?.();
