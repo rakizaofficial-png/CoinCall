@@ -16,7 +16,14 @@ export type ChatMessage = {
   text: string;
   createdAt: number;
   imageUrl?: string;
-  kind?: 'text' | 'image' | 'support';
+  kind?: 'text' | 'image' | 'support' | 'gift';
+  giftId?: string;
+  giftName?: string;
+  giftEmoji?: string;
+  giftCoins?: number;
+  giftAnimationUrl?: string;
+  giftSoundUrl?: string;
+  giftTxnId?: string;
   fromName?: string;
   deliveredAt?: number;
   readAt?: number;
@@ -73,6 +80,14 @@ export async function fetchDmMessages(
         createdAt: number;
         fromName?: string;
         imageUrl?: string;
+        kind?: ChatMessage['kind'];
+        giftId?: string;
+        giftName?: string;
+        giftEmoji?: string;
+        giftCoins?: number;
+        giftAnimationUrl?: string;
+        giftSoundUrl?: string;
+        giftTxnId?: string;
         deliveredAt?: number;
         readAt?: number;
       }>;
@@ -85,9 +100,16 @@ export async function fetchDmMessages(
       createdAt: m.createdAt,
       fromName: m.fromName,
       imageUrl: m.imageUrl,
+      kind: m.kind || (m.imageUrl ? 'image' : 'text'),
+      giftId: m.giftId,
+      giftName: m.giftName,
+      giftEmoji: m.giftEmoji,
+      giftCoins: m.giftCoins,
+      giftAnimationUrl: m.giftAnimationUrl,
+      giftSoundUrl: m.giftSoundUrl,
+      giftTxnId: m.giftTxnId,
       deliveredAt: m.deliveredAt,
       readAt: m.readAt,
-      kind: m.imageUrl ? ('image' as const) : ('text' as const),
     }));
   } catch {
     return [];

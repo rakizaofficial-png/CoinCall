@@ -1779,6 +1779,16 @@ app.post('/api/calls/:id/gift-requests/:reqId/respond', (req, res) => {
     txnId: xfer.txn.id,
   };
 
+  recordGiftDm({
+    userId,
+    userName: call.userName,
+    hostId: call.hostId,
+    giftId: gr.giftId,
+    giftName: gr.giftName,
+    giftEmoji: gr.giftEmoji,
+    giftCoins: gr.coins,
+    txnId: xfer.txn.id,
+  });
   pushGiftHistory({
     id: gr.id,
     fromUserId: userId,
@@ -1898,6 +1908,17 @@ app.post('/api/gifts/send', (req, res) => {
     giftEvent.roomId = resolvedRoom.id;
   }
 
+  recordGiftDm({
+    userId,
+    userName,
+    hostId,
+    giftId,
+    giftName: catalog.name,
+    giftEmoji: catalog.emoji,
+    giftCoins: catalog.coins,
+    txnId: xfer.txn.id,
+    createdAt: giftEvent.createdAt,
+  });
   broadcastWs({ type: 'gift:received', payload: giftEvent });
   pushToHost(hostId, 'live_gift', giftEvent);
   pushGiftHistory({
@@ -4660,7 +4681,14 @@ type DmMessageRow = {
   text: string;
   imageUrl?: string;
   createdAt: number;
-  kind: 'text' | 'image';
+  kind: 'text' | 'image' | 'gift';
+  giftId?: string;
+  giftName?: string;
+  giftEmoji?: string;
+  giftCoins?: number;
+  giftAnimationUrl?: string;
+  giftSoundUrl?: string;
+  giftTxnId?: string;
   deliveredAt?: number;
   readAt?: number;
 };
@@ -4733,11 +4761,62 @@ function pushDmMessage(
     text: row.text,
     imageUrl: row.imageUrl,
     kind: row.kind || (row.imageUrl ? 'image' : 'text'),
+    giftId: row.giftId,
+    giftName: row.giftName,
+    giftEmoji: row.giftEmoji,
+    giftCoins: row.giftCoins,
+    giftAnimationUrl: row.giftAnimationUrl,
+    giftSoundUrl: row.giftSoundUrl,
+    giftTxnId: row.giftTxnId,
   };
   list.push(msg);
   while (list.length > 200) list.shift();
   dmMessages.set(chatId, list);
   return { chatId, msg };
+}
+
+function recordGiftDm(input: {
+  userId: string;
+  userName: string;
+  hostId: string;
+  giftId: string;
+  giftName: string;
+  giftEmoji: string;
+  giftCoins: number;
+  txnId: string;
+  createdAt?: number;
+}) {
+  const host = getHost(input.hostId);
+  const media = giftMedia(input.giftCoins);
+  const { chatId, msg } = pushDmMessage({
+    fromId: input.userId,
+    toId: input.hostId,
+    fromName: input.userName || 'Fan',
+    text: `${input.giftEmoji} Sent ${input.giftName} · ${input.giftCoins.toLocaleString()} coins`,
+    kind: 'gift',
+    giftId: input.giftId,
+    giftName: input.giftName,
+    giftEmoji: input.giftEmoji,
+    giftCoins: input.giftCoins,
+    giftAnimationUrl: media.animationUrl,
+    giftSoundUrl: media.soundUrl,
+    giftTxnId: input.txnId,
+    createdAt: input.createdAt,
+    clientMessageId: `gift_${input.txnId}`,
+  });
+  const thread = upsertDmThread({
+    userId: input.userId,
+    userName: input.userName || 'Fan',
+    hostId: input.hostId,
+    hostName: host?.name || 'Host',
+    hostAvatar: host?.avatarUrl,
+    lastMessage: `${input.giftEmoji} ${input.giftName} · ${input.giftCoins.toLocaleString()} coins`,
+    at: msg.createdAt,
+  });
+  const payload = { chatId, message: msg, thread };
+  broadcastWs({ type: 'dm:message', payload });
+  pushToHost(input.hostId, 'dm_message', payload);
+  return payload;
 }
 
 function pushLiveComment(roomId: string, row: Omit<LiveCommentRow, 'id' | 'createdAt'> & { createdAt?: number }) {
