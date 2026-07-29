@@ -51,7 +51,7 @@ class MainActivity : AppCompatActivity() {
       cacheMode = WebSettings.LOAD_DEFAULT
       allowFileAccess = false
       allowContentAccess = false
-      userAgentString = "$userAgentString ZukoApp/1.1.1"
+      userAgentString = "$userAgentString ZukoApp/1.1.2"
     }
     webView.addJavascriptInterface(BillingBridge(), "NativeBilling")
     webView.webViewClient = object : WebViewClient() {
@@ -84,7 +84,7 @@ class MainActivity : AppCompatActivity() {
         }
       }
     }
-    webView.loadUrl("https://$allowedHost/?v=1.1.1")
+    webView.loadUrl("https://$allowedHost/?v=1.1.2")
   }
 
   private fun requestMediaPermissions() {
