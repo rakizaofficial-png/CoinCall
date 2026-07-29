@@ -269,21 +269,25 @@ export function IncomingCallModal({ call, onClear, hostBusyOnCall }: Props) {
     setPhase('accepting');
     void stopIncomingRingtone();
 
-    const optimistic: BridgeCall = { ...call, ratePerMinute: rate };
-    goToCall(optimistic);
-
     void (async () => {
       try {
+        // Release the live Agora engine before the private call screen mounts.
+        // Starting navigation first caused camera/RTC engine contention.
         if (myLiveRoom?.isLive) {
           await pauseLiveForPrivateCall();
         }
-        await acceptBridgeCall(call.id);
+        const accepted = await acceptBridgeCall(call.id);
+        goToCall({ ...accepted.call, ratePerMinute: rate });
       } catch (e: unknown) {
         const message =
           e instanceof Error ? e.message : 'Could not accept call';
-        if (message.toLowerCase().includes('accepted')) return;
+        if (message.toLowerCase().includes('accepted')) {
+          goToCall({ ...call, ratePerMinute: rate });
+          return;
+        }
         notify('Accept failed', message.slice(0, 140));
-        if (navigation.canGoBack()) navigation.goBack();
+        setBusy(false);
+        setPhase('ring');
       }
     })();
   };
