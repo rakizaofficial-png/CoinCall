@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, Vibration, View } from 'react-native';
 import Animated, {
   Easing,
   FadeIn,
@@ -106,6 +106,34 @@ function RisingBit({
   );
 }
 
+/** Original fly-through for premium gifts. Vibration is the native sound-cue fallback. */
+function GiftFlyThrough({ gift }: { gift: GiftItem }) {
+  const x = useSharedValue(-420);
+  const opacity = useSharedValue(0);
+
+  useEffect(() => {
+    Vibration.vibrate(gift.effect === 'spectacle' ? [0, 45, 80, 65] : 45);
+    opacity.value = withSequence(
+      withTiming(1, { duration: 180 }),
+      withTiming(1, { duration: 1900 }),
+      withTiming(0, { duration: 350 }),
+    );
+    x.value = withTiming(420, { duration: 2500, easing: Easing.inOut(Easing.cubic) });
+  }, [gift.effect, opacity, x]);
+
+  const style = useAnimatedStyle(() => ({
+    opacity: opacity.value,
+    transform: [{ translateX: x.value }, { rotate: '4deg' }],
+  }));
+
+  return (
+    <View style={styles.flyZone} pointerEvents="none">
+      <Animated.View style={[styles.flyTrail, style]} />
+      <Animated.Text style={[styles.flyEmoji, style]}>{gift.emoji}</Animated.Text>
+    </View>
+  );
+}
+
 /**
  * Full-screen glamour gift for host live/call — Reanimated only (60fps-friendly).
  */
@@ -180,6 +208,8 @@ export function GlamourGiftOverlay({ item, onDone }: Props) {
         ]}
       />
       <ParticleField gift={gift} />
+
+      {isBig ? <GiftFlyThrough gift={gift} /> : null}
 
       <View style={styles.center}>
         <Text style={[styles.rarity, { color: rarityColor, borderColor: rarityColor }]}>
@@ -264,6 +294,34 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 24,
     paddingBottom: '12%',
+  },
+  flyZone: {
+    position: 'absolute',
+    top: '36%',
+    left: 0,
+    right: 0,
+    height: 140,
+    overflow: 'hidden',
+  },
+  flyTrail: {
+    position: 'absolute',
+    top: 73,
+    left: -240,
+    width: 240,
+    height: 5,
+    borderRadius: 99,
+    backgroundColor: 'rgba(132, 240, 255, 0.9)',
+    shadowColor: '#60e7ff',
+    shadowOpacity: 1,
+    shadowRadius: 14,
+  },
+  flyEmoji: {
+    position: 'absolute',
+    top: 10,
+    left: -40,
+    fontSize: 92,
+    textShadowColor: 'rgba(255, 219, 99, 0.9)',
+    textShadowRadius: 24,
   },
   rarity: {
     fontSize: 10,
