@@ -12,6 +12,7 @@ import Animated, {
   withSequence,
   withTiming,
 } from 'react-native-reanimated';
+import { Audio } from 'expo-av';
 import {
   GIFT_RARITY_COLOR,
   GIFT_RARITY_LABEL,
@@ -123,13 +124,37 @@ export function GlamourGiftOverlay({ item, onDone }: Props) {
         particles: 3,
         gradient: ['#ff2a7a', '#c9184a'] as [string, string],
         glow: 'rgba(255,42,122,0.6)',
+        category: 'vip' as const,
+        animationUrl: '',
+        soundUrl: 'https://actions.google.com/sounds/v1/cartoon/magic_chime.ogg',
       } satisfies GiftItem)
     : null;
 
   useEffect(() => {
     if (!item || !gift) return;
+    let cancelled = false;
+    let sound: Audio.Sound | null = null;
+    void Audio.Sound.createAsync(
+      { uri: gift.soundUrl },
+      { shouldPlay: true, volume: 0.78 },
+    )
+      .then((loaded) => {
+        if (cancelled) {
+          void loaded.sound.unloadAsync();
+        } else {
+          sound = loaded.sound;
+        }
+      })
+      .catch(() => undefined);
     const t = setTimeout(() => onDone?.(), gift.animMs);
-    return () => clearTimeout(t);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+      if (sound) {
+        void sound.stopAsync().catch(() => undefined);
+        void sound.unloadAsync().catch(() => undefined);
+      }
+    };
   }, [item, gift, onDone]);
 
   if (!item || !gift) return null;

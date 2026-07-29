@@ -321,6 +321,38 @@ const GIFT_CATALOG_SERVER: Record<
   rocket: { name: 'Private Jet', emoji: '✈️', coins: 4999 },
 };
 
+type GiftCategory = 'popular' | 'vip' | 'mega';
+
+const GIFT_MEDIA: Record<
+  GiftCategory,
+  { animationUrl: string; soundUrl: string }
+> = {
+  popular: {
+    animationUrl: 'https://assets10.lottiefiles.com/packages/lf20_q5pk6p1k.json',
+    soundUrl: 'https://actions.google.com/sounds/v1/cartoon/pop.ogg',
+  },
+  vip: {
+    animationUrl: 'https://assets2.lottiefiles.com/packages/lf20_u4yrau.json',
+    soundUrl: 'https://actions.google.com/sounds/v1/cartoon/magic_chime.ogg',
+  },
+  mega: {
+    animationUrl: 'https://assets7.lottiefiles.com/packages/lf20_touohxv0.json',
+    soundUrl:
+      'https://actions.google.com/sounds/v1/transportation/sports_car_accelerating.ogg',
+  },
+};
+
+function giftCategory(coins: number): GiftCategory {
+  if (coins >= 1200) return 'mega';
+  if (coins >= 250) return 'vip';
+  return 'popular';
+}
+
+function giftMedia(coins: number) {
+  const category = giftCategory(coins);
+  return { category, ...GIFT_MEDIA[category] };
+}
+
 const calls = new Map<string, CallRecord>();
 /** Durable call archive (capped) */
 const callHistory: CallHistoryRecord[] = [];
@@ -616,6 +648,7 @@ app.get('/api/gifts', (_req, res) => {
       name: g.name,
       emoji: g.emoji,
       coins: g.coins,
+      ...giftMedia(g.coins),
     }))
     .sort((a, b) => a.coins - b.coins);
   res.json({ gifts });
@@ -1831,6 +1864,7 @@ app.post('/api/gifts/send', (req, res) => {
     giftName: catalog.name,
     giftEmoji: catalog.emoji,
     coins: catalog.coins,
+    ...giftMedia(catalog.coins),
     hostCredited: xfer.txn.coinsCreditedHost,
     platformCut: xfer.txn.coinsCreditedPlatform,
     combo: 1,

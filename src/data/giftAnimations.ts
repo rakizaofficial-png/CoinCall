@@ -3,6 +3,7 @@ import { GIFT_CATALOG } from './gifts';
 export type GiftLottieDetails = {
   source: string;
   durationMs: number;
+  soundUrl?: string;
 };
 
 const DEFAULT_COIN_LOTTIE =
@@ -27,7 +28,8 @@ const GIFT_LOTTIE_SOURCES: Record<string, string> = {
 export function resolveGiftLottie(giftId: string): GiftLottieDetails {
   const gift = GIFT_CATALOG.find((item) => item.id === giftId);
   return {
-    source: GIFT_LOTTIE_SOURCES[giftId] || DEFAULT_COIN_LOTTIE,
+    source: gift?.animationUrl || GIFT_LOTTIE_SOURCES[giftId] || DEFAULT_COIN_LOTTIE,
     durationMs: gift?.animMs ? Math.max(2400, gift.animMs) : 5200,
+    soundUrl: gift?.soundUrl,
   };
 }
