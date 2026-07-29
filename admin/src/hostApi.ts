@@ -63,6 +63,27 @@ export type AuditLog = {
   details?: string;
 };
 
+export type HostPerformance = {
+  summary: {
+    totalCalls: number;
+    totalCallSeconds: number;
+    averageCallSeconds: number;
+    totalCallCoins: number;
+    giftCoins: number;
+    liveSeconds: number;
+    lastActiveAt: number;
+  };
+  recentCalls: Array<{
+    id: string;
+    userName: string;
+    status: string;
+    durationSec: number;
+    coinsSpent: number;
+    startedAt: number;
+    endedAt: number;
+  }>;
+};
+
 function requireDb(): Database {
   if (!db) throw new Error('Firebase RTDB not configured in admin/.env');
   return db;
@@ -95,6 +116,12 @@ async function adminFetch<T>(path: string, init?: RequestInit): Promise<T> {
     return (await res.text()) as T;
   }
   return res.json() as Promise<T>;
+}
+
+export async function fetchHostPerformance(hostId: string) {
+  return adminFetch<HostPerformance>(
+    `/admin/hosts/${encodeURIComponent(hostId)}/performance`,
+  );
 }
 
 export async function syncHostsToServer(hosts: ManagedHost[]) {
@@ -225,7 +252,7 @@ export async function runHostAction(
 export async function runBulkHostAction(
   ids: string[],
   action: string,
-  reason?: string,
+  extra?: { reason?: string; callPrice?: number },
 ) {
   const data = await adminFetch<{
     ok: boolean;
@@ -237,7 +264,7 @@ export async function runBulkHostAction(
     }[];
   }>('/admin/hosts/bulk', {
     method: 'POST',
-    body: JSON.stringify({ ids, action, reason }),
+    body: JSON.stringify({ ids, action, ...extra }),
   });
   await Promise.all(
     data.results.map((r) => mirrorFirebase(r.id, r.firebaseMirror, r.control)),
@@ -249,14 +276,62 @@ export function mergeFirebaseHosts(
   firebase: HostRow[],
   managed: ManagedHost[],
 ): ManagedHost[] {
-  const map = new Map<string, ManagedHost>();
-  for (const m of managed) map.set(m.id, m);
+  const rows: ManagedHost[] = [];
+  const keyToIndex = new Map<string, number>();
+  const keysFor = (host: Pick<ManagedHost, 'id' | 'hostId'>) => {
+    const keys = new Set<string>();
+    const id = String(host.id || '').trim().toLowerCase();
+    const publicId = String(host.hostId || '').trim().toLowerCase();
+    if (id) keys.add(`id:${id}`);
+    if (publicId) {
+      keys.add(`id:${publicId}`);
+      keys.add(`public:${publicId}`);
+      const digits = publicId.replace(/\D/g, '');
+      if (digits) keys.add(`app:${digits.slice(-6).padStart(6, '0')}`);
+    }
+    return [...keys];
+  };
+  const upsert = (next: ManagedHost) => {
+    const keys = keysFor(next);
+    const hit = keys.map((key) => keyToIndex.get(key)).find((i) => i != null);
+    if (hit == null) {
+      const index = rows.length;
+      rows.push(next);
+      keys.forEach((key) => keyToIndex.set(key, index));
+      return;
+    }
+    const previous = rows[hit]!;
+    const merged = {
+      ...next,
+      ...previous,
+      id: previous.id || next.id,
+      hostId: previous.hostId || next.hostId,
+      name: previous.name || next.name,
+      photoUrl: previous.photoUrl || next.photoUrl,
+      photoUrls:
+        previous.photoUrls?.length ? previous.photoUrls : next.photoUrls,
+      totalCalls: Math.max(previous.totalCalls || 0, next.totalCalls || 0),
+      onlineSeconds: Math.max(
+        previous.onlineSeconds || 0,
+        next.onlineSeconds || 0,
+      ),
+      revenueGenerated: Math.max(
+        previous.revenueGenerated || 0,
+        next.revenueGenerated || 0,
+      ),
+    };
+    rows[hit] = merged;
+    keysFor(merged).forEach((key) => keyToIndex.set(key, hit));
+  };
+  managed.forEach(upsert);
   for (const f of firebase) {
-    const prev = map.get(f.id);
-    map.set(f.id, {
+    const prev = rows.find((row) =>
+      keysFor(row).some((key) => keysFor(f as ManagedHost).includes(key)),
+    );
+    upsert({
       ...f,
       ...prev,
-      id: f.id,
+      id: prev?.id || f.id,
       name: f.name || prev?.name,
       photoUrl: f.photoUrl || prev?.photoUrl,
       photoUrls: f.photoUrls || prev?.photoUrls,
@@ -264,9 +339,9 @@ export function mergeFirebaseHosts(
       hostStatus: (prev?.hostStatus || f.hostStatus) as HostLifecycleStatus,
       coinBalance: prev?.coinBalance ?? f.coinBalance,
       isOnline: f.isOnline ?? prev?.isOnline,
-    });
+    } as ManagedHost);
   }
-  return [...map.values()];
+  return rows;
 }
 
 export function listenHostNotifications(

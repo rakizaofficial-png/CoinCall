@@ -13,6 +13,7 @@ export type HostAppUpdateConfig = {
   message: string;
   iosStoreUrl: string;
   androidStoreUrl: string;
+  androidApkUrl: string;
   webUpdateUrl: string;
   updatedAt: number;
   updatedBy: string;

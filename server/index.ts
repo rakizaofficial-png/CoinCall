@@ -30,7 +30,11 @@ import {
   loadAgenciesFromSnapshot,
 } from './agencyManagement.ts';
 import { registerVideoLibraryRoutes } from './videoLibrary.ts';
-import { registerHostAppUpdateRoutes } from './hostAppUpdate.ts';
+import {
+  dumpHostAppUpdateForSnapshot,
+  loadHostAppUpdateFromSnapshot,
+  registerHostAppUpdateRoutes,
+} from './hostAppUpdate.ts';
 import {
   loginUser,
   publicAuthUser,
@@ -3693,14 +3697,71 @@ app.get('/api/admin/wallets', (req, res) => {
     res.status(401).json({ error: 'Unauthorized' });
     return;
   }
-  const all = [...wallets.values()]
+  const query = String(req.query.q || '').trim().toLowerCase();
+  const queryDigits = query.replace(/\D/g, '');
+  const allRows = [...wallets.values()]
     .map((w) => ({
       ...walletPublic(w),
       role: w.role,
       ledgerCount: (walletLedger.get(w.userId) || []).length,
-    }))
+    }));
+  const all = allRows
+    .filter((w) => {
+      if (!query) return true;
+      const appId = String(w.appId || '');
+      if (queryDigits.length === 6 && appId === queryDigits) return true;
+      return `${w.userId} ${w.displayName} ${w.role} ${appId}`
+        .toLowerCase()
+        .includes(query);
+    })
     .sort((a, b) => b.coinBalance - a.coinBalance);
-  res.json({ wallets: all, count: all.length });
+  res.json({
+    wallets: all,
+    count: all.length,
+    exactMatch:
+      queryDigits.length === 6
+        ? all.find((w) => String(w.appId || '') === queryDigits) || null
+        : all.find((w) => String(w.userId).toLowerCase() === query) || null,
+  });
+});
+
+app.get('/api/admin/hosts/:hostId/performance', (req, res) => {
+  if (!requireStaff(req, res)) return;
+  const requestedId = String(req.params.hostId || '').trim();
+  const managed = getHost(requestedId);
+  const aliases = new Set(
+    [requestedId, managed?.id, managed?.hostId].map((v) => String(v || '').trim()).filter(Boolean),
+  );
+  const calls = callHistory.filter((row) => aliases.has(row.hostId));
+  const gifts = giftHistory.filter((row) => aliases.has(row.toHostId));
+  const lives = liveSessionHistory.filter((row) => aliases.has(row.hostId));
+  const totalCallSeconds = calls.reduce((sum, row) => sum + Math.max(0, row.durationSec || 0), 0);
+  const lastActiveAt = Math.max(
+    Number(managed?.updatedAt || 0),
+    ...calls.map((row) => row.endedAt || row.startedAt || 0),
+    ...gifts.map((row) => row.createdAt || 0),
+    ...lives.map((row) => row.endedAt || row.startedAt || 0),
+  );
+  res.json({
+    summary: {
+      totalCalls: calls.length,
+      totalCallSeconds,
+      averageCallSeconds: calls.length ? Math.round(totalCallSeconds / calls.length) : 0,
+      totalCallCoins: calls.reduce((sum, row) => sum + Math.max(0, row.coinsSpent || 0), 0),
+      giftCoins: gifts.reduce((sum, row) => sum + Math.max(0, row.coins || 0), 0),
+      liveSeconds: lives.reduce((sum, row) => sum + Math.max(0, row.durationSec || 0), 0),
+      lastActiveAt,
+    },
+    recentCalls: calls.slice(0, 20).map((row) => ({
+      id: row.id,
+      userName: row.userName,
+      status: row.status,
+      durationSec: row.durationSec,
+      coinsSpent: row.coinsSpent,
+      startedAt: row.startedAt,
+      endedAt: row.endedAt,
+    })),
+  });
 });
 
 app.post('/api/admin/wallets/:userId/status', (req, res) => {
@@ -4340,7 +4401,7 @@ app.get('/api/auto-call/analytics', (req, res) => {
 
 registerVideoLibraryRoutes(app, { requireAdmin });
 
-registerHostAppUpdateRoutes(app, { requireAdmin, broadcastWs });
+registerHostAppUpdateRoutes(app, { requireAdmin, broadcastWs, onChange: persist });
 
 /** Public Luma home banners (hero + swipe promos) */
 app.get('/api/banners/home', (_req, res) => {
@@ -4578,12 +4639,22 @@ function upsertDmThread(input: {
   return dmThreads.get(id)!;
 }
 
-function pushDmMessage(row: Omit<DmMessageRow, 'id' | 'createdAt' | 'deliveredAt'> & { createdAt?: number }) {
+function pushDmMessage(
+  row: Omit<DmMessageRow, 'id' | 'createdAt' | 'deliveredAt'> & {
+    createdAt?: number;
+    clientMessageId?: string;
+  },
+) {
   const chatId = dmChatId(row.fromId, row.toId);
   const list = dmMessages.get(chatId) || [];
+  const requestedId = String(row.clientMessageId || '').trim().slice(0, 80);
+  if (requestedId) {
+    const existing = list.find((message) => message.id === requestedId);
+    if (existing) return { chatId, msg: existing };
+  }
   const now = row.createdAt || Date.now();
   const msg: DmMessageRow = {
-    id: randomUUID().slice(0, 12),
+    id: requestedId || randomUUID().slice(0, 12),
     createdAt: now,
     deliveredAt: now,
     fromId: row.fromId,
@@ -4672,6 +4743,7 @@ function buildSnapshot(): PersistedSnapshot {
     })),
     ...dumpAgenciesForSnapshot(),
     ...dumpManagedHostsForSnapshot(),
+    hostAppUpdate: dumpHostAppUpdateForSnapshot() as unknown as Record<string, unknown>,
   };
 }
 
@@ -4828,6 +4900,7 @@ function restoreFromDisk() {
     announcements: snap.announcements,
   });
   const restoredHosts = loadManagedHostsFromSnapshot(snap.managedHosts);
+  loadHostAppUpdateFromSnapshot(snap.hostAppUpdate);
   console.log(
     `[persist] restored wallets=${wallets.size} withdrawals=${withdrawals.length} liveRooms=${liveRooms.size} dm=${dmThreads.size} calls=${callHistory.length} gifts=${giftHistory.length} liveSessions=${liveSessionHistory.length} avatars=${restoredAvatars} agencies=${snap.agencies?.length ?? 0} hosts=${restoredHosts}`,
   );
@@ -4962,6 +5035,7 @@ async function applyMongoOrDisk() {
     announcements: snap.announcements,
   });
   const restoredHosts = loadManagedHostsFromSnapshot(snap.managedHosts);
+  loadHostAppUpdateFromSnapshot(snap.hostAppUpdate);
   console.log(
     `[persist] restored from Mongo wallets=${wallets.size} withdrawals=${withdrawals.length} calls=${callHistory.length} gifts=${giftHistory.length} liveSessions=${liveSessionHistory.length} avatars=${restoredAvatars} agencies=${snap.agencies?.length ?? 0} hosts=${restoredHosts}`,
   );
@@ -5517,6 +5591,24 @@ app.post('/api/host/mass-text', (req, res) => {
     return;
   }
 
+  const recentDuplicate = massTextHistory.find(
+    (row) =>
+      row.hostId === hostId &&
+      row.text === text &&
+      Date.now() - row.at < 5_000,
+  );
+  if (recentDuplicate) {
+    res.json({
+      ok: true,
+      deduplicated: true,
+      sent: recentDuplicate.toCount,
+      broadcast: recentDuplicate,
+      userIds: recentDuplicate.userIds,
+      recipients: [],
+    });
+    return;
+  }
+
   // Only users seen in the last 2 minutes count as "online" for mass text
   const targets = listActiveUsers(2 * 60_000)
     .filter((u) => u.role === 'user' && u.userId !== hostId)
@@ -5836,6 +5928,7 @@ app.post('/api/dm/send', (req, res) => {
   const fromRole = String(req.body?.fromRole || 'user') === 'host' ? 'host' : 'user';
   const peerName = String(req.body?.peerName || '').trim().slice(0, 40);
   const peerAvatar = req.body?.peerAvatar ? String(req.body.peerAvatar).slice(0, 500) : undefined;
+  const clientMessageId = String(req.body?.clientMessageId || '').trim().slice(0, 80);
 
   if (!fromId || !toId || (!text && !imageUrl)) {
     res.status(400).json({ error: 'fromId, toId, text or imageUrl required' });
@@ -5850,6 +5943,7 @@ app.post('/api/dm/send', (req, res) => {
     text: text || (imageUrl ? '📷 Photo' : ''),
     imageUrl,
     kind: imageUrl ? 'image' : 'text',
+    clientMessageId,
   });
 
   const userId = fromRole === 'user' ? fromId : toId;
@@ -5875,6 +5969,27 @@ app.post('/api/dm/send', (req, res) => {
   pushToHost(hostId, 'dm_message', payload);
   persist();
   res.status(201).json({ ok: true, ...payload });
+});
+
+/** Convert a local chat photo into a durable public URL before sending the DM. */
+app.post('/api/chat/images', (req, res) => {
+  const ownerId = String(req.body?.ownerId || req.headers['x-user-id'] || '').trim();
+  const image = String(req.body?.image || req.body?.dataUrl || '');
+  if (!ownerId || !image) {
+    res.status(400).json({ error: 'ownerId and image required' });
+    return;
+  }
+  const imageId = `chat_${createHash('sha256')
+    .update(`${ownerId}:${Date.now()}:${image.length}`)
+    .digest('hex')
+    .slice(0, 24)}`;
+  const saved = saveHostAvatar(imageId, image);
+  if (!saved.ok || !saved.url) {
+    res.status(400).json({ error: saved.error || 'Image upload failed' });
+    return;
+  }
+  persist();
+  res.status(201).json({ ok: true, imageUrl: saved.url });
 });
 
 app.get('/api/dm/threads', (req, res) => {

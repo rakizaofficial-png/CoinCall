@@ -195,7 +195,55 @@ export function ensureHostRecord(
 }
 
 export function listHosts(): HostManagedRecord[] {
-  return [...registry.values()].sort(
+  const rows: HostManagedRecord[] = [];
+  const keyToIndex = new Map<string, number>();
+  const keysFor = (host: HostManagedRecord) => {
+    const keys = new Set<string>();
+    const id = String(host.id || '').trim().toLowerCase();
+    const hostId = String(host.hostId || '').trim().toLowerCase();
+    if (id) keys.add(`id:${id}`);
+    if (hostId) {
+      keys.add(`id:${hostId}`);
+      keys.add(`public:${hostId}`);
+      const digits = hostId.replace(/\D/g, '');
+      if (digits) keys.add(`app:${digits.slice(-6).padStart(6, '0')}`);
+    }
+    return [...keys];
+  };
+  for (const host of registry.values()) {
+    const keys = keysFor(host);
+    const hit = keys.map((key) => keyToIndex.get(key)).find((i) => i != null);
+    if (hit == null) {
+      const index = rows.length;
+      rows.push(host);
+      keys.forEach((key) => keyToIndex.set(key, index));
+      continue;
+    }
+    const previous = rows[hit]!;
+    const newer =
+      (host.updatedAt || 0) >= (previous.updatedAt || 0) ? host : previous;
+    const older = newer === host ? previous : host;
+    const merged: HostManagedRecord = {
+      ...older,
+      ...newer,
+      id: previous.id,
+      hostId: previous.hostId || host.hostId,
+      photoUrl: newer.photoUrl || older.photoUrl,
+      photoUrls: newer.photoUrls?.length ? newer.photoUrls : older.photoUrls,
+      totalCalls: Math.max(previous.totalCalls || 0, host.totalCalls || 0),
+      onlineSeconds: Math.max(
+        previous.onlineSeconds || 0,
+        host.onlineSeconds || 0,
+      ),
+      revenueGenerated: Math.max(
+        previous.revenueGenerated || 0,
+        host.revenueGenerated || 0,
+      ),
+    };
+    rows[hit] = merged;
+    keysFor(merged).forEach((key) => keyToIndex.set(key, hit));
+  }
+  return rows.sort(
     (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0),
   );
 }
@@ -992,18 +1040,19 @@ export function registerHostManagementRoutes(
       res.status(400).json({ error: 'action required' });
       return;
     }
-    if (
-      (action === 'reset_earnings' ||
-        action === 'set_call_price' ||
-        action === 'set_commission' ||
-        action === 'freeze_wallet') &&
-      !canFinance(adminRole)
-    ) {
+    const financeAction =
+      action === 'reset_earnings' ||
+      action === 'set_call_price' ||
+      action === 'set_commission' ||
+      action === 'freeze_wallet';
+    if (financeAction && !canFinance(adminRole)) {
       res.status(403).json({ error: 'Finance role required' });
       return;
     }
-    if (!canModerate(adminRole) && action !== 'record_login') {
-      res.status(403).json({ error: 'Moderator role required' });
+    if (!financeAction && !canModerate(adminRole) && action !== 'record_login') {
+      res.status(403).json({
+        error: priceAction ? 'Finance role required' : 'Moderator role required',
+      });
       return;
     }
     const id = String(req.params.id);
@@ -1045,14 +1094,18 @@ export function registerHostManagementRoutes(
     if (!requireAdmin(req, res)) return;
     const meta = adminMeta(req);
     const { adminId, adminRole } = meta;
-    if (!canModerate(adminRole)) {
+    const action = String(req.body?.action || '') as HostAction;
+    const priceAction = action === 'set_call_price';
+    if (
+      (!priceAction && !canModerate(adminRole)) ||
+      (priceAction && !canFinance(adminRole))
+    ) {
       res.status(403).json({ error: 'Moderator role required' });
       return;
     }
     const ids: string[] = Array.isArray(req.body?.ids)
       ? req.body.ids.map(String)
       : [];
-    const action = String(req.body?.action || '') as HostAction;
     const reason = req.body?.reason ? String(req.body.reason) : undefined;
     if (!ids.length || !action) {
       res.status(400).json({ error: 'ids and action required' });
@@ -1073,6 +1126,8 @@ export function registerHostManagementRoutes(
         adminId,
         adminRole,
         reason,
+        callPrice:
+          req.body?.callPrice != null ? Number(req.body.callPrice) : undefined,
         broadcast: broadcastWs,
       });
       return {

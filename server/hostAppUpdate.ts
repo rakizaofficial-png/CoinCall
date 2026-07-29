@@ -14,6 +14,7 @@ export type HostAppUpdateConfig = {
   message: string;
   iosStoreUrl: string;
   androidStoreUrl: string;
+  androidApkUrl: string;
   webUpdateUrl: string;
   updatedAt: number;
   updatedBy: string;
@@ -28,6 +29,7 @@ const DEFAULT: HostAppUpdateConfig = {
     'A new CoinCall Host version is available. Please update to continue earning.',
   iosStoreUrl: '',
   androidStoreUrl: '',
+  androidApkUrl: '',
   webUpdateUrl: '',
   updatedAt: Date.now(),
   updatedBy: 'system',
@@ -53,11 +55,26 @@ export function setHostAppUpdateConfig(
     message: String(patch.message ?? config.message).trim() || config.message,
     iosStoreUrl: String(patch.iosStoreUrl ?? config.iosStoreUrl).trim(),
     androidStoreUrl: String(patch.androidStoreUrl ?? config.androidStoreUrl).trim(),
+    androidApkUrl: String(patch.androidApkUrl ?? config.androidApkUrl).trim(),
     webUpdateUrl: String(patch.webUpdateUrl ?? config.webUpdateUrl).trim(),
     updatedAt: Date.now(),
     updatedBy,
   };
   return getHostAppUpdateConfig();
+}
+
+export function dumpHostAppUpdateForSnapshot() {
+  return getHostAppUpdateConfig();
+}
+
+export function loadHostAppUpdateFromSnapshot(raw?: Record<string, unknown>) {
+  if (!raw) return;
+  config = {
+    ...DEFAULT,
+    ...raw,
+    forceUpdate: Boolean(raw.forceUpdate),
+    updatedAt: Number(raw.updatedAt || Date.now()),
+  } as HostAppUpdateConfig;
 }
 
 /** Compare semver-ish strings: a < b → -1, a = b → 0, a > b → 1 */
@@ -91,6 +108,7 @@ export function registerHostAppUpdateRoutes(
   deps: {
     requireAdmin: (req: Request, res: Response) => boolean;
     broadcastWs?: (event: unknown) => void;
+    onChange?: () => void;
   },
 ) {
   /** Public — host app checks on launch / resume */
@@ -126,6 +144,7 @@ export function registerHostAppUpdateRoutes(
         message: body.message,
         iosStoreUrl: body.iosStoreUrl,
         androidStoreUrl: body.androidStoreUrl,
+        androidApkUrl: body.androidApkUrl,
         webUpdateUrl: body.webUpdateUrl,
       },
       adminId,
@@ -134,6 +153,7 @@ export function registerHostAppUpdateRoutes(
       type: 'host:force_update',
       payload: next,
     });
+    deps.onChange?.();
     res.json({
       ok: true,
       config: next,

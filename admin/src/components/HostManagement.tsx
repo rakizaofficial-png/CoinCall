@@ -5,6 +5,7 @@ import {
   exportHostsCsv,
   fetchAuditLogs,
   fetchBridgeHosts,
+  fetchHostPerformance,
   fetchManagedHosts,
   mergeFirebaseHosts,
   runBulkHostAction,
@@ -13,6 +14,7 @@ import {
   type AuditLog,
   type BridgeHostStatus,
   type HostLifecycleStatus,
+  type HostPerformance,
   type ManagedHost,
 } from '../hostApi';
 import { DeskField, DeskModal } from './DeskModal';
@@ -109,6 +111,7 @@ export function HostManagementPanel({
   );
   const [sort, setSort] = useState('updated');
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkPrice, setBulkPrice] = useState('80');
   const [detail, setDetail] = useState<ManagedHost | null>(null);
   const [managed, setManaged] = useState<ManagedHost[]>([]);
   const [logs, setLogs] = useState<AuditLog[]>([]);
@@ -377,13 +380,16 @@ export function HostManagementPanel({
       await runBulkHostAction(
         ids,
         action,
-        action === 'reject'
-          ? 'Not approved'
-          : action === 'ban'
-            ? 'Banned by admin'
-            : action === 'suspend'
-              ? 'Suspended by admin'
-              : undefined,
+        {
+          reason:
+            action === 'reject'
+              ? 'Not approved'
+              : action === 'ban'
+                ? 'Banned by admin'
+                : action === 'suspend'
+                  ? 'Suspended by admin'
+                  : undefined,
+        },
       );
       for (const id of ids) clearOptimistic(id);
       setSelected(new Set());
@@ -392,6 +398,28 @@ export function HostManagementPanel({
     } catch (e) {
       for (const id of ids) clearOptimistic(id);
       flash(e instanceof Error ? e.message : 'Bulk failed');
+      await refreshServer();
+    } finally {
+      setBusyIds(new Set());
+    }
+  };
+
+  const applyBulkPrice = async () => {
+    const callPrice = Number(bulkPrice);
+    if (!selected.size) return;
+    if (!Number.isFinite(callPrice) || callPrice < 1 || callPrice > 9999) {
+      flash('Price must be between 1 and 9,999 coins');
+      return;
+    }
+    const ids = [...selected];
+    setBusyIds(new Set(ids));
+    try {
+      await runBulkHostAction(ids, 'set_call_price', { callPrice });
+      setSelected(new Set());
+      flash(`Price ${callPrice} coins · ${ids.length} hosts updated`);
+      await refreshServer();
+    } catch (e) {
+      flash(e instanceof Error ? e.message : 'Bulk price update failed');
       await refreshServer();
     } finally {
       setBusyIds(new Set());
@@ -552,14 +580,35 @@ export function HostManagementPanel({
             Suspend
           </button>
           {!agencyId ? (
-            <button
-              type="button"
-              className="btn-red"
-              disabled={!selected.size}
-              onClick={() => void bulk('ban')}
-            >
-              Ban
-            </button>
+            <>
+              <input
+                className="hm-search"
+                style={{ width: 132 }}
+                type="number"
+                min={1}
+                max={9999}
+                value={bulkPrice}
+                onChange={(e) => setBulkPrice(e.target.value)}
+                aria-label="Bulk host call price"
+                placeholder="Coins/min"
+              />
+              <button
+                type="button"
+                className="btn-pink"
+                disabled={!selected.size}
+                onClick={() => void applyBulkPrice()}
+              >
+                Set bulk price
+              </button>
+              <button
+                type="button"
+                className="btn-red"
+                disabled={!selected.size}
+                onClick={() => void bulk('ban')}
+              >
+                Ban
+              </button>
+            </>
           ) : null}
         </div>
       ) : null}
@@ -912,6 +961,19 @@ function HostDetail({
   ) => void;
   onOpenForm: (type: 'docs' | 'price' | 'commission' | 'coins') => void;
 }) {
+  const [performance, setPerformance] = useState<HostPerformance | null>(null);
+  useEffect(() => {
+    let active = true;
+    setPerformance(null);
+    void fetchHostPerformance(host.id)
+      .then((data) => {
+        if (active) setPerformance(data);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [host.id]);
   const photos = host.photoUrls?.length
     ? host.photoUrls
     : host.photoUrl
@@ -986,6 +1048,55 @@ function HostDetail({
           <b>{(host.rating ?? 5).toFixed(1)}</b>
         </div>
       </div>
+
+      <h4>Work performance</h4>
+      <div className="hm-metrics">
+        <div>
+          <span>Total call time</span>
+          <b>{fmtSec(performance?.summary.totalCallSeconds)}</b>
+        </div>
+        <div>
+          <span>Average call</span>
+          <b>{fmtSec(performance?.summary.averageCallSeconds)}</b>
+        </div>
+        <div>
+          <span>Live time</span>
+          <b>{fmtSec(performance?.summary.liveSeconds)}</b>
+        </div>
+        <div>
+          <span>Call coins</span>
+          <b>{(performance?.summary.totalCallCoins ?? 0).toLocaleString()}</b>
+        </div>
+        <div>
+          <span>Gift coins</span>
+          <b>{(performance?.summary.giftCoins ?? 0).toLocaleString()}</b>
+        </div>
+        <div>
+          <span>Last active</span>
+          <b>
+            {performance?.summary.lastActiveAt
+              ? new Date(performance.summary.lastActiveAt).toLocaleDateString()
+              : '—'}
+          </b>
+        </div>
+      </div>
+      {performance?.recentCalls.length ? (
+        <>
+          <h4>Recent call timing</h4>
+          <ul className="hm-audit">
+            {performance.recentCalls.slice(0, 8).map((call) => (
+              <li key={call.id}>
+                <strong>{call.userName || 'User'}</strong> · {fmtSec(call.durationSec)}
+                {' · '}{call.coinsSpent} coins
+                <br />
+                <span className="meta">
+                  {call.status} · {new Date(call.startedAt).toLocaleString()}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
 
       {canAct ? (
         <>

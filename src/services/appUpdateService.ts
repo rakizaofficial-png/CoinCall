@@ -16,6 +16,7 @@ export type HostAppUpdateConfig = {
   message: string;
   iosStoreUrl: string;
   androidStoreUrl: string;
+  androidApkUrl: string;
   webUpdateUrl: string;
   updatedAt?: number;
   needsForceUpdate?: boolean;
@@ -57,6 +58,7 @@ export function shouldForceUpdate(cfg: HostAppUpdateConfig | null): boolean {
 
 export function pickStoreUrl(cfg: HostAppUpdateConfig): string {
   if (Platform.OS === 'ios' && cfg.iosStoreUrl) return cfg.iosStoreUrl;
+  if (Platform.OS === 'android' && cfg.androidApkUrl) return cfg.androidApkUrl;
   if (Platform.OS === 'android' && cfg.androidStoreUrl) return cfg.androidStoreUrl;
   return cfg.webUpdateUrl || cfg.androidStoreUrl || cfg.iosStoreUrl || '';
 }
@@ -99,6 +101,7 @@ export function listenHostAppUpdate(
       ),
       iosStoreUrl: String(val.iosStoreUrl || ''),
       androidStoreUrl: String(val.androidStoreUrl || ''),
+      androidApkUrl: String(val.androidApkUrl || ''),
       webUpdateUrl: String(val.webUpdateUrl || ''),
       updatedAt: Number(val.updatedAt || 0),
     });

@@ -17,6 +17,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
   listenChatMessages,
   sendChatMessage,
+  uploadChatImage,
   fetchDmMessages,
   type ChatMessage,
 } from '../../services/chatService';
@@ -30,6 +31,7 @@ export function ChatScreen({ navigation, route }: Props) {
   const { user: authUser } = useAuth();
   const { getHost, startCall, user } = useApp();
   const listRef = useRef<FlatList<ChatBubbleMessage>>(null);
+  const sendLockRef = useRef(false);
   const peerId = route.params.peerId;
   const peerName = route.params.peerName || getHost(peerId)?.name || 'Fan';
   const peerAvatar =
@@ -92,7 +94,8 @@ export function ChatScreen({ navigation, route }: Props) {
   }, [text]);
 
   const send = async (imageUrl?: string) => {
-    if ((!text.trim() && !imageUrl) || sending) return;
+    if ((!text.trim() && !imageUrl) || sendLockRef.current) return;
+    sendLockRef.current = true;
     const body = text.trim() || (imageUrl ? '📷 Photo' : '');
     const tempId = `pending_${Date.now()}`;
     const optimistic: ChatBubbleMessage = {
@@ -117,6 +120,7 @@ export function ChatScreen({ navigation, route }: Props) {
         peerAvatar,
         fromRole: 'host',
         imageUrl,
+        clientMessageId: tempId,
       });
       setPending((p) => p.filter((m) => m.id !== tempId));
       const rows = await fetchDmMessages(meId, peerId, meId);
@@ -127,6 +131,7 @@ export function ChatScreen({ navigation, route }: Props) {
       );
       notify('Chat', e instanceof Error ? e.message : 'Could not send');
     } finally {
+      sendLockRef.current = false;
       setSending(false);
     }
   };
@@ -140,10 +145,17 @@ export function ChatScreen({ navigation, route }: Props) {
     const res = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       quality: 0.7,
-      base64: false,
+      base64: true,
     });
-    if (res.canceled || !res.assets?.[0]?.uri) return;
-    await send(res.assets[0].uri);
+    const asset = res.assets?.[0];
+    if (res.canceled || !asset?.base64) return;
+    try {
+      const mime = asset.mimeType || 'image/jpeg';
+      const imageUrl = await uploadChatImage(meId, `data:${mime};base64,${asset.base64}`);
+      await send(imageUrl);
+    } catch (e) {
+      notify('Photo', e instanceof Error ? e.message : 'Could not upload image');
+    }
   };
 
   const header = (
