@@ -1,75 +1,121 @@
-/**
- * Classic mobile ringtone (North-American dual-tone style).
- * Pattern: ~2s ring (440 Hz + 480 Hz) → ~4s silence → repeat.
- */
-let audioCtx: AudioContext | null = null;
-let ringTimer: ReturnType<typeof setInterval> | null = null;
-let stopBurstTimers: Array<ReturnType<typeof setTimeout>> = [];
+import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
+import { Platform, Vibration } from 'react-native';
 
-function ctx() {
-  if (typeof window === 'undefined') return null;
-  const AC =
-    window.AudioContext ||
-    (window as unknown as { webkitAudioContext: typeof AudioContext })
-      .webkitAudioContext;
-  if (!AC) return null;
-  if (!audioCtx) audioCtx = new AC();
-  return audioCtx;
+const ringtoneAsset = require('../../assets/audio/incoming-call-ringtone.mp3');
+
+let sound: Audio.Sound | null = null;
+let vibrationTimer: ReturnType<typeof setInterval> | null = null;
+let stopTimer: ReturnType<typeof setTimeout> | null = null;
+let starting = false;
+
+async function configureRingAudioSession() {
+  if (Platform.OS === 'web') return;
+  await Audio.setAudioModeAsync({
+    allowsRecordingIOS: false,
+    staysActiveInBackground: true,
+    playsInSilentModeIOS: true,
+    shouldDuckAndroid: false,
+    playThroughEarpieceAndroid: false,
+    interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
+    interruptionModeIOS: InterruptionModeIOS.DoNotMix,
+  });
 }
 
-function dualTone(durationSec: number) {
-  const c = ctx();
-  if (!c) return;
-  const now = c.currentTime;
-  const master = c.createGain();
-  master.gain.value = 0.0001;
-  master.connect(c.destination);
-
-  for (const freq of [440, 480]) {
-    const osc = c.createOscillator();
-    osc.type = 'sine';
-    osc.frequency.value = freq;
-    osc.connect(master);
-    osc.start(now);
-    osc.stop(now + durationSec + 0.02);
-  }
-
-  master.gain.exponentialRampToValueAtTime(0.22, now + 0.04);
-  master.gain.setValueAtTime(0.22, now + durationSec - 0.08);
-  master.gain.exponentialRampToValueAtTime(0.0001, now + durationSec);
+async function configureCallAudioSession() {
+  if (Platform.OS === 'web') return;
+  await Audio.setAudioModeAsync({
+    allowsRecordingIOS: true,
+    staysActiveInBackground: true,
+    playsInSilentModeIOS: true,
+    shouldDuckAndroid: false,
+    playThroughEarpieceAndroid: false,
+    interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
+    interruptionModeIOS: InterruptionModeIOS.DoNotMix,
+  });
 }
 
-function vibrateClassic() {
-  if (typeof navigator !== 'undefined' && navigator.vibrate) {
-    // Match ring / pause feel
-    navigator.vibrate([400, 200, 400, 200, 400, 2000]);
+function startSubtleVibration() {
+  stopVibration();
+  if (Platform.OS === 'web') {
+    const nav = typeof navigator !== 'undefined' ? navigator : null;
+    nav?.vibrate?.([280, 420, 280, 1600]);
+    vibrationTimer = setInterval(() => nav?.vibrate?.([280, 420, 280, 1600]), 2600);
+    return;
+  }
+  Vibration.vibrate([0, 280, 420, 280, 1600], true);
+}
+
+function stopVibration() {
+  if (vibrationTimer) {
+    clearInterval(vibrationTimer);
+    vibrationTimer = null;
+  }
+  if (Platform.OS === 'web') {
+    if (typeof navigator !== 'undefined') navigator.vibrate?.(0);
+    return;
+  }
+  Vibration.cancel();
+}
+
+export async function startIncomingRingtone(timeoutMs = 30_000) {
+  if (starting || sound) {
+    startSubtleVibration();
+    return;
+  }
+  starting = true;
+  try {
+    await stopIncomingRingtone();
+    await configureRingAudioSession();
+    const created = await Audio.Sound.createAsync(
+      ringtoneAsset,
+      {
+        isLooping: true,
+        shouldPlay: true,
+        volume: 0.72,
+        progressUpdateIntervalMillis: 500,
+      },
+      undefined,
+      true,
+    );
+    sound = created.sound;
+    startSubtleVibration();
+    stopTimer = setTimeout(() => {
+      void stopIncomingRingtone();
+    }, timeoutMs);
+  } catch (e) {
+    console.warn('[ringtone] start failed', e);
+    startSubtleVibration();
+  } finally {
+    starting = false;
   }
 }
 
-function ringBurst() {
-  dualTone(2.0);
-  vibrateClassic();
+export async function stopIncomingRingtone() {
+  if (stopTimer) {
+    clearTimeout(stopTimer);
+    stopTimer = null;
+  }
+  stopVibration();
+  const current = sound;
+  sound = null;
+  if (!current) return;
+  try {
+    await current.stopAsync();
+  } catch {
+    /* already stopped */
+  }
+  try {
+    await current.unloadAsync();
+  } catch {
+    /* already unloaded */
+  }
 }
 
-export function startIncomingRingtone() {
-  stopIncomingRingtone();
-  const c = ctx();
-  if (c?.state === 'suspended') {
-    void c.resume();
-  }
-  ringBurst();
-  // Classic cadence: ring 2s, gap ~4s → interval 6s
-  ringTimer = setInterval(ringBurst, 6000);
+export async function prepareAudioForAgoraCall() {
+  await stopIncomingRingtone();
+  await configureCallAudioSession();
 }
 
-export function stopIncomingRingtone() {
-  if (ringTimer) {
-    clearInterval(ringTimer);
-    ringTimer = null;
-  }
-  for (const t of stopBurstTimers) clearTimeout(t);
-  stopBurstTimers = [];
-  if (typeof navigator !== 'undefined' && navigator.vibrate) {
-    navigator.vibrate(0);
-  }
+export function cancelIncomingVibration() {
+  stopVibration();
 }

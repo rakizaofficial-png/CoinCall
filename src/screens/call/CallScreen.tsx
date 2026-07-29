@@ -50,6 +50,7 @@ import {
 import { radii } from '../../theme/colors';
 import { useTheme } from '../../theme/ThemeContext';
 import { notify } from '../../utils/notify';
+import { prepareAudioForAgoraCall } from '../../utils/ringtone';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Call'>;
 
@@ -319,6 +320,7 @@ export function CallScreen({ navigation, route }: Props) {
     let active = true;
     (async () => {
       try {
+        await prepareAudioForAgoraCall();
         let localEl: HTMLElement | null = null;
         let remoteEl: HTMLElement | null = null;
         if (isWeb) {

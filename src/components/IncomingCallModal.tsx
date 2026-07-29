@@ -96,7 +96,7 @@ export function IncomingCallModal({ call, onClear, hostBusyOnCall }: Props) {
 
   useEffect(() => {
     if (!call) {
-      stopIncomingRingtone();
+      void stopIncomingRingtone();
       setPhase('ring');
       handledRef.current = false;
       return;
@@ -107,7 +107,7 @@ export function IncomingCallModal({ call, onClear, hostBusyOnCall }: Props) {
     }
 
     handledRef.current = false;
-    startIncomingRingtone();
+    void startIncomingRingtone(30_000);
     pulse.value = withRepeat(
       withSequence(
         withTiming(1.12, { duration: 700, easing: Easing.inOut(Easing.ease) }),
@@ -156,7 +156,7 @@ export function IncomingCallModal({ call, onClear, hostBusyOnCall }: Props) {
     })();
 
     return () => {
-      stopIncomingRingtone();
+      void stopIncomingRingtone();
     };
   }, [call, onClear, pulse, ringScale]);
 
@@ -211,7 +211,7 @@ export function IncomingCallModal({ call, onClear, hostBusyOnCall }: Props) {
       return;
     }
 
-    const max = settings.maxWaitSec || 45;
+    const max = Math.min(settings.maxWaitSec || 30, 30);
     setWaitLeft(max);
     const tick = setInterval(() => {
       setWaitLeft((s) => {
@@ -219,6 +219,7 @@ export function IncomingCallModal({ call, onClear, hostBusyOnCall }: Props) {
           clearInterval(tick);
           if (!handledRef.current) {
             handledRef.current = true;
+            void stopIncomingRingtone();
             void rejectBridgeCall(call.id).catch(() => undefined);
             onClear();
           }
@@ -266,7 +267,7 @@ export function IncomingCallModal({ call, onClear, hostBusyOnCall }: Props) {
     handledRef.current = true;
     setBusy(true);
     setPhase('accepting');
-    stopIncomingRingtone();
+    void stopIncomingRingtone();
 
     const optimistic: BridgeCall = { ...call, ratePerMinute: rate };
     goToCall(optimistic);
@@ -292,7 +293,7 @@ export function IncomingCallModal({ call, onClear, hostBusyOnCall }: Props) {
     handledRef.current = true;
     setBusy(true);
     setPhase('rejecting');
-    stopIncomingRingtone();
+    void stopIncomingRingtone();
     try {
       await rejectBridgeCall(call.id);
       await pushLiveCallHistory({
@@ -320,7 +321,7 @@ export function IncomingCallModal({ call, onClear, hostBusyOnCall }: Props) {
   const ignore = () => {
     if (busy) return;
     ignoredIds.current.add(call.id);
-    stopIncomingRingtone();
+    void stopIncomingRingtone();
     onClear();
     notify('Ignored', 'Call dismissed — live continues');
   };

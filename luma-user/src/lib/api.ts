@@ -217,7 +217,7 @@ export async function fetchCallToken(callId: string) {
 export async function waitForAccept(
   callId: string,
   onTick?: (status: BridgeCall["status"]) => void,
-  timeoutMs = 45_000,
+  timeoutMs = 30_000,
 ): Promise<BridgeCall> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
