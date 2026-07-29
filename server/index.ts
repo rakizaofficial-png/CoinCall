@@ -1839,8 +1839,14 @@ app.post('/api/gifts/send', (req, res) => {
 
   const giftEventId = randomUUID().slice(0, 10);
   const txnKey =
-    String(req.headers['idempotency-key'] || req.body?.txnKey || '').trim() ||
+    String(
+      req.headers['idempotency-key'] ||
+        req.body?.txnKey ||
+        req.body?.clientTxId ||
+        '',
+    ).trim() ||
     `gift_send:${userId}:${hostId}:${giftId}:${giftEventId}`;
+  const existingTxn = getCoinTxnByKey(txnKey);
 
   const xfer = transferUserToHost(coinDeps(), {
     txnKey,
@@ -1865,6 +1871,19 @@ app.post('/api/gifts/send', (req, res) => {
 
   const userWallet = ensureWallet(userId);
   const hostWallet = ensureWallet(hostId);
+
+  // An idempotent HTTP retry returns the original transaction without
+  // crediting earnings, room totals, history or realtime events a second time.
+  if (existingTxn?.status === 'completed') {
+    res.status(200).json({
+      ok: true,
+      replayed: true,
+      txn: xfer.txn,
+      userWallet: walletPublic(userWallet),
+      hostWallet: walletPublic(hostWallet),
+    });
+    return;
+  }
 
   recordHostEarning(hostId, xfer.txn.coinsCreditedHost, {
     kind: 'gift',
@@ -6290,19 +6309,9 @@ wss.on('connection', (socket, req) => {
         });
       }
 
-      if (type === 'gift:send') {
-        broadcastWs({
-          type: 'gift:received',
-          payload: {
-            roomId,
-            fromUserId: String(raw.fromUserId || payload.fromHostId || hostId),
-            giftId: raw.giftId || payload.giftId,
-            coins,
-            label: raw.label || payload.label || 'Gift',
-            toHostId: raw.toHostId || payload.toHostId,
-          },
-        });
-      }
+      // Legacy clients used to mirror a completed HTTP gift as `gift:send`.
+      // Never turn that unauthoritative signal into a second received gift:
+      // /api/gifts/send owns charging, crediting and the single broadcast.
 
       if (type === 'dm:send') {
         const fromId = String(
