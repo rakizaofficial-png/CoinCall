@@ -12,29 +12,13 @@ import Animated, {
   withSequence,
   withTiming,
 } from 'react-native-reanimated';
-import { Audio } from 'expo-av';
 import {
   GIFT_RARITY_COLOR,
   GIFT_RARITY_LABEL,
   resolveGift,
   type GiftItem,
 } from '../../data/gifts';
-
-const LOCAL_GIFT_SOUNDS = {
-  sparkle: require('../../../assets/gift-sounds/magic-sparkle.ogg'),
-  rise: require('../../../assets/gift-sounds/magic-rise.ogg'),
-  fireworks: require('../../../assets/gift-sounds/fireworks.ogg'),
-} as const;
-
-function localGiftSound(giftId: string) {
-  if (['fireworks', 'sports_car', 'super_bike', 'private_jet', 'luxury_yacht', 'diamond_rain'].includes(giftId)) {
-    return LOCAL_GIFT_SOUNDS.fireworks;
-  }
-  if (['diamond_crown', 'royal_castle', 'golden_throne', 'millionaire_box'].includes(giftId)) {
-    return LOCAL_GIFT_SOUNDS.rise;
-  }
-  return LOCAL_GIFT_SOUNDS.sparkle;
-}
+import { playGiftSound, stopGiftSound } from '../../services/giftSoundService';
 
 export type GlamourGiftPayload = {
   id: string;
@@ -177,27 +161,16 @@ export function GlamourGiftOverlay({ item, onDone }: Props) {
   useEffect(() => {
     if (!item || !gift) return;
     let cancelled = false;
-    let sound: Audio.Sound | null = null;
-    void Audio.Sound.createAsync(
-      localGiftSound(gift.id),
-      { shouldPlay: true, volume: 0.78 },
-    )
-      .then((loaded) => {
-        if (cancelled) {
-          void loaded.sound.unloadAsync();
-        } else {
-          sound = loaded.sound;
-        }
-      })
-      .catch(() => undefined);
+    let sound: Awaited<ReturnType<typeof playGiftSound>> = null;
+    void playGiftSound(gift.id).then((player) => {
+      if (cancelled) void stopGiftSound(player);
+      else sound = player;
+    });
     const t = setTimeout(() => onDone?.(), gift.animMs);
     return () => {
       cancelled = true;
       clearTimeout(t);
-      if (sound) {
-        void sound.stopAsync().catch(() => undefined);
-        void sound.unloadAsync().catch(() => undefined);
-      }
+      void stopGiftSound(sound);
     };
   }, [item, gift, onDone]);
 

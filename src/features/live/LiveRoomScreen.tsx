@@ -198,7 +198,9 @@ export function LiveRoomScreen({ navigation, route }: Props) {
       kind: 'gift' as const,
     }));
     const commentLines = comments
-      .filter((c) => c.kind !== 'system' || /joined|gift/i.test(c.text))
+      // Gifts already have a dedicated row. The server also records a gift
+      // comment for chat history, so rendering both would show every gift twice.
+      .filter((c) => c.kind !== 'system' || /joined/i.test(c.text))
       .slice(-40)
       .map((c) => ({
         id: c.id,

@@ -357,6 +357,7 @@ export function AppProvider({
   const [todayLiveSeconds, setTodayLiveSeconds] = useState(0);
   const [myLongestCallSeconds, setMyLongestCallSeconds] = useState(0);
   const hydratedDayRef = useRef<number>(0);
+  const processedBillingGiftIdsRef = useRef(new Set<string>());
   const [incomingBridgeCall, setIncomingBridgeCall] = useState<BridgeCall | null>(
     null,
   );
@@ -944,11 +945,29 @@ export function AppProvider({
           }
         },
         (gift) => {
+          const giftIdentity = gift as {
+            id?: string;
+            txnId?: string;
+            giftId?: string;
+            createdAt?: number;
+            hostCredited?: number;
+          };
+          const eventId =
+            giftIdentity.txnId ||
+            giftIdentity.id ||
+            `billing_gift_${giftIdentity.giftId}_${giftIdentity.createdAt}`;
+          if (processedBillingGiftIdsRef.current.has(eventId)) return;
+          processedBillingGiftIdsRef.current.add(eventId);
+          if (processedBillingGiftIdsRef.current.size > 200) {
+            processedBillingGiftIdsRef.current = new Set(
+              [...processedBillingGiftIdsRef.current].slice(-100),
+            );
+          }
           const coins = Math.max(
             0,
             Math.floor(
               Number(
-                (gift as { hostCredited?: number }).hostCredited ?? gift.coins,
+                giftIdentity.hostCredited ?? gift.coins,
               ) || 0,
             ),
           );

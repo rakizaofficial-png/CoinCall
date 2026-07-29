@@ -43,6 +43,7 @@ import { syncHostPresence } from '../services/realtimeService';
 import { publishHostPresence } from '../services/callBridge';
 import { setBridgeLive } from '../services/hostBridgeState';
 import { notify } from '../utils/notify';
+import { preloadGiftSounds } from '../services/giftSoundService';
 
 type GoLiveDraft = {
   title: string;
@@ -135,6 +136,8 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
   const [gifts, setGifts] = useState<LiveGiftEvent[]>([]);
   const [giftOverlay, setGiftOverlay] = useState<LiveGiftEvent | null>(null);
   const giftQueueRef = useRef<LiveGiftEvent[]>([]);
+  const seenGiftOverlayIdsRef = useRef(new Set<string>());
+  const processedGiftEventIdsRef = useRef(new Set<string>());
   const giftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const advanceGiftRef = useRef<() => void>(() => {});
 
@@ -164,11 +167,22 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
   });
 
   const enqueueGiftOverlay = useCallback((gift: LiveGiftEvent) => {
+    if (seenGiftOverlayIdsRef.current.has(gift.id)) return;
+    seenGiftOverlayIdsRef.current.add(gift.id);
+    if (seenGiftOverlayIdsRef.current.size > 120) {
+      seenGiftOverlayIdsRef.current = new Set(
+        [...seenGiftOverlayIdsRef.current].slice(-60),
+      );
+    }
     giftQueueRef.current.push(gift);
     // Only start processing if nothing is currently showing
     if (!giftTimerRef.current) {
       advanceGiftRef.current();
     }
+  }, []);
+
+  useEffect(() => {
+    void preloadGiftSounds();
   }, []);
   const [lockedPhotos, setLockedPhotos] = useState<LockedLivePhoto[]>([]);
   const [rechargeTicker, setRechargeTicker] = useState<{
@@ -351,6 +365,8 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
         }
         if (event.type === 'gift:received') {
           const p = event.payload as {
+            id?: string;
+            txnId?: string;
             toHostId?: string;
             roomId?: string;
             fromName?: string;
@@ -363,8 +379,19 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
           };
           if (p.toHostId && p.toHostId !== user.id) return;
           if (p.roomId && activeRoomId && p.roomId !== activeRoomId) return;
+          const eventId =
+            p.id ||
+            p.txnId ||
+            `gift_${p.roomId || activeRoomId}_${p.giftId}_${p.createdAt}`;
+          if (processedGiftEventIdsRef.current.has(eventId)) return;
+          processedGiftEventIdsRef.current.add(eventId);
+          if (processedGiftEventIdsRef.current.size > 200) {
+            processedGiftEventIdsRef.current = new Set(
+              [...processedGiftEventIdsRef.current].slice(-100),
+            );
+          }
           const overlay: LiveGiftEvent = {
-            id: `ws_${Date.now()}`,
+            id: eventId,
             fromId: String((event.payload as { fromUserId?: string }).fromUserId || 'fan'),
             fromName: p.fromName || 'Fan',
             fromAvatar: '',
@@ -375,7 +402,11 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
             combo: 1,
             createdAt: p.createdAt || Date.now(),
           };
-          setGifts((prev) => [overlay, ...prev].slice(0, 50));
+          setGifts((prev) =>
+            prev.some((gift) => gift.id === overlay.id)
+              ? prev
+              : [overlay, ...prev].slice(0, 50),
+          );
           enqueueGiftOverlay(overlay);
           const coins = Number(p.coins) || 0;
           if (coins > 0) {
