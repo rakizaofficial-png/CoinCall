@@ -21,9 +21,9 @@ import {
 } from '../../data/gifts';
 
 const LOCAL_GIFT_SOUNDS = {
-  sparkle: require('../../assets/gift-sounds/magic-sparkle.ogg'),
-  rise: require('../../assets/gift-sounds/magic-rise.ogg'),
-  fireworks: require('../../assets/gift-sounds/fireworks.ogg'),
+  sparkle: require('../../../assets/gift-sounds/magic-sparkle.ogg'),
+  rise: require('../../../assets/gift-sounds/magic-rise.ogg'),
+  fireworks: require('../../../assets/gift-sounds/fireworks.ogg'),
 } as const;
 
 function localGiftSound(giftId: string) {
