@@ -8,8 +8,12 @@
 const {
   withGradleProperties,
   withAppBuildGradle,
+  withProjectBuildGradle,
+  withDangerousMod,
   createRunOncePlugin,
 } = require('@expo/config-plugins');
+const fs = require('fs');
+const path = require('path');
 
 const AGORA_EXCLUDES = [
   '**/libagora_lip_sync_extension.so',
@@ -38,6 +42,25 @@ function setGradleProp(props, key, value) {
 }
 
 function withAndroidSizeOptimizations(config) {
+  config = withProjectBuildGradle(config, (cfg) => {
+    let contents = cfg.modResults.contents;
+    const marker = '// CoinCall: modern SDK overrides for legacy DeepAR RN module';
+    if (!contents.includes(marker)) {
+      contents += `
+
+${marker}
+ext {
+    Deepar_compileSdkVersion = 36
+    Deepar_buildToolsVersion = "36.0.0"
+    Deepar_minSdkVersion = 24
+    Deepar_targetSdkVersion = 35
+}
+`;
+    }
+    cfg.modResults.contents = contents;
+    return cfg;
+  });
+
   config = withGradleProperties(config, (cfg) => {
     const props = cfg.modResults;
     // Phones: arm64 only for universal APK size. AAB still splits per-device.
@@ -51,6 +74,12 @@ function withAndroidSizeOptimizations(config) {
       props,
       'android.packagingOptions.excludes',
       AGORA_EXCLUDES.join(','),
+    );
+    // Agora RTC and RTM both bundle the same AOSL runtime. Keep one copy.
+    setGradleProp(
+      props,
+      'android.packagingOptions.pickFirsts',
+      '**/libaosl.so',
     );
     // Dev network inspector not needed in release packaging path
     setGradleProp(props, 'EX_DEV_CLIENT_NETWORK_INSPECTOR', 'false');
@@ -88,11 +117,35 @@ function withAndroidSizeOptimizations(config) {
     return cfg;
   });
 
+  config = withDangerousMod(config, [
+    'android',
+    async (cfg) => {
+      const proguardPath = path.join(
+        cfg.modRequest.platformProjectRoot,
+        'app',
+        'proguard-rules.pro',
+      );
+      const marker = '# CoinCall: optional Expo AV classes absent in this SDK build';
+      const rules = `${marker}
+-dontwarn expo.modules.core.interfaces.services.KeepAwakeManager
+-dontwarn expo.modules.kotlin.types.AnyTypeProvider
+-dontwarn expo.modules.kotlin.types.LazyKType
+`;
+      const current = fs.existsSync(proguardPath)
+        ? fs.readFileSync(proguardPath, 'utf8')
+        : '';
+      if (!current.includes(marker)) {
+        fs.appendFileSync(proguardPath, `\n${rules}`);
+      }
+      return cfg;
+    },
+  ]);
+
   return config;
 }
 
 module.exports = createRunOncePlugin(
   withAndroidSizeOptimizations,
   'withAndroidSizeOptimizations',
-  '1.0.0',
+  '1.0.3',
 );
