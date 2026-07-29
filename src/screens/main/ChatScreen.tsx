@@ -84,16 +84,24 @@ export function ChatScreen({ navigation, route }: Props) {
     return merged.sort((a, b) => a.createdAt - b.createdAt);
   }, [meId, messages, pending]);
 
+  // FlatList's inverted mode keeps index 0 pinned to the visual bottom. This is
+  // more reliable than scrollToEnd while the composer/keyboard changes height.
+  const newestFirstBubbles = useMemo(() => [...bubbles].reverse(), [bubbles]);
+  const newestMessageId = newestFirstBubbles[0]?.id;
+
   useEffect(() => {
-    if (!bubbles.length) return;
+    if (!newestMessageId) return;
     requestAnimationFrame(() => {
-      listRef.current?.scrollToEnd({ animated: true });
+      listRef.current?.scrollToOffset({ offset: 0, animated: true });
     });
-  }, [bubbles.length]);
+  }, [newestMessageId]);
 
   useEffect(() => {
     if (!text) return;
-    const t = setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 80);
+    const t = setTimeout(
+      () => listRef.current?.scrollToOffset({ offset: 0, animated: true }),
+      80,
+    );
     return () => clearTimeout(t);
   }, [text]);
 
@@ -238,13 +246,17 @@ export function ChatScreen({ navigation, route }: Props) {
       >
         <FlatList
           ref={listRef}
-          data={bubbles}
+          data={newestFirstBubbles}
+          inverted={newestFirstBubbles.length > 0}
           keyExtractor={(item) => item.id}
           style={{ flex: 1 }}
           contentContainerStyle={styles.listContent}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
-          onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+          maintainVisibleContentPosition={{
+            minIndexForVisible: 0,
+            autoscrollToTopThreshold: 80,
+          }}
           renderItem={({ item }) => (
             <ChatBubble message={item} onImagePress={setViewerUri} />
           )}
@@ -253,7 +265,7 @@ export function ChatScreen({ navigation, route }: Props) {
               No messages yet — fans who message you appear here.
             </Text>
           }
-          ListFooterComponent={peerTyping ? <TypingIndicator /> : null}
+          ListHeaderComponent={peerTyping ? <TypingIndicator /> : null}
         />
       </ChatThreadLayout>
       <ImageViewerModal uri={viewerUri} onClose={() => setViewerUri(null)} />
@@ -293,7 +305,6 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 16,
     flexGrow: 1,
-    justifyContent: 'flex-end',
   },
   empty: {
     color: CHAT_THEME.muted,
