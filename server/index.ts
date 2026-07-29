@@ -2159,12 +2159,24 @@ const installUserMap = new Map<string, string>();
 type WithdrawalRequest = {
   id: string;
   hostId: string;
+  hostName?: string;
+  hostAvatar?: string;
   amountCoins: number;
   gateway: 'easypaisa' | 'jazzcash' | 'bank';
   accountName: string;
   accountNumber: string;
   status: 'pending' | 'processing' | 'paid' | 'failed' | 'admin_review';
   createdAt: number;
+  /** Immutable audit snapshot taken immediately before/after the debit. */
+  walletBalanceBefore?: number;
+  walletBalanceAfter?: number;
+  totalCallsAtRequest?: number;
+  answeredCallsAtRequest?: number;
+  missedCallsAtRequest?: number;
+  totalCallSecondsAtRequest?: number;
+  callCoinsAtRequest?: number;
+  giftCoinsAtRequest?: number;
+  lifetimeEarningsAtRequest?: number;
   providerRef?: string;
   error?: string;
 };
@@ -3623,12 +3635,46 @@ app.post('/api/host/withdrawals', async (req, res) => {
   const request: WithdrawalRequest = {
     id: `wd_${randomUUID()}`,
     hostId,
+    hostName:
+      row.displayName ||
+      getHost(hostId)?.name ||
+      getPresence(hostId)?.name ||
+      'Host',
+    hostAvatar:
+      getHost(hostId)?.photoUrl ||
+      getPresence(hostId)?.avatarUrl ||
+      row.avatarUrl,
     amountCoins,
     gateway,
     accountName,
     accountNumber,
     status: 'pending',
     createdAt: Date.now(),
+    walletBalanceBefore: debited.txn.userBalanceBefore,
+    walletBalanceAfter: debited.txn.userBalanceAfter,
+    totalCallsAtRequest: callHistory.filter((call) => call.hostId === hostId).length,
+    answeredCallsAtRequest: callHistory.filter(
+      (call) =>
+        call.hostId === hostId &&
+        (call.status === 'ended' ||
+          call.status === 'accepted' ||
+          call.billedMinutes > 0),
+    ).length,
+    missedCallsAtRequest: callHistory.filter(
+      (call) =>
+        call.hostId === hostId &&
+        (call.endReason === 'missed' || call.endReason === 'rejected'),
+    ).length,
+    totalCallSecondsAtRequest: callHistory
+      .filter((call) => call.hostId === hostId)
+      .reduce((sum, call) => sum + Math.max(0, call.durationSec || 0), 0),
+    callCoinsAtRequest: callHistory
+      .filter((call) => call.hostId === hostId)
+      .reduce((sum, call) => sum + Math.max(0, call.coinsSpent || 0), 0),
+    giftCoinsAtRequest: giftHistory
+      .filter((gift) => gift.toHostId === hostId)
+      .reduce((sum, gift) => sum + Math.max(0, gift.coins || 0), 0),
+    lifetimeEarningsAtRequest: hostEarningsSummary(hostId).totalCoins,
   };
   withdrawals.unshift(request);
 
@@ -4020,7 +4066,29 @@ app.get('/api/admin/withdrawals', (req, res) => {
     const hostSet = new Set(auth.agency.hostIds);
     rows = rows.filter((w) => hostSet.has(w.hostId));
   }
-  res.json({ withdrawals: rows.slice(0, 100) });
+  res.json({
+    withdrawals: rows.slice(0, 100).map((withdrawal) => {
+      const wallet = ensureWallet(withdrawal.hostId, { role: 'host' });
+      const calls = callHistory.filter((call) => call.hostId === withdrawal.hostId);
+      const presence = getPresence(withdrawal.hostId);
+      return {
+        ...withdrawal,
+        currentWalletBalance: wallet.coinBalance,
+        isOnline: Boolean(presence?.isOnline),
+        isLive: Boolean(presence?.isLive),
+        currentTotalCalls: calls.length,
+        currentAnsweredCalls: calls.filter(
+          (call) =>
+            call.status === 'ended' ||
+            call.status === 'accepted' ||
+            call.billedMinutes > 0,
+        ).length,
+        currentMissedCalls: calls.filter(
+          (call) => call.endReason === 'missed' || call.endReason === 'rejected',
+        ).length,
+      };
+    }),
+  });
 });
 
 app.post('/api/admin/withdrawals/:id/status', (req, res) => {
@@ -4057,6 +4125,7 @@ app.post('/api/admin/withdrawals/:id/status', (req, res) => {
     }
     broadcastWallet(row.hostId);
   }
+  persist();
   broadcastWs({ type: 'withdrawal:updated', payload: row });
   res.json({ ok: true, withdrawal: row });
 });

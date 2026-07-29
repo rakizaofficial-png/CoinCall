@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { fetchBridgeHosts, fetchManagedHosts } from './hostApi';
+import { fetchBridgeHosts, fetchManagedHosts, runHostAction } from './hostApi';
 import {
   staffLogin,
   connectAdminRealtime,
@@ -15,7 +15,6 @@ import {
   resolveAdminReport,
   resolveFirebaseReport,
   sendControl,
-  setHostOnline,
   type ActiveCall,
   type AdminActiveCall,
   type AdminLiveRoomSession,
@@ -181,6 +180,8 @@ export default function App() {
     (localStorage.getItem('cc_admin_theme') as 'dark' | 'light') || 'light',
   );
   const [openPayouts, setOpenPayouts] = useState(0);
+  const [remoteBusyId, setRemoteBusyId] = useState<string | null>(null);
+  const [remoteMsg, setRemoteMsg] = useState('');
   const [bridgeHosts, setBridgeHosts] = useState<
     { id: string; name: string; readyToCall?: boolean; isOnline?: boolean; isLive?: boolean; isOnCall?: boolean; avatarUrl?: string }[]
   >([]);
@@ -415,7 +416,16 @@ export default function App() {
   const remoteHosts = useMemo(() => {
     const byId = new Map<string, HostRow & { readyToCall?: boolean; isLive?: boolean; isOnCall?: boolean }>();
     for (const h of hosts) {
-      if (h.hostStatus === 'approved') byId.set(h.id, h);
+      if (h.hostStatus === 'approved') {
+        byId.set(h.id, {
+          ...h,
+          // Firebase profile flags are not presence. Only an API heartbeat is online.
+          isOnline: false,
+          readyToCall: false,
+          isLive: false,
+          isOnCall: false,
+        });
+      }
     }
     for (const b of bridgeHosts) {
       const prev = byId.get(b.id);
@@ -433,6 +443,70 @@ export default function App() {
     }
     return [...byId.values()];
   }, [hosts, bridgeHosts]);
+
+  const applyRemoteHostAction = async (
+    hostId: string,
+    action: 'force_online' | 'force_offline',
+  ) => {
+    setRemoteBusyId(hostId);
+    setRemoteMsg('');
+    try {
+      await runHostAction(hostId, action);
+      await refreshSessions();
+      setRemoteMsg(
+        action === 'force_offline'
+          ? 'Host ko offline command bhej diya gaya aur bridge presence clear ho gayi.'
+          : 'Online request bhej di gayi. Host heartbeat aane par hi Online show hoga.',
+      );
+    } catch (error) {
+      setRemoteMsg(error instanceof Error ? error.message : 'Remote action failed');
+    } finally {
+      setRemoteBusyId(null);
+    }
+  };
+
+  const sendRemoteTip = async (hostId: string) => {
+    setRemoteBusyId(hostId);
+    try {
+      await runHostAction(hostId, 'admin_message', {
+        reason: 'Please stay online longer.',
+      });
+      setRemoteMsg('Admin tip Host App ko bhej di gayi.');
+    } catch (error) {
+      setRemoteMsg(error instanceof Error ? error.message : 'Tip failed');
+    } finally {
+      setRemoteBusyId(null);
+    }
+  };
+
+  const endRemoteCall = async (hostId: string) => {
+    setRemoteBusyId(hostId);
+    setRemoteMsg('');
+    try {
+      const call = bridgeCalls.find(
+        (row) =>
+          row.hostId === hostId &&
+          row.status !== 'ended' &&
+          row.status !== 'rejected' &&
+          row.status !== 'missed',
+      );
+      if (call) await endBridgeCallAdmin(call.id);
+      await sendControl(hostId, {
+        type: 'end_call',
+        message: 'Admin ended call.',
+      });
+      await refreshSessions();
+      setRemoteMsg(
+        call
+          ? 'Active call backend aur Host App dono taraf end kar di gayi.'
+          : 'Host ko end-call command bhej di gayi; koi active backend call nahi thi.',
+      );
+    } catch (error) {
+      setRemoteMsg(error instanceof Error ? error.message : 'End call failed');
+    } finally {
+      setRemoteBusyId(null);
+    }
+  };
 
   async function onLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -676,6 +750,7 @@ export default function App() {
                       : 'Real-time hosts · users · live · revenue'
                   }
                 />
+                {remoteMsg ? <div className="hm-toast desk-toast">{remoteMsg}</div> : null}
                 {isAgency && agencyId ? (
                   <AgencyOverview
                     agencyId={agencyId}
@@ -1132,43 +1207,32 @@ export default function App() {
                                 <button
                                   type="button"
                                   className="btn-ghost"
-                                  onClick={() =>
-                                    void sendControl(h.id, {
-                                      type: 'message',
-                                      message: 'Please stay online longer.',
-                                    })
-                                  }
+                                  disabled={remoteBusyId === h.id}
+                                  onClick={() => void sendRemoteTip(h.id)}
                                 >
                                   Tip
                                 </button>
                                 <button
                                   type="button"
                                   className="btn-gold"
-                                  onClick={() => void setHostOnline(h.id, true)}
+                                  disabled={remoteBusyId === h.id}
+                                  onClick={() => void applyRemoteHostAction(h.id, 'force_online')}
                                 >
-                                  Online
+                                  Request online
                                 </button>
                                 <button
                                   type="button"
                                   className="btn-ghost"
-                                  onClick={() =>
-                                    void sendControl(h.id, {
-                                      type: 'force_offline',
-                                      message: 'Admin set you Offline.',
-                                    })
-                                  }
+                                  disabled={remoteBusyId === h.id}
+                                  onClick={() => void applyRemoteHostAction(h.id, 'force_offline')}
                                 >
                                   Force offline
                                 </button>
                                 <button
                                   type="button"
                                   className="btn-red"
-                                  onClick={() =>
-                                    void sendControl(h.id, {
-                                      type: 'end_call',
-                                      message: 'Admin ended call.',
-                                    })
-                                  }
+                                  disabled={remoteBusyId === h.id}
+                                  onClick={() => void endRemoteCall(h.id)}
                                 >
                                   End call
                                 </button>

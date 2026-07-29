@@ -505,6 +505,7 @@ export type HostAction =
   | 'set_call_price'
   | 'set_commission'
   | 'set_coins'
+  | 'admin_message'
   | 'record_login';
 
 export function applyHostAction(
@@ -1241,6 +1242,10 @@ function controlForAction(action: HostAction, reason?: string) {
     request_docs: {
       type: 'message',
       message: reason || 'Please upload additional documents.',
+    },
+    admin_message: {
+      type: 'message',
+      message: reason || 'Message from admin.',
     },
     freeze_wallet: {
       type: 'message',
