@@ -30,9 +30,11 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GlamourGiftOverlay } from '../../components/gifts/GlamourGiftOverlay';
+import { LockedRoomPaywallOverlay } from '../../components/live/LockedRoomPaywallOverlay';
 import { useLiveStudio } from '../../context/LiveStudioContext';
 import { useApp } from '../../context/AppContext';
 import { LIVE_FILTERS } from '../../data/liveFilters';
+import { useLiveRoomLockRtm } from '../../hooks/useLiveRoomLockRtm';
 import {
   beautyCssFilter,
   setAgoraBeauty,
@@ -229,6 +231,19 @@ export function LiveRoomScreen({ navigation, route }: Props) {
     setSheet('none');
     notify('Room updated', lockOn ? `Locked · ${lockFee} coins` : 'Room unlocked');
   };
+
+  const kickFromLockedRoom = useCallback(async () => {
+    await stopAgoraCall();
+  }, []);
+
+  const lockGate = useLiveRoomLockRtm({
+    roomId,
+    channel: room?.channel || roomId,
+    userId: user.id,
+    userName: user.name || 'Viewer',
+    enabled: !hostMode && Boolean(room?.channel || roomId),
+    onKick: kickFromLockedRoom,
+  });
 
   if (!room) {
     return (
@@ -548,6 +563,21 @@ export function LiveRoomScreen({ navigation, route }: Props) {
             })}
           </View>
         </BottomSheet>
+      )}
+
+      {!hostMode && (
+        <LockedRoomPaywallOverlay
+          visible={lockGate.locked}
+          entryFee={lockGate.entryFee || entryFee}
+          balance={user.coinBalance}
+          paying={lockGate.paying}
+          error={lockGate.error}
+          onPay={() => void lockGate.pay()}
+          onDecline={() => {
+            void lockGate.decline();
+            navigation.goBack();
+          }}
+        />
       )}
     </View>
   );

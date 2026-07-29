@@ -16,6 +16,7 @@ import {
   startUserAgoraLiveAudience,
   stopUserAgoraCall,
 } from "@/lib/agora";
+import { connectLiveRoomRtm, type LiveRoomLockRtmEvent } from "@/lib/liveRtm";
 
 function avatarFor(id: string, url?: string | null) {
   if (
@@ -161,6 +162,69 @@ export default function LiveRoomPage({
       cancelled = true;
     };
   }, [ready, display.roomId, userId]);
+
+  useEffect(() => {
+    if (!ready || !display.roomId || !display.channel || !userId) return;
+    let closed = false;
+    let cleanup: (() => Promise<void>) | null = null;
+
+    const enforceLock = async (event: LiveRoomLockRtmEvent) => {
+      if (closed) return;
+      if (!event.entryLocked || event.entryFee <= 0) {
+        setEntryFee(0);
+        setPaywallOpen(false);
+        setEntryPaid(true);
+        return;
+      }
+      try {
+        const access = await checkLiveAccess(display.roomId, userId);
+        if (closed) return;
+        if (access.allowed) {
+          setEntryPaid(true);
+          setPaywallOpen(false);
+          return;
+        }
+        setEntryFee(access.entryFee || event.entryFee);
+        setEntryPaid(false);
+        setPaywallOpen(true);
+        setVideoStatus("Live locked · payment required");
+        await stopUserAgoraCall();
+      } catch {
+        if (closed) return;
+        setEntryFee(event.entryFee);
+        setEntryPaid(false);
+        setPaywallOpen(true);
+        setVideoStatus("Live locked · payment required");
+        await stopUserAgoraCall();
+      }
+    };
+
+    void (async () => {
+      try {
+        const session = await connectLiveRoomRtm({
+          roomId: display.roomId,
+          channel: display.channel,
+          hostId: display.id,
+          userId,
+          onLock: (event) => void enforceLock(event),
+        });
+        if (closed) {
+          await session.close();
+          return;
+        }
+        cleanup = session.close;
+        const state = await session.getLockState();
+        if (state) await enforceLock(state);
+      } catch {
+        /* API access check remains authoritative if RTM is unavailable */
+      }
+    })();
+
+    return () => {
+      closed = true;
+      void cleanup?.();
+    };
+  }, [ready, display.roomId, display.channel, display.id, userId]);
 
   useEffect(() => {
     if (!ready || !display.channel || !entryPaid) return;

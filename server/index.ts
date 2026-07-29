@@ -132,7 +132,7 @@ import {
   verifyStaffToken,
 } from './staffAuth.ts';
 
-const { RtcRole, RtcTokenBuilder } = agoraToken as {
+const { RtcRole, RtcTokenBuilder, RtmTokenBuilder } = agoraToken as {
   RtcRole: { PUBLISHER: number; SUBSCRIBER: number };
   RtcTokenBuilder: {
     buildTokenWithUid: (
@@ -142,6 +142,14 @@ const { RtcRole, RtcTokenBuilder } = agoraToken as {
       uid: number,
       role: number,
       tokenExpire: number,
+      privilegeExpire: number,
+    ) => string;
+  };
+  RtmTokenBuilder: {
+    buildToken: (
+      appId: string,
+      appCertificate: string,
+      userId: string,
       privilegeExpire: number,
     ) => string;
   };
@@ -516,6 +524,21 @@ function mintToken(channel: string, uid: number, roleName: string) {
   return { appId: APP_ID, channel, uid, role: roleName, token, expireAt: privilegeExpire };
 }
 
+function mintRtmToken(userId: string) {
+  if (!APP_ID || !APP_CERT) {
+    throw new Error('Agora server keys missing');
+  }
+  const now = Math.floor(Date.now() / 1000);
+  const privilegeExpire = now + 3600;
+  const token = RtmTokenBuilder.buildToken(
+    APP_ID,
+    APP_CERT,
+    userId,
+    privilegeExpire,
+  );
+  return { appId: APP_ID, userId, token, expireAt: privilegeExpire };
+}
+
 function pushToHost(hostId: string, event: string, data: unknown) {
   const streams = hostStreams.get(hostId);
   if (!streams?.size) return;
@@ -634,6 +657,22 @@ app.get('/api/agora/token', (req, res) => {
     res.json(mintToken(channel, uid, roleName));
   } catch (e: any) {
     res.status(500).json({ error: e?.message || 'Token error' });
+  }
+});
+
+/**
+ * GET /api/agora/rtm-token?userId=user_xyz
+ */
+app.get('/api/agora/rtm-token', (req, res) => {
+  try {
+    const userId = String(req.query.userId || '').trim().slice(0, 64);
+    if (!userId) {
+      res.status(400).json({ error: 'userId is required' });
+      return;
+    }
+    res.json(mintRtmToken(userId));
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || 'RTM token error' });
   }
 });
 

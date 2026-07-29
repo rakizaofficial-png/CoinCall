@@ -450,4 +450,13 @@ export async function updateLiveRoomLock(
       entryFee,
     });
   }
+  void import('./liveRoomRtmService').then(({ publishLiveRoomLockRtm }) =>
+    publishLiveRoomLockRtm({
+      roomId,
+      channel: roomId,
+      hostId,
+      entryLocked: opts.entryLocked,
+      entryFee,
+    }),
+  );
 }
