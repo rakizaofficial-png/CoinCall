@@ -352,6 +352,7 @@ export async function subscribeLiveRoomLockRtm(input: {
 export async function fetchLiveRoomAccess(input: { roomId: string; userId: string }) {
   const res = await fetch(
     `${api()}/live/rooms/${encodeURIComponent(input.roomId)}/access?userId=${encodeURIComponent(input.userId)}`,
+    { headers: { 'X-User-Id': input.userId } },
   );
   if (!res.ok) {
     const body = await res.text().catch(() => '');
@@ -375,7 +376,7 @@ export async function payLockedLiveEntry(input: {
 }) {
   const res = await fetch(`${api()}/live/rooms/${encodeURIComponent(input.roomId)}/join`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-User-Id': input.userId },
     body: JSON.stringify({ userId: input.userId, userName: input.userName }),
   });
   const data = await res.json().catch(() => ({}));

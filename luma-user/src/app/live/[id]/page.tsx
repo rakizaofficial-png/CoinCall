@@ -21,6 +21,7 @@ import {
   type LiveRoomLockRtmEvent,
   type LiveRoomRtmEvent,
 } from "@/lib/liveRtm";
+import { useGiftAnimationQueue } from "@/components/gifts/GiftAnimationQueue";
 
 function avatarFor(id: string, url?: string | null) {
   if (
@@ -55,6 +56,7 @@ export default function LiveRoomPage({
   const { id } = use(params);
   const mock = creators.find((c) => c.id === id) ?? null;
   const { coins, following, toggleFollow, pushToast, userId, syncWallet } = useApp();
+  const { enqueueGift } = useGiftAnimationQueue();
 
   const [host, setHost] = useState<LiveHost | null>(null);
   const [room, setRoom] = useState<RoomRow | null>(null);
@@ -207,6 +209,17 @@ export default function LiveRoomPage({
     const handleRtmEvent = async (event: LiveRoomRtmEvent) => {
       if (closed) return;
       if (event.type === "live_gift") {
+        enqueueGift({
+          id: event.id,
+          giftId: event.giftId,
+          giftName: event.giftName,
+          emoji: event.giftEmoji,
+          senderName: event.fromName,
+          coins: event.coins,
+          combo: event.combo,
+          source: event.lottie?.source,
+          durationMs: event.lottie?.durationMs,
+        });
         setFloating((items) => [
           ...items,
           `${event.giftEmoji}${event.combo > 1 ? ` x${event.combo}` : ""}`,
@@ -262,7 +275,15 @@ export default function LiveRoomPage({
       closed = true;
       void cleanup?.();
     };
-  }, [ready, display.roomId, display.channel, display.id, userId]);
+  }, [
+    ready,
+    display.roomId,
+    display.channel,
+    display.id,
+    enqueueGift,
+    pushToast,
+    userId,
+  ]);
 
   useEffect(() => {
     if (!ready || !display.channel || !entryPaid) return;

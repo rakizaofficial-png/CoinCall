@@ -33,6 +33,12 @@ services:
         value: https://coincall-api.onrender.com
       - key: DATA_DIR
         sync: false
+      - key: GOOGLE_PLAY_PACKAGE_NAME
+        value: com.zuko.user
+      - key: GOOGLE_PLAY_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: ALLOW_IAP_STUB
+        value: "0"
 
   # Host app (Expo web export) — hosts Go Online & accept Luma calls
   # EXPO_PUBLIC_* must be set in the dashboard (baked at build). Code also

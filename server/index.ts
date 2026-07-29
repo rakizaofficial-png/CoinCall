@@ -2,7 +2,7 @@ import 'dotenv/config';
 import cors from 'cors';
 import express from 'express';
 import agoraToken from 'agora-token';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import {
@@ -86,6 +86,7 @@ import {
   setAutoCallPrefs,
   touchAutoCallHeartbeat,
   type CandidateHost,
+  type AutoCallAnalyticsEvent,
 } from './autoCallInvites.ts';
 import {
   claimDailyLogin,
@@ -131,6 +132,10 @@ import {
   verifyAdminCredentials,
   verifyStaffToken,
 } from './staffAuth.ts';
+import {
+  consumeGooglePlayProduct,
+  verifyGooglePlayProduct,
+} from './googlePlayBilling.ts';
 
 const { RtcRole, RtcTokenBuilder, RtmTokenBuilder } = agoraToken as {
   RtcRole: { PUBLISHER: number; SUBSCRIBER: number };
@@ -277,6 +282,11 @@ const GIFT_CATALOG_SERVER: Record<
   string,
   { name: string; emoji: string; coins: number }
 > = {
+  // Micro gifts — fast, low-cost engagement
+  coin: { name: 'Lucky Coin', emoji: '🪙', coins: 1 },
+  single_rose: { name: 'Single Rose', emoji: '🌹', coins: 2 },
+  heart_tap: { name: 'Heart Tap', emoji: '❤️', coins: 5 },
+  applause: { name: 'Applause', emoji: '👏', coins: 8 },
   // Premium Glamour collection
   rose_bouquet: { name: 'Rose Bouquet', emoji: '🌹', coins: 10 },
   luxury_perfume: { name: 'Luxury Perfume', emoji: '🧴', coins: 50 },
@@ -587,12 +597,27 @@ app.get('/api/health', (_req, res) => {
 
 /** Public gift catalog — User + Host must use the same IDs */
 app.get('/api/gifts', (_req, res) => {
-  const gifts = Object.entries(GIFT_CATALOG_SERVER).map(([id, g]) => ({
-    id,
-    name: g.name,
-    emoji: g.emoji,
-    coins: g.coins,
-  }));
+  const legacyAliases = new Set([
+    'rose',
+    'heart',
+    'kiss',
+    'star',
+    'diamond',
+    'crown',
+    'sports',
+    'yacht',
+    'castle',
+    'rocket',
+  ]);
+  const gifts = Object.entries(GIFT_CATALOG_SERVER)
+    .filter(([id]) => !legacyAliases.has(id))
+    .map(([id, g]) => ({
+      id,
+      name: g.name,
+      emoji: g.emoji,
+      coins: g.coins,
+    }))
+    .sort((a, b) => a.coins - b.coins);
   res.json({ gifts });
 });
 
@@ -2062,8 +2087,8 @@ app.post('/api/calls/route', (req, res) => {
  * WALLET / IAP / WITHDRAWALS / WEBSOCKET
  * =============================================================================
  * Replace in-memory `wallets` Map with Postgres when DATABASE_URL is set.
- * IAP verify stubs must be swapped for Google Play Developer API + App Store
- * Server API before production money moves.
+ * Google Play purchases are verified through Android Publisher before minting.
+ * Apple purchases still require App Store Server API configuration.
  * =============================================================================
  */
 
@@ -2073,6 +2098,7 @@ type WalletRow = {
   xp: number;
   isPremium: boolean;
   displayName: string;
+  country?: string;
   avatarUrl?: string;
   bio?: string;
   role: 'user' | 'host';
@@ -3326,7 +3352,7 @@ app.post('/api/wallet/iap/session', (req, res) => {
  * Verify IAP receipt then credit wallet.
  * Replace stub with Google androidpublisher + Apple App Store Server API.
  */
-app.post('/api/wallet/iap/verify', (req, res) => {
+app.post('/api/wallet/iap/verify', async (req, res) => {
   const userId = String(req.body?.userId || '').trim();
   const productId = String(req.body?.productId || '').trim();
   const purchaseToken = String(req.body?.purchaseToken || '').trim();
@@ -3337,7 +3363,8 @@ app.post('/api/wallet/iap/verify', (req, res) => {
     return;
   }
   if (!requireUserMatch(req, res, userId)) return;
-  if (iapReceipts.has(purchaseToken)) {
+  const receiptKey = createHash('sha256').update(purchaseToken).digest('hex');
+  if (iapReceipts.has(receiptKey) || iapReceipts.has(purchaseToken)) {
     res.status(409).json({ error: 'Purchase already redeemed' });
     return;
   }
@@ -3346,6 +3373,9 @@ app.post('/api/wallet/iap/verify', (req, res) => {
   const appleReady = Boolean(process.env.APPLE_IAP_SHARED_SECRET);
   const allowStub =
     process.env.ALLOW_IAP_STUB === '1' || process.env.NODE_ENV !== 'production';
+  let googlePurchase:
+    | Awaited<ReturnType<typeof verifyGooglePlayProduct>>
+    | undefined;
   if (platform === 'google' && !googleReady) {
     if (!allowStub) {
       res.status(503).json({
@@ -3353,7 +3383,35 @@ app.post('/api/wallet/iap/verify', (req, res) => {
       });
       return;
     }
-    console.warn('[IAP] GOOGLE_PLAY_SERVICE_ACCOUNT_JSON missing — stub accept');
+    console.warn('[IAP] GOOGLE_PLAY_SERVICE_ACCOUNT_JSON missing — dev stub accept');
+  } else if (platform === 'google') {
+    const packageName = String(
+      process.env.GOOGLE_PLAY_PACKAGE_NAME || 'com.zuko.user',
+    ).trim();
+    try {
+      googlePurchase = await verifyGooglePlayProduct({
+        packageName,
+        productId,
+        purchaseToken,
+        userId,
+      });
+      if (googlePurchase.alreadyConsumed) {
+        res.status(409).json({ error: 'Purchase already consumed' });
+        return;
+      }
+    } catch (error) {
+      console.warn(
+        '[IAP] Google verification rejected:',
+        error instanceof Error ? error.message : 'unknown error',
+      );
+      res.status(422).json({
+        error:
+          error instanceof Error
+            ? error.message
+            : 'Google Play purchase verification failed',
+      });
+      return;
+    }
   }
   if (platform === 'apple' && !appleReady) {
     if (!allowStub) {
@@ -3371,7 +3429,7 @@ app.post('/api/wallet/iap/verify', (req, res) => {
     return;
   }
 
-  iapReceipts.add(purchaseToken);
+  iapReceipts.add(receiptKey);
   const credited = product.coins + product.bonusCoins;
   const minted = mintCoins(coinDeps(), {
     txnKey: `iap:${purchaseToken}`,
@@ -3379,15 +3437,38 @@ app.post('/api/wallet/iap/verify', (req, res) => {
     userId,
     amount: credited,
     reason: `IAP · ${product.title}`,
-    meta: { productId, platform },
+    meta: {
+      productId,
+      platform,
+      orderId: googlePurchase?.orderId,
+      regionCode: googlePurchase?.regionCode,
+    },
   });
   if (!minted.ok) {
-    iapReceipts.delete(purchaseToken);
+    iapReceipts.delete(receiptKey);
     res.status(minted.code).json({
       error: minted.txn.error || 'Credit failed',
       txn: minted.txn,
     });
     return;
+  }
+  if (platform === 'google' && googlePurchase) {
+    try {
+      await consumeGooglePlayProduct({
+        packageName: String(
+          process.env.GOOGLE_PLAY_PACKAGE_NAME || 'com.zuko.user',
+        ).trim(),
+        productId,
+        purchaseToken,
+      });
+    } catch (error) {
+      // Entitlement is already granted and receipt is reserved. A retry must
+      // never mint twice; operations can reconcile consumption from logs/RTDN.
+      console.error(
+        '[IAP] Purchase credited but Google consume failed:',
+        error instanceof Error ? error.message : 'unknown error',
+      );
+    }
   }
   const row = ensureWallet(userId);
   cancelPendingForUser(userId, 'iap_purchase');
@@ -4588,12 +4669,7 @@ function restoreFromDisk() {
     loadAutoCallFromSnapshot(
       snap.autoCall as {
         prefs?: Array<{ userId: string; enabled: boolean; updatedAt: number }>;
-        analytics?: Array<{
-          id: string;
-          at: number;
-          userId: string;
-          type: string;
-        }>;
+        analytics?: AutoCallAnalyticsEvent[];
       },
     );
   }
@@ -4760,12 +4836,7 @@ async function applyMongoOrDisk() {
     loadAutoCallFromSnapshot(
       snap.autoCall as {
         prefs?: Array<{ userId: string; enabled: boolean; updatedAt: number }>;
-        analytics?: Array<{
-          id: string;
-          at: number;
-          userId: string;
-          type: string;
-        }>;
+        analytics?: AutoCallAnalyticsEvent[];
       },
     );
   }
@@ -4998,7 +5069,7 @@ app.get('/api/live/rooms/:id', (req, res) => {
     return;
   }
   const hostId = String(found.room.hostId || found.id);
-  const out = { ...found.room, id: found.id };
+  const out: Record<string, unknown> = { ...found.room, id: found.id };
   for (const key of ['hostAvatar', 'thumbnailUrl'] as const) {
     const v = out[key];
     if (
@@ -5228,6 +5299,7 @@ app.get('/api/live/rooms/:id/access', (req, res) => {
     res.status(400).json({ error: 'userId required' });
     return;
   }
+  if (!requireUserMatch(req, res, userId)) return;
   const access = hasLiveEntryAccess(found.room, userId);
   res.json({
     roomId: found.id,
@@ -5255,6 +5327,7 @@ app.post('/api/live/rooms/:id/join', (req, res) => {
     res.status(400).json({ error: 'userId required' });
     return;
   }
+  if (!requireUserMatch(req, res, userId)) return;
   const hostId = String(room.hostId || '');
   const entryFee = roomEntryFee(room);
   if (entryFee <= 0) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
 import { gifts as STATIC_GIFTS, type Gift } from "@/lib/data";
@@ -8,6 +8,8 @@ import { useApp } from "@/lib/store";
 import { getDeviceUserId } from "@/lib/walletApi";
 import { requireApiBase } from "@/config/apiConfig";
 import { getRealtimeClient } from "@/lib/realtime/websocket";
+import { useGiftAnimationQueue } from "@/components/gifts/GiftAnimationQueue";
+import { giftAnimationSource } from "@/lib/giftAnimations";
 
 /** Floating gift animation — rendered outside the sheet so it persists after close. */
 export function GiftFloatOverlay({ emoji }: { emoji: string | null }) {
@@ -52,10 +54,12 @@ export function GiftSheet({
   callId?: string;
 }) {
   const { spend, syncWallet, pushToast } = useApp();
+  const { enqueueGift } = useGiftAnimationQueue();
   const [catalog, setCatalog] = useState<Gift[]>(STATIC_GIFTS);
   const [sending, setSending] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [floatEmoji, setFloatEmoji] = useState<string | null>(null);
+  const localGiftSequence = useRef(0);
 
   useEffect(() => {
     void fetchGiftCatalog().then(setCatalog);
@@ -102,6 +106,17 @@ export function GiftSheet({
       }
 
       setSending(emoji);
+      enqueueGift({
+        id: `local:${id}:${++localGiftSequence.current}`,
+        giftId: id,
+        giftName: name,
+        emoji,
+        senderName: "You",
+        coins,
+        combo: 1,
+        source: giftAnimationSource(id),
+        durationMs: coins >= 1000 ? 5200 : 3000,
+      });
       // Non-blocking overlay — keep visible after sheet closes
       setFloatEmoji(emoji);
       setTimeout(() => setFloatEmoji(null), 1400);

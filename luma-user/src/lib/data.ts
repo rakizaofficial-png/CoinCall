@@ -205,6 +205,10 @@ export const threads: ChatThread[] = [
  * Prefer fetching GET /api/gifts at runtime; this is the static fallback.
  */
 export const gifts: Gift[] = [
+  { id: "coin", name: "Lucky Coin", emoji: "🪙", coins: 1 },
+  { id: "single_rose", name: "Single Rose", emoji: "🌹", coins: 2 },
+  { id: "heart_tap", name: "Heart Tap", emoji: "❤️", coins: 5 },
+  { id: "applause", name: "Applause", emoji: "👏", coins: 8 },
   { id: "rose_bouquet", name: "Rose Bouquet", emoji: "🌹", coins: 10 },
   { id: "luxury_perfume", name: "Luxury Perfume", emoji: "🧴", coins: 50 },
   { id: "neon_heart", name: "Neon Heart", emoji: "💗", coins: 99 },

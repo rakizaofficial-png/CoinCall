@@ -9,8 +9,8 @@ android {
         applicationId = "com.zuko.user"
         minSdk = 26
         targetSdk = 35
-        versionCode = 110
-        versionName = "1.1.0"
+        versionCode = 111
+        versionName = "1.1.1"
     }
     signingConfigs {
         create("release") {
@@ -40,4 +40,5 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.webkit:webkit:1.12.1")
+    implementation("com.android.billingclient:billing-ktx:8.1.0")
 }

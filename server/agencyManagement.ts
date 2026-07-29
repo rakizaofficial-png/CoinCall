@@ -261,13 +261,13 @@ export function loadAgenciesFromSnapshot(snap: {
       const a = raw as unknown as Agency;
       if (!a?.id) continue;
       agencies.set(a.id, {
-        minWithdrawCoins: 500,
-        maxWithdrawCoins: 50000,
-        dailyWithdrawCap: 100000,
-        inviteClicks: 0,
-        inviteJoins: 0,
-        referralCode: a.referralCode || makeReferralCode(a.name || a.id),
         ...a,
+        minWithdrawCoins: a.minWithdrawCoins ?? 500,
+        maxWithdrawCoins: a.maxWithdrawCoins ?? 50000,
+        dailyWithdrawCap: a.dailyWithdrawCap ?? 100000,
+        inviteClicks: a.inviteClicks ?? 0,
+        inviteJoins: a.inviteJoins ?? 0,
+        referralCode: a.referralCode || makeReferralCode(a.name || a.id),
         hostIds: Array.isArray(a.hostIds) ? a.hostIds.map(String) : [],
         permissions: { ...DEFAULT_PERMS, ...(a.permissions || {}) },
       });
@@ -912,7 +912,7 @@ export function registerAgencyRoutes(app: Express, ctx: Ctx) {
     const hostIds = Array.isArray(req.body?.hostIds)
       ? req.body.hostIds.map((x: unknown) => String(x)).filter(Boolean)
       : [...agency.hostIds];
-    const allowed = hostIds.filter((h) => agency.hostIds.includes(h));
+    const allowed = hostIds.filter((h: string) => agency.hostIds.includes(h));
     ctx.notifyHosts?.(allowed, {
       title: `${agency.name}`,
       body: text,

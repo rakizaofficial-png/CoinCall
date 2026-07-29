@@ -185,7 +185,6 @@ export function ensureHostRecord(
       createdAt: now(),
       updatedAt: now(),
       ...patch,
-      id,
     };
     registry.set(id, row);
   } else if (patch) {
@@ -241,7 +240,7 @@ export function recordHostEarning(
   hostId: string,
   amount: number,
   opts?: {
-    kind?: 'call' | 'gift' | 'other';
+    kind?: 'call' | 'gift' | 'live' | 'other';
     coinBalance?: number;
     incrementCalls?: boolean;
     broadcast?: Broadcast;

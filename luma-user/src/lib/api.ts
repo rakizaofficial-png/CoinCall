@@ -253,7 +253,10 @@ export type LiveAccess = {
 export async function checkLiveAccess(roomId: string, userId: string) {
   const res = await fetch(
     `${requireApiBase()}/live/rooms/${encodeURIComponent(roomId)}/access?userId=${encodeURIComponent(userId)}`,
-    { cache: "no-store" },
+    {
+      cache: "no-store",
+      headers: { "X-User-Id": userId },
+    },
   );
   return parse<LiveAccess>(res);
 }
@@ -267,7 +270,7 @@ export async function joinLiveRoom(
     `${requireApiBase()}/live/rooms/${encodeURIComponent(roomId)}/join`,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-User-Id": userId },
       body: JSON.stringify({ userId, userName }),
     },
   );

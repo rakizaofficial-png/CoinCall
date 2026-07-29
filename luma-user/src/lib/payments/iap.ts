@@ -59,6 +59,7 @@ export async function verifyIapPurchase(input: {
 
   return apiJson<VerifyIapResult>("/wallet/iap/verify", {
     method: "POST",
+    headers: { "X-User-Id": input.userId },
     body: JSON.stringify({
       userId: input.userId,
       productId: input.productId,
@@ -99,7 +100,7 @@ export async function purchaseCoins(input: {
   const bridge = (
     window as unknown as {
       LumaNativeIap?: {
-        purchase: (sku: string) => Promise<{
+        purchase: (sku: string, accountId: string) => Promise<{
           platform: IapPlatform;
           purchaseToken: string;
         }>;
@@ -110,7 +111,7 @@ export async function purchaseCoins(input: {
   if (bridge?.purchase) {
     const product = getIapProduct(input.productId);
     if (!product) throw new Error("Unknown product");
-    const native = await bridge.purchase(product.platformSku.google);
+    const native = await bridge.purchase(product.platformSku.google, input.userId);
     return verifyIapPurchase({
       userId: input.userId,
       productId: input.productId,
