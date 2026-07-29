@@ -6,7 +6,7 @@ const ringtoneAsset = require('../../assets/audio/incoming-call-ringtone.mp3');
 let sound: Audio.Sound | null = null;
 let vibrationTimer: ReturnType<typeof setInterval> | null = null;
 let stopTimer: ReturnType<typeof setTimeout> | null = null;
-let starting = false;
+let lifecycleId = 0;
 
 async function configureRingAudioSession() {
   if (Platform.OS === 'web') return;
@@ -58,14 +58,12 @@ function stopVibration() {
 }
 
 export async function startIncomingRingtone(timeoutMs = 30_000) {
-  if (starting || sound) {
-    startSubtleVibration();
-    return;
-  }
-  starting = true;
+  const requestId = ++lifecycleId;
   try {
-    await stopIncomingRingtone();
+    await releaseCurrentRingtone();
+    if (requestId !== lifecycleId) return;
     await configureRingAudioSession();
+    if (requestId !== lifecycleId) return;
     const created = await Audio.Sound.createAsync(
       ringtoneAsset,
       {
@@ -77,20 +75,25 @@ export async function startIncomingRingtone(timeoutMs = 30_000) {
       undefined,
       true,
     );
+    if (requestId !== lifecycleId) {
+      await created.sound.stopAsync().catch(() => undefined);
+      await created.sound.unloadAsync().catch(() => undefined);
+      return;
+    }
     sound = created.sound;
     startSubtleVibration();
     stopTimer = setTimeout(() => {
       void stopIncomingRingtone();
     }, timeoutMs);
   } catch (e) {
-    console.warn('[ringtone] start failed', e);
-    startSubtleVibration();
-  } finally {
-    starting = false;
+    if (requestId === lifecycleId) {
+      console.warn('[ringtone] start failed', e);
+      startSubtleVibration();
+    }
   }
 }
 
-export async function stopIncomingRingtone() {
+async function releaseCurrentRingtone() {
   if (stopTimer) {
     clearTimeout(stopTimer);
     stopTimer = null;
@@ -109,6 +112,13 @@ export async function stopIncomingRingtone() {
   } catch {
     /* already unloaded */
   }
+}
+
+export async function stopIncomingRingtone() {
+  // Invalidates an Audio.Sound load already in progress. Without this token,
+  // createAsync could finish after Accept and start ringing inside the call.
+  lifecycleId += 1;
+  await releaseCurrentRingtone();
 }
 
 export async function prepareAudioForAgoraCall() {
