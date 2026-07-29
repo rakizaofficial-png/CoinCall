@@ -4,6 +4,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { FontProvider } from './src/components/ui/FontProvider';
 import { PremiumModalProvider } from './src/components/premium/PremiumModalProvider';
 import { AuthProvider } from './src/context/AuthContext';
+import { GiftAnimationQueueProvider } from './src/context/GiftAnimationQueueContext';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { ThemeProvider, useTheme } from './src/theme/ThemeContext';
 
@@ -25,7 +26,9 @@ export default function App() {
       <FontProvider>
         <PremiumModalProvider>
           <ThemeProvider>
-            <AppShell />
+            <GiftAnimationQueueProvider>
+              <AppShell />
+            </GiftAnimationQueueProvider>
           </ThemeProvider>
         </PremiumModalProvider>
       </FontProvider>
