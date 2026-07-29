@@ -107,6 +107,7 @@ export function LiveRoomScreen({ navigation, route }: Props) {
   const [chatText, setChatText] = useState('');
   const [lockOn, setLockOn] = useState(Boolean(room?.entryLocked));
   const [lockFee, setLockFee] = useState(room?.entryFee || 50);
+  const [lockSaving, setLockSaving] = useState(false);
   const broadcastStarted = useRef(false);
 
   useEffect(() => {
@@ -238,9 +239,30 @@ export function LiveRoomScreen({ navigation, route }: Props) {
   };
 
   const onSaveLock = async () => {
-    await updateRoomLock({ entryLocked: lockOn, entryFee: lockOn ? lockFee : 0 });
-    setSheet('none');
-    notify('Room updated', lockOn ? `Locked · ${lockFee} coins` : 'Room unlocked');
+    if (lockSaving) return;
+    const normalizedFee = lockOn
+      ? Math.max(10, Math.min(9999, Math.floor(lockFee) || 50))
+      : 0;
+    setLockSaving(true);
+    try {
+      await updateRoomLock({
+        entryLocked: lockOn,
+        entryFee: normalizedFee,
+      });
+      setLockFee(normalizedFee || 50);
+      setSheet('none');
+      notify(
+        'Room updated',
+        lockOn ? `Locked · ${normalizedFee} coins` : 'Room unlocked',
+      );
+    } catch (error) {
+      notify(
+        'Lock failed',
+        error instanceof Error ? error.message : 'Could not update room lock',
+      );
+    } finally {
+      setLockSaving(false);
+    }
   };
 
   const kickFromLockedRoom = useCallback(async () => {
@@ -564,10 +586,28 @@ export function LiveRoomScreen({ navigation, route }: Props) {
                   </Pressable>
                 ))}
               </View>
+              <TextInput
+                value={String(lockFee)}
+                onChangeText={(value) => {
+                  const fee = Number(value.replace(/\D/g, ''));
+                  setLockFee(Number.isFinite(fee) ? Math.min(9999, fee) : 0);
+                }}
+                keyboardType="number-pad"
+                maxLength={4}
+                placeholder="Custom fee (10–9999 coins)"
+                placeholderTextColor="rgba(255,255,255,0.38)"
+                style={styles.feeInput}
+              />
             </>
           )}
-          <Pressable style={styles.saveBtn} onPress={() => void onSaveLock()}>
-            <Text style={styles.saveBtnText}>Apply</Text>
+          <Pressable
+            style={[styles.saveBtn, lockSaving && { opacity: 0.55 }]}
+            disabled={lockSaving}
+            onPress={() => void onSaveLock()}
+          >
+            <Text style={styles.saveBtnText}>
+              {lockSaving ? 'Applying…' : 'Apply'}
+            </Text>
           </Pressable>
         </BottomSheet>
       )}
@@ -981,6 +1021,18 @@ const styles = StyleSheet.create({
   },
   presetText: { color: 'rgba(255,255,255,0.7)', fontWeight: '800', fontSize: 14 },
   presetTextOn: { color: '#F5C14C' },
+  feeInput: {
+    height: 46,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
+    paddingHorizontal: 14,
+    marginBottom: 14,
+  },
   filterHead: {
     flexDirection: 'row',
     alignItems: 'center',

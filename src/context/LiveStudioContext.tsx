@@ -991,7 +991,10 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
           ? Math.max(10, Math.min(9999, Math.floor(opts.entryFee) || 50))
           : 0,
       };
-      await updateLiveRoomLock(myLiveRoom.id, user.id, normalized);
+      await updateLiveRoomLock(myLiveRoom.id, user.id, {
+        ...normalized,
+        channel: myLiveRoom.channel,
+      });
       setMyLiveRoom((r) =>
         r ? { ...r, ...normalized } : r,
       );

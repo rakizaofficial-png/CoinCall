@@ -462,7 +462,7 @@ export async function removeLiveRoom(roomId: string) {
 export async function updateLiveRoomLock(
   roomId: string,
   hostId: string,
-  opts: { entryLocked: boolean; entryFee: number },
+  opts: { entryLocked: boolean; entryFee: number; channel?: string },
 ) {
   const entryFee = opts.entryLocked
     ? Math.max(10, Math.min(9999, Math.floor(opts.entryFee) || 50))
@@ -491,7 +491,7 @@ export async function updateLiveRoomLock(
   void import('./liveRoomRtmService').then(({ publishLiveRoomLockRtm }) =>
     publishLiveRoomLockRtm({
       roomId,
-      channel: roomId,
+      channel: opts.channel || roomId,
       hostId,
       entryLocked: opts.entryLocked,
       entryFee,

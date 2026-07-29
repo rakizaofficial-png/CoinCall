@@ -5307,8 +5307,27 @@ app.patch('/api/live/rooms/:id/lock', (req, res) => {
     type: 'live:lock',
     payload: {
       id: String(room.id || id),
+      roomId: String(room.id || id),
+      hostId: String(room.hostId || ''),
+      channel: String(room.channel || room.id || id),
       entryLocked,
       entryFee,
+      updatedAt: room.updatedAt,
+    },
+  });
+  // Backward-compatible room update for viewers already subscribed to live:room.
+  broadcastWs({
+    type: 'live:room',
+    payload: {
+      id: String(room.id || id),
+      roomId: String(room.id || id),
+      hostId: String(room.hostId || ''),
+      channel: String(room.channel || room.id || id),
+      entryLocked,
+      entryFee,
+      locked: entryLocked,
+      unlockCoins: entryFee,
+      updatedAt: room.updatedAt,
     },
   });
   persist();
