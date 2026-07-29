@@ -21,6 +21,12 @@ function statusLabel(s: string) {
   return 'Pending';
 }
 
+function durationLabel(seconds = 0) {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return `${hours}h ${minutes}m`;
+}
+
 /** Money Desk — cash-out queue with clear Pending / Approved / Rejected */
 export function MoneyDesk({
   readOnly,
@@ -61,6 +67,21 @@ export function MoneyDesk({
     const approved = scopedRows.filter((w) => mapTab(w.status) === 'approved').length;
     const rejected = scopedRows.filter((w) => mapTab(w.status) === 'rejected').length;
     return { pending, approved, rejected };
+  }, [scopedRows]);
+
+  const totals = useMemo(() => {
+    const pending = scopedRows.filter((row) => mapTab(row.status) === 'pending');
+    const uniqueBalances = new Map<string, number>();
+    for (const row of scopedRows) {
+      uniqueBalances.set(row.hostId, row.currentWalletBalance || 0);
+    }
+    return {
+      pendingCoins: pending.reduce((sum, row) => sum + row.amountCoins, 0),
+      liveWalletCoins: [...uniqueBalances.values()].reduce((sum, coins) => sum + coins, 0),
+      onlineHosts: new Set(
+        scopedRows.filter((row) => row.isOnline).map((row) => row.hostId),
+      ).size,
+    };
   }, [scopedRows]);
 
   const filtered = useMemo(
@@ -107,6 +128,25 @@ export function MoneyDesk({
 
       {msg ? <div className="hm-toast desk-toast">{msg}</div> : null}
 
+      <div className="stats">
+        <div className="stat gold">
+          <span>Pending payout coins</span>
+          <b>{totals.pendingCoins.toLocaleString()}</b>
+        </div>
+        <div className="stat teal">
+          <span>Current host balances</span>
+          <b>{totals.liveWalletCoins.toLocaleString()}</b>
+        </div>
+        <div className="stat blue">
+          <span>Online payout hosts</span>
+          <b>{totals.onlineHosts}</b>
+        </div>
+        <div className="stat">
+          <span>Total requests</span>
+          <b>{scopedRows.length}</b>
+        </div>
+      </div>
+
       <div className="desk-filters">
         {(
           [
@@ -134,10 +174,10 @@ export function MoneyDesk({
           <table className="desk-table">
             <thead>
               <tr>
-                <th>Amount</th>
                 <th>Host</th>
-                <th>Gateway</th>
-                <th>Account</th>
+                <th>Wallet &amp; request</th>
+                <th>Performance at request</th>
+                <th>Payout account</th>
                 <th>Status</th>
                 <th>Submitted</th>
                 {!readOnly ? <th>Actions</th> : null}
@@ -147,17 +187,56 @@ export function MoneyDesk({
               {filtered.map((w) => (
                 <tr key={w.id} className={busyId === w.id ? 'desk-row-busy' : ''}>
                   <td>
-                    <strong>{w.amountCoins.toLocaleString()}</strong>
-                    <small className="meta"> coins</small>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      {w.hostAvatar ? (
+                        <img className="desk-table-avatar" src={w.hostAvatar} alt="" />
+                      ) : (
+                        <span className="desk-avatar-fallback sm">
+                          {(w.hostName || 'H')[0]}
+                        </span>
+                      )}
+                      <div>
+                        <strong>{w.hostName || 'Host'}</strong>
+                        <div className="meta">
+                          <code className="desk-app-id">{w.hostId}</code>
+                          {' · '}
+                          <span className={`badge solid ${w.isLive ? 'live' : w.isOnline ? 'online' : 'none'}`}>
+                            {w.isLive ? 'Live' : w.isOnline ? 'Online' : 'Offline'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
                   </td>
                   <td>
-                    <code className="desk-app-id">{w.hostId}</code>
+                    <strong>{w.amountCoins.toLocaleString()} coins requested</strong>
+                    <div className="meta">
+                      Before: {(w.walletBalanceBefore ?? 0).toLocaleString()}
+                      {' · '}After: {(w.walletBalanceAfter ?? 0).toLocaleString()}
+                      <br />
+                      Live balance: {(w.currentWalletBalance ?? 0).toLocaleString()}
+                    </div>
                   </td>
-                  <td>{w.gateway.toUpperCase()}</td>
-                  <td className="meta">
-                    {w.accountName}
-                    <br />
-                    {w.accountNumber}
+                  <td>
+                    <strong>
+                      {w.answeredCallsAtRequest ?? 0}/{w.totalCallsAtRequest ?? 0} calls answered
+                    </strong>
+                    <div className="meta">
+                      Missed: {w.missedCallsAtRequest ?? 0}
+                      {' · '}Call time: {durationLabel(w.totalCallSecondsAtRequest)}
+                      <br />
+                      Calls: {(w.callCoinsAtRequest ?? 0).toLocaleString()} coins
+                      {' · '}Gifts: {(w.giftCoinsAtRequest ?? 0).toLocaleString()}
+                      <br />
+                      Lifetime: {(w.lifetimeEarningsAtRequest ?? 0).toLocaleString()} coins
+                    </div>
+                  </td>
+                  <td>
+                    <strong>{w.gateway.toUpperCase()}</strong>
+                    <div className="meta">
+                      {w.accountName}
+                      <br />
+                      <code className="desk-app-id">{w.accountNumber}</code>
+                    </div>
                   </td>
                   <td>
                     <span
