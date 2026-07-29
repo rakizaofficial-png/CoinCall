@@ -666,9 +666,14 @@ app.post('/api/users/register', (req, res) => {
     return;
   }
   const { account } = result;
-  ensureWallet(account.userId, {
+  const wallet = ensureWallet(account.userId, {
     role: 'user',
     displayName: account.displayName,
+  });
+  touchAutoCallHeartbeat({
+    userId: account.userId,
+    coinBalance: wallet.coinBalance,
+    inCall: false,
   });
   persist();
   res.status(201).json(publicAuthUser(account));
@@ -4204,11 +4209,21 @@ app.post('/api/auto-call/heartbeat', (req, res) => {
       ? String(req.body.viewingHostId)
       : null,
     inCall: Boolean(req.body?.inCall),
+    acceptedCall: Boolean(req.body?.acceptedCall),
   });
   // If user gained coins mid-session, cancel pending invite client-side too
-  if (coinBalance > 0 || session.inCall) {
+  if (coinBalance >= 80 || session.inCall) {
     const pending = getPendingInvite(userId);
-    if (pending) cancelPendingForUser(userId, coinBalance > 0 ? 'has_coins' : 'in_call');
+    if (pending) {
+      cancelPendingForUser(
+        userId,
+        coinBalance >= 80 ? 'recharged' : 'in_call',
+      );
+    }
+    sendWsToUser(userId, {
+      type: 'auto_call:cancel',
+      payload: { reason: coinBalance >= 80 ? 'recharged' : 'in_call' },
+    });
   }
   res.json({
     ok: true,
@@ -6110,7 +6125,7 @@ httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`Hosts:  GET /api/hosts`);
   console.log(`Calls:  POST /api/calls`);
   console.log(`Help:   GET /api/help-center`);
-  console.log(`AutoCall: scheduler every 20s`);
+  console.log(`AutoCall: scheduler every 1s`);
   console.log(`Persist: ${persistenceLabel()}`);
 });
 
@@ -6120,7 +6135,7 @@ setInterval(() => {
   } catch (e) {
     console.warn('[auto-call] tick failed', e);
   }
-}, 20_000);
+}, 1_000);
 
 void applyMongoOrDisk().catch((e) => {
   console.warn('[persist] mongo boot skipped', e);

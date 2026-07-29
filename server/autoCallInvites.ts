@@ -7,9 +7,11 @@
 
 import { randomUUID } from 'crypto';
 
-export const AUTO_CALL_MIN_INTERVAL_MS = 3 * 60 * 1000;
-export const AUTO_CALL_MAX_INTERVAL_MS = 8 * 60 * 1000;
-export const AUTO_CALL_MAX_PER_HOUR = 3;
+export const AUTO_CALL_FIRST_DELAY_MS = 7_000;
+export const AUTO_CALL_SECOND_DELAY_MS = 40_000;
+export const AUTO_CALL_REPEAT_DELAY_MS = 60_000;
+export const AUTO_CALL_STOP_BALANCE = 80;
+export const AUTO_CALL_MAX_PER_HOUR = 60;
 export const AUTO_CALL_RING_MS = 35_000;
 export const AUTO_CALL_HEARTBEAT_TTL_MS = 90_000;
 
@@ -36,6 +38,8 @@ export type AutoCallSession = {
   invitesThisHour: number;
   shownHostIds: string[];
   pendingInviteId?: string;
+  autoInviteCount: number;
+  sequenceStopped: boolean;
 };
 
 export type AutoCallInvite = {
@@ -113,14 +117,10 @@ function logEvent(
   return row;
 }
 
-function randomIntervalMs() {
-  const span = AUTO_CALL_MAX_INTERVAL_MS - AUTO_CALL_MIN_INTERVAL_MS;
-  return AUTO_CALL_MIN_INTERVAL_MS + Math.floor(Math.random() * (span + 1));
-}
-
-/** First invite of a zero-balance session arrives sooner, then 3–8 min cadence */
-function firstInviteDelayMs() {
-  return 45_000 + Math.floor(Math.random() * 75_000);
+function nextSequenceDelayMs(s: AutoCallSession) {
+  return s.autoInviteCount <= 1
+    ? AUTO_CALL_SECOND_DELAY_MS
+    : AUTO_CALL_REPEAT_DELAY_MS;
 }
 
 export function getAutoCallPrefs(userId: string): AutoCallPrefs {
@@ -161,10 +161,12 @@ function ensureSession(userId: string): AutoCallSession {
       recentHostIds: [],
       inCall: false,
       lastHeartbeatAt: now,
-      nextInviteAt: now + firstInviteDelayMs(),
+      nextInviteAt: now + AUTO_CALL_FIRST_DELAY_MS,
       invitesHourWindowStart: now,
       invitesThisHour: 0,
       shownHostIds: [],
+      autoInviteCount: 0,
+      sequenceStopped: false,
     };
     sessions.set(userId, s);
   }
@@ -205,6 +207,7 @@ export function touchAutoCallHeartbeat(input: {
   recentHostIds?: string[];
   viewingHostId?: string | null;
   inCall?: boolean;
+  acceptedCall?: boolean;
 }): AutoCallSession {
   const s = ensureSession(input.userId);
   const prevBalance = s.coinBalance;
@@ -222,15 +225,22 @@ export function touchAutoCallHeartbeat(input: {
   }
   s.viewingHostId = input.viewingHostId?.trim() || undefined;
   s.inCall = Boolean(input.inCall);
+  if (input.acceptedCall) s.sequenceStopped = true;
   s.lastHeartbeatAt = Date.now();
   rollHourWindow(s);
 
-  // Stop immediately after purchase or call start
-  if (s.coinBalance > 0 || s.inCall) {
-    cancelPendingForUser(input.userId, s.inCall ? 'in_call' : 'has_coins');
-    if (prevBalance === 0 && s.coinBalance > 0) {
+  // Recharge threshold is permanent; accepting/in-call stops this session.
+  if (s.coinBalance >= AUTO_CALL_STOP_BALANCE) {
+    if (getAutoCallPrefs(input.userId).enabled) {
+      setAutoCallPrefs(input.userId, false);
+    }
+    s.sequenceStopped = true;
+    cancelPendingForUser(input.userId, 'recharged');
+    if (prevBalance < AUTO_CALL_STOP_BALANCE) {
       logEvent({ userId: input.userId, type: 'blocked_has_coins' });
     }
+  } else if (s.inCall) {
+    cancelPendingForUser(input.userId, 'in_call');
   }
 
   logEvent({
@@ -318,7 +328,10 @@ export function createAutoInvite(input: {
   }
   const s = ensureSession(input.userId);
   rollHourWindow(s);
-  if (s.coinBalance > 0 && input.reason !== 'host_manual_allowed') {
+  if (
+    (s.coinBalance >= AUTO_CALL_STOP_BALANCE || s.sequenceStopped) &&
+    input.reason !== 'host_manual_allowed'
+  ) {
     logEvent({ userId: input.userId, type: 'blocked_has_coins' });
     return { error: 'User has coins — auto invites disabled' };
   }
@@ -361,6 +374,7 @@ export function createAutoInvite(input: {
   );
   if (invite.reason === 'zero_balance_auto') {
     s.invitesThisHour += 1;
+    s.autoInviteCount += 1;
   }
   sessions.set(input.userId, s);
 
@@ -385,7 +399,7 @@ export function getPendingInvite(userId: string): AutoCallInvite | null {
   if (Date.now() > inv.expiresAt) {
     inv.status = 'expired';
     s.pendingInviteId = undefined;
-    s.nextInviteAt = Date.now() + randomIntervalMs();
+    s.nextInviteAt = Date.now() + nextSequenceDelayMs(s);
     logEvent({
       userId,
       hostId: inv.hostId,
@@ -412,6 +426,7 @@ export function respondAutoInvite(input: {
   const s = ensureSession(input.userId);
   if (input.action === 'accept') {
     inv.status = 'accepted';
+    s.sequenceStopped = true;
     logEvent({
       userId: input.userId,
       hostId: inv.hostId,
@@ -428,7 +443,10 @@ export function respondAutoInvite(input: {
     });
   }
   s.pendingInviteId = undefined;
-  s.nextInviteAt = Date.now() + randomIntervalMs();
+  s.nextInviteAt =
+    input.action === 'accept'
+      ? Number.MAX_SAFE_INTEGER
+      : Date.now() + nextSequenceDelayMs(s);
   sessions.set(input.userId, s);
   return { ok: true, invite: inv };
 }
@@ -452,7 +470,8 @@ export function listDueAutoCallUsers(now = Date.now()): string[] {
     if (now - s.lastHeartbeatAt > AUTO_CALL_HEARTBEAT_TTL_MS) continue;
     const p = getAutoCallPrefs(s.userId);
     if (!p.enabled) continue;
-    if (s.coinBalance > 0) continue;
+    if (s.coinBalance >= AUTO_CALL_STOP_BALANCE) continue;
+    if (s.sequenceStopped) continue;
     if (s.inCall) continue;
     if (s.pendingInviteId) continue;
     rollHourWindow(s, now);
@@ -482,7 +501,7 @@ export function expireStaleInvites(now = Date.now()) {
     const s = sessions.get(inv.userId);
     if (s?.pendingInviteId === inv.id) {
       s.pendingInviteId = undefined;
-      s.nextInviteAt = now + randomIntervalMs();
+      s.nextInviteAt = now + nextSequenceDelayMs(s);
     }
     logEvent({
       userId: inv.userId,
@@ -499,11 +518,17 @@ export function getAutoCallStatus(userId: string) {
   const pending = getPendingInvite(userId);
   return {
     enabled: p.enabled,
-    eligible: p.enabled && (s?.coinBalance ?? 0) === 0 && !s?.inCall,
+    eligible:
+      p.enabled &&
+      (s?.coinBalance ?? 0) < AUTO_CALL_STOP_BALANCE &&
+      !s?.inCall &&
+      !s?.sequenceStopped,
     coinBalance: s?.coinBalance ?? null,
     invitesThisHour: s?.invitesThisHour ?? 0,
     maxPerHour: AUTO_CALL_MAX_PER_HOUR,
     nextInviteAt: s?.nextInviteAt ?? null,
+    autoInviteCount: s?.autoInviteCount ?? 0,
+    stopBalance: AUTO_CALL_STOP_BALANCE,
     pending,
   };
 }
