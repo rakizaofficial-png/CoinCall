@@ -256,6 +256,9 @@ export function listenHostBillingEvents(
     hostWallet?: { coinBalance?: number };
   }) => void,
   onGift?: (payload: {
+    id?: string;
+    txnId?: string;
+    callId?: string;
     coins: number;
     giftName?: string;
     giftEmoji?: string;
@@ -284,6 +287,9 @@ export function listenHostBillingEvents(
         es.addEventListener('live_gift', (ev) => {
           try {
             const data = JSON.parse((ev as MessageEvent).data) as {
+              id?: string;
+              txnId?: string;
+              callId?: string;
               coins?: number;
               giftName?: string;
               giftEmoji?: string;
@@ -291,6 +297,9 @@ export function listenHostBillingEvents(
               giftId?: string;
             };
             onGift({
+              id: data.id || data.txnId,
+              txnId: data.txnId,
+              callId: data.callId,
               coins: Number(data.coins) || 0,
               giftName: data.giftName,
               giftEmoji: data.giftEmoji,

@@ -267,10 +267,10 @@ export function IncomingCallModal({ call, onClear, hostBusyOnCall }: Props) {
     handledRef.current = true;
     setBusy(true);
     setPhase('accepting');
-    void stopIncomingRingtone();
 
     void (async () => {
       try {
+        await stopIncomingRingtone();
         // Release the live Agora engine before the private call screen mounts.
         // Starting navigation first caused camera/RTC engine contention.
         if (myLiveRoom?.isLive) {
@@ -288,6 +288,7 @@ export function IncomingCallModal({ call, onClear, hostBusyOnCall }: Props) {
         notify('Accept failed', message.slice(0, 140));
         setBusy(false);
         setPhase('ring');
+        void startIncomingRingtone(30_000);
       }
     })();
   };

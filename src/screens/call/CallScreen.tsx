@@ -117,7 +117,7 @@ export function CallScreen({ navigation, route }: Props) {
   const [surfacesReady, setSurfacesReady] = useState(false);
   const [netQuality] = useState<'Excellent' | 'Good' | 'Fair'>('Good');
   const [beautyPreset] = useState<BeautyPreset>(beautyOn ? 'snap' : 'off');
-  const [giftBurst, setGiftBurst] = useState<GlamourGiftPayload | null>(null);
+  const [giftQueue, setGiftQueue] = useState<GlamourGiftPayload[]>([]);
   const [disconnected, setDisconnected] = useState(false);
   const agoraReady = isAgoraConfigured();
   const isWeb = Platform.OS === 'web';
@@ -127,6 +127,19 @@ export function CallScreen({ navigation, route }: Props) {
   const bridgeLedgerStarted = useRef(false);
   const callStartedAt = useRef(Date.now());
   const markSurfacesReady = useCallback(() => setSurfacesReady(true), []);
+  const giftBurst = giftQueue[0] || null;
+  const enqueueGift = useCallback((gift: GlamourGiftPayload) => {
+    setGiftQueue((current) => {
+      if (current.some((queued) => queued.id === gift.id)) return current;
+      if (current.length >= 30) return current;
+      return [...current, gift];
+    });
+  }, []);
+
+  useEffect(() => {
+    // Stop/unload the ringtone before camera surfaces or Agora initialization.
+    void prepareAudioForAgoraCall();
+  }, []);
 
   useEffect(() => {
     setHostCallBusy(true);
@@ -391,8 +404,8 @@ export function CallScreen({ navigation, route }: Props) {
     if (!bridgeCallId) return;
     return listenGiftRequestEvents(bridgeCallId, (type, gift) => {
       if (type === 'gift:accepted') {
-        setGiftBurst({
-          id: `gb_${Date.now()}`,
+        enqueueGift({
+          id: gift.id,
           giftId: gift.giftId,
           emoji: gift.giftEmoji || '🎁',
           giftName: gift.giftName || 'Gift',
@@ -406,7 +419,7 @@ export function CallScreen({ navigation, route }: Props) {
         notify('Gift request expired', 'User did not respond in time');
       }
     });
-  }, [bridgeCallId, peerName]);
+  }, [bridgeCallId, enqueueGift, peerName, user.name]);
 
   useEffect(() => {
     if (!bridgeCallId || !user.id) return;
@@ -421,8 +434,8 @@ export function CallScreen({ navigation, route }: Props) {
           setPeerBalance((b) => Math.max(0, b - rate));
         },
         (gift) => {
-          setGiftBurst({
-            id: `sse_${Date.now()}`,
+          enqueueGift({
+            id: gift.id || `sse_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
             giftId: gift.giftId,
             emoji: gift.giftEmoji || '🎁',
             giftName: gift.giftName || 'Gift',
@@ -434,7 +447,7 @@ export function CallScreen({ navigation, route }: Props) {
       );
     });
     return () => stop?.();
-  }, [bridgeCallId, peerName, rate, user.id, user.name]);
+  }, [bridgeCallId, enqueueGift, peerName, rate, user.id, user.name]);
 
   useEffect(() => {
     if (!bridgeCallId || !user.id) return;
@@ -534,7 +547,10 @@ export function CallScreen({ navigation, route }: Props) {
       ) : null}
 
       {giftBurst ? (
-        <GlamourGiftOverlay item={giftBurst} onDone={() => setGiftBurst(null)} />
+        <GlamourGiftOverlay
+          item={giftBurst}
+          onDone={() => setGiftQueue((current) => current.slice(1))}
+        />
       ) : null}
 
       {disconnected ? (
