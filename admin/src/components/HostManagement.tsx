@@ -111,7 +111,7 @@ export function HostManagementPanel({
   );
   const [sort, setSort] = useState('updated');
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [bulkPrice, setBulkPrice] = useState('80');
+  const [bulkPrice, setBulkPrice] = useState('40');
   const [detail, setDetail] = useState<ManagedHost | null>(null);
   const [managed, setManaged] = useState<ManagedHost[]>([]);
   const [logs, setLogs] = useState<AuditLog[]>([]);
@@ -407,8 +407,8 @@ export function HostManagementPanel({
   const applyBulkPrice = async () => {
     const callPrice = Number(bulkPrice);
     if (!selected.size) return;
-    if (!Number.isFinite(callPrice) || callPrice < 1 || callPrice > 9999) {
-      flash('Price must be between 1 and 9,999 coins');
+    if (!Number.isInteger(callPrice) || callPrice < 30 || callPrice > 40) {
+      flash('Price must be a whole number between 30 and 40 coins');
       return;
     }
     const ids = [...selected];
@@ -449,8 +449,8 @@ export function HostManagementPanel({
       });
     } else if (type === 'price') {
       const n = Number(formValue);
-      if (!Number.isFinite(n) || n < 1 || n > 9999) {
-        flash('Price must be between 1 and 9,999 coins');
+      if (!Number.isInteger(n) || n < 30 || n > 40) {
+        flash('Price must be a whole number between 30 and 40 coins');
         return;
       }
       await act(host.id, 'set_call_price', { callPrice: n });
@@ -585,8 +585,8 @@ export function HostManagementPanel({
                 className="hm-search"
                 style={{ width: 132 }}
                 type="number"
-                min={1}
-                max={9999}
+                min={30}
+                max={40}
                 value={bulkPrice}
                 onChange={(e) => setBulkPrice(e.target.value)}
                 aria-label="Bulk host call price"
@@ -826,7 +826,7 @@ export function HostManagementPanel({
                   setForm({ type, host: detail });
                   setFormValue(
                     type === 'price'
-                      ? String(detail.callPrice ?? 80)
+                      ? String(detail.callPrice ?? 40)
                       : type === 'commission'
                       ? String(detail.commissionRate ?? 0.3)
                       : type === 'coins'
@@ -908,7 +908,7 @@ export function HostManagementPanel({
             form?.type === 'docs'
               ? 'Message to host'
               : form?.type === 'price'
-                ? 'Coins per minute (1–9,999)'
+                ? 'Coins per minute (30–40)'
               : form?.type === 'commission'
                 ? 'Rate (0–1)'
                 : 'Coin balance'
@@ -923,6 +923,10 @@ export function HostManagementPanel({
             />
           ) : (
             <input
+              type={form?.type === 'price' ? 'number' : 'text'}
+              min={form?.type === 'price' ? 30 : undefined}
+              max={form?.type === 'price' ? 40 : undefined}
+              step={form?.type === 'price' ? 1 : undefined}
               value={formValue}
               onChange={(e) => setFormValue(e.target.value)}
               inputMode="decimal"
@@ -1268,7 +1272,7 @@ function HostDetail({
                   className="btn-pink"
                   onClick={() => onOpenForm('price')}
                 >
-                  Call price · {host.callPrice ?? 80}/min
+                  Call price · {host.callPrice ?? 40}/min
                 </button>
                 <button
                   type="button"

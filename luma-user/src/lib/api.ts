@@ -55,7 +55,7 @@ function normalizeHost(raw: Partial<LiveHost> & { id?: string; name?: string }):
     name: String(raw.name),
     avatarUrl: raw.avatarUrl,
     country: raw.country,
-    ratePerMinute: Number(raw.ratePerMinute) || 80,
+    ratePerMinute: Number(raw.ratePerMinute) || 40,
     isOnline,
     isLive,
     isOnCall,

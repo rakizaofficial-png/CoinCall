@@ -88,7 +88,7 @@ data class CallUiState(
     val network: String = "Good",
     val ended: Boolean = false,
     val mode: CallMediaMode = CallMediaMode.VIDEO,
-    val ratePerMinute: Int = 80,
+    val ratePerMinute: Int = 40,
     val coinsEarned: Int = 0,
     val permissionGranted: Boolean = false,
     val error: String? = null,
@@ -130,7 +130,7 @@ class CallViewModel @Inject constructor(
             val channel = tokenRes?.channel ?: "call_$callId"
             val token = tokenRes?.token.orEmpty().ifBlank { "dev-token" }
             val uid = tokenRes?.uid ?: 1
-            val rate = tokenRes?.call?.ratePerMinute ?: 80
+            val rate = tokenRes?.call?.ratePerMinute ?: 40
             _state.update { it.copy(ratePerMinute = rate) }
             agora.initialize(appContext, appId)
             agora.join(

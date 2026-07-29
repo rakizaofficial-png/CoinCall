@@ -241,7 +241,8 @@ export function IncomingCallModal({ call, onClear, hostBusyOnCall }: Props) {
 
   if (!call) return null;
 
-  const rate = settings?.coinsPerMinute || call.ratePerMinute || 80;
+  // The backend/admin rate attached to the call is authoritative.
+  const rate = call.ratePerMinute || settings?.coinsPerMinute || 40;
   const minutesLeft =
     caller.coinBalance > 0 ? Math.floor(caller.coinBalance / rate) : 0;
 

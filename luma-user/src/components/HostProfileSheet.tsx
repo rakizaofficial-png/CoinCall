@@ -45,7 +45,7 @@ export function HostProfileSheet({
 
   if (!host) return null;
 
-  const rate = host.ratePerMinute || 80;
+  const rate = host.ratePerMinute || 40;
 
   const startCall = () => {
     if (coins < rate) {

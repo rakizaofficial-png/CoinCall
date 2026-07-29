@@ -174,7 +174,7 @@ export function EditHostProfileScreen({ navigation }: { navigation: any }) {
           avatarUrl: saved.avatarUrl,
           photoUrl: saved.photoUrl || saved.avatarUrl,
           country: saved.country,
-          ratePerMinute: saved.callPrice || 80,
+          ratePerMinute: saved.callPrice || 40,
           isOnline: true,
         }).catch(() => undefined);
       }

@@ -76,7 +76,7 @@ export default function CallingLoungePage() {
           h.avatarUrl ||
           `https://i.pravatar.cc/600?u=${encodeURIComponent(h.id)}`,
         country: h.country,
-        ratePerMinute: h.ratePerMinute || 80,
+        ratePerMinute: h.ratePerMinute || 40,
         online: true,
         live: h.isLive,
       }));

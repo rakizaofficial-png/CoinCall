@@ -143,7 +143,7 @@ export function SwipeFeed() {
       })
     : null;
 
-  const rate = current?.host.ratePerMinute ?? 80;
+  const rate = current?.host.ratePerMinute ?? 40;
 
   const openProfile = () => {
     if (!current) return;
@@ -165,7 +165,7 @@ export function SwipeFeed() {
 
   if (!items.length) {
     return (
-      <LoungeShell minuteRate={80} enableAutoTopUp={false}>
+      <LoungeShell minuteRate={40} enableAutoTopUp={false}>
         <div className="flex min-h-[70dvh] flex-col items-center justify-center gap-3 px-6 text-center">
           <p className="font-display text-lg font-bold text-sand">
             No hosts ready yet
@@ -188,7 +188,7 @@ export function SwipeFeed() {
 
   if (!current || !activity) {
     return (
-      <LoungeShell minuteRate={80}>
+      <LoungeShell minuteRate={40}>
         <div className="flex min-h-[70dvh] items-center justify-center px-6 text-center text-sm text-cyan/70">
           Syncing live hosts…
         </div>
