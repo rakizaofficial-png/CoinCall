@@ -33,9 +33,32 @@ const QueueContext = createContext<QueueContextValue | null>(null);
 const animationCache = new Map<string, object>();
 const MAX_QUEUE_SIZE = 20;
 
+const LOCAL_GIFT_SOUNDS: Record<string, string> = {
+  fireworks: "/gift-sounds/fireworks.ogg",
+  sports_car: "/gift-sounds/fireworks.ogg",
+  super_bike: "/gift-sounds/fireworks.ogg",
+  private_jet: "/gift-sounds/fireworks.ogg",
+  luxury_yacht: "/gift-sounds/fireworks.ogg",
+  diamond_rain: "/gift-sounds/fireworks.ogg",
+  neon_heart: "/gift-sounds/magic-sparkle.ogg",
+  golden_butterfly: "/gift-sounds/magic-sparkle.ogg",
+  diamond_ring: "/gift-sounds/magic-sparkle.ogg",
+  diamond_crown: "/gift-sounds/magic-rise.ogg",
+  royal_castle: "/gift-sounds/magic-rise.ogg",
+  golden_throne: "/gift-sounds/magic-rise.ogg",
+  millionaire_box: "/gift-sounds/magic-rise.ogg",
+};
+
 /** Short original in-browser chime for a sent/received gift. */
-function playGiftChime(coins = 0) {
+function playGiftChime(giftId: string, coins = 0) {
   try {
+    const soundUrl = LOCAL_GIFT_SOUNDS[giftId];
+    if (soundUrl) {
+      const audio = new Audio(soundUrl);
+      audio.volume = 0.65;
+      void audio.play().catch(() => undefined);
+      return;
+    }
     const BrowserAudioContext = window.AudioContext ||
       (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!BrowserAudioContext) return;
@@ -92,7 +115,7 @@ function GiftAnimationStage({
   }, [item.source]);
 
   useEffect(() => {
-    playGiftChime(item.coins);
+    playGiftChime(item.giftId, item.coins);
     const timer = window.setTimeout(onDone, Math.max(1800, item.durationMs || 4200));
     return () => window.clearTimeout(timer);
   }, [item.durationMs, item.id, onDone]);

@@ -20,6 +20,22 @@ import {
   type GiftItem,
 } from '../../data/gifts';
 
+const LOCAL_GIFT_SOUNDS = {
+  sparkle: require('../../assets/gift-sounds/magic-sparkle.ogg'),
+  rise: require('../../assets/gift-sounds/magic-rise.ogg'),
+  fireworks: require('../../assets/gift-sounds/fireworks.ogg'),
+} as const;
+
+function localGiftSound(giftId: string) {
+  if (['fireworks', 'sports_car', 'super_bike', 'private_jet', 'luxury_yacht', 'diamond_rain'].includes(giftId)) {
+    return LOCAL_GIFT_SOUNDS.fireworks;
+  }
+  if (['diamond_crown', 'royal_castle', 'golden_throne', 'millionaire_box'].includes(giftId)) {
+    return LOCAL_GIFT_SOUNDS.rise;
+  }
+  return LOCAL_GIFT_SOUNDS.sparkle;
+}
+
 export type GlamourGiftPayload = {
   id: string;
   giftId?: string;
@@ -163,7 +179,7 @@ export function GlamourGiftOverlay({ item, onDone }: Props) {
     let cancelled = false;
     let sound: Audio.Sound | null = null;
     void Audio.Sound.createAsync(
-      { uri: gift.soundUrl },
+      localGiftSound(gift.id),
       { shouldPlay: true, volume: 0.78 },
     )
       .then((loaded) => {
