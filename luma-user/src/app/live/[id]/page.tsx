@@ -16,7 +16,11 @@ import {
   startUserAgoraLiveAudience,
   stopUserAgoraCall,
 } from "@/lib/agora";
-import { connectLiveRoomRtm, type LiveRoomLockRtmEvent } from "@/lib/liveRtm";
+import {
+  connectLiveRoomRtm,
+  type LiveRoomLockRtmEvent,
+  type LiveRoomRtmEvent,
+} from "@/lib/liveRtm";
 
 function avatarFor(id: string, url?: string | null) {
   if (
@@ -57,6 +61,7 @@ export default function LiveRoomPage({
   const [giftOpen, setGiftOpen] = useState(false);
   const [likes, setLikes] = useState(0);
   const [viewers, setViewers] = useState(0);
+  const [totalCoins, setTotalCoins] = useState(0);
   const [floating, setFloating] = useState<string[]>([]);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -199,6 +204,38 @@ export default function LiveRoomPage({
       }
     };
 
+    const handleRtmEvent = async (event: LiveRoomRtmEvent) => {
+      if (closed) return;
+      if (event.type === "live_gift") {
+        setFloating((items) => [
+          ...items,
+          `${event.giftEmoji}${event.combo > 1 ? ` x${event.combo}` : ""}`,
+        ]);
+        setTimeout(() => setFloating((items) => items.slice(1)), event.lottie?.durationMs || 1800);
+        if (typeof event.totals?.totalCoins === "number") {
+          setTotalCoins(event.totals.totalCoins);
+        }
+        if (typeof event.totals?.viewerCount === "number") {
+          setViewers(event.totals.viewerCount);
+        }
+        return;
+      }
+      if (event.type === "live_stats") {
+        if (typeof event.totalCoins === "number") setTotalCoins(event.totalCoins);
+        if (typeof event.viewerCount === "number") setViewers(event.viewerCount);
+        if (typeof event.viewerDelta === "number") {
+          setViewers((current) => Math.max(0, current + event.viewerDelta!));
+        }
+        return;
+      }
+      if (event.type === "live_stream_state" && event.ended) {
+        setVideoStatus("Live ended");
+        pushToast?.("Live ended");
+        await stopUserAgoraCall();
+        window.location.href = "/live";
+      }
+    };
+
     void (async () => {
       try {
         const session = await connectLiveRoomRtm({
@@ -207,6 +244,7 @@ export default function LiveRoomPage({
           hostId: display.id,
           userId,
           onLock: (event) => void enforceLock(event),
+          onEvent: (event) => void handleRtmEvent(event),
         });
         if (closed) {
           await session.close();
@@ -471,6 +509,7 @@ export default function LiveRoomPage({
                   <Eye className="h-3 w-3" />{" "}
                   {viewers > 0 ? viewers.toLocaleString() : "Live"}
                   {likes > 0 ? ` · ${likes}♥` : ""}
+                  {totalCoins > 0 ? ` · 💎 ${totalCoins.toLocaleString()}` : ""}
                 </p>
               </div>
               <button

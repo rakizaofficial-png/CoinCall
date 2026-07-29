@@ -10,6 +10,59 @@ export type LiveRoomLockRtmEvent = {
   updatedAt: number;
 };
 
+export type LiveRoomGiftRtmEvent = {
+  type: "live_gift";
+  id: string;
+  roomId: string;
+  channel: string;
+  fromId: string;
+  fromName: string;
+  giftId: string;
+  giftName: string;
+  giftEmoji: string;
+  coins: number;
+  combo: number;
+  lottie?: {
+    source: string;
+    durationMs: number;
+  };
+  totals?: {
+    totalCoins?: number;
+    viewerCount?: number;
+    hostEarnings?: number;
+  };
+  createdAt: number;
+};
+
+export type LiveRoomStatsRtmEvent = {
+  type: "live_stats";
+  roomId: string;
+  channel: string;
+  totalCoins?: number;
+  viewerCount?: number;
+  viewerDelta?: number;
+  hostEarnings?: number;
+  updatedAt: number;
+};
+
+export type LiveRoomStreamStateRtmEvent = {
+  type: "live_stream_state";
+  roomId: string;
+  channel: string;
+  hostId: string;
+  muted?: boolean;
+  cameraOff?: boolean;
+  ended?: boolean;
+  reason?: string;
+  updatedAt: number;
+};
+
+export type LiveRoomRtmEvent =
+  | LiveRoomLockRtmEvent
+  | LiveRoomGiftRtmEvent
+  | LiveRoomStatsRtmEvent
+  | LiveRoomStreamStateRtmEvent;
+
 type LiveRtmSession = {
   close: () => Promise<void>;
   getLockState: () => Promise<LiveRoomLockRtmEvent | null>;
@@ -62,6 +115,7 @@ export async function connectLiveRoomRtm(input: {
   hostId: string;
   userId: string;
   onLock: (event: LiveRoomLockRtmEvent) => void;
+  onEvent?: (event: LiveRoomRtmEvent) => void;
 }) : Promise<LiveRtmSession> {
   if (!apiConfig.agora.appId && typeof window === "undefined") {
     throw new Error("RTM is browser-only in Luma.");
@@ -76,10 +130,11 @@ export async function connectLiveRoomRtm(input: {
         typeof event.message === "string"
           ? event.message
           : new TextDecoder().decode(event.message);
-      const parsed = JSON.parse(raw) as LiveRoomLockRtmEvent;
-      if (parsed.type !== "live_room_lock") return;
+      const parsed = JSON.parse(raw) as LiveRoomRtmEvent;
+      if (!parsed?.type) return;
       if (parsed.roomId !== input.roomId && parsed.channel !== input.channel) return;
-      input.onLock(parsed);
+      input.onEvent?.(parsed);
+      if (parsed.type === "live_room_lock") input.onLock(parsed);
     } catch {
       /* ignore unrelated RTM messages */
     }
@@ -113,4 +168,3 @@ export async function connectLiveRoomRtm(input: {
     },
   };
 }
-

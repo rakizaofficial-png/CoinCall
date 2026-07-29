@@ -35,6 +35,7 @@ import { useLiveStudio } from '../../context/LiveStudioContext';
 import { useApp } from '../../context/AppContext';
 import { LIVE_FILTERS } from '../../data/liveFilters';
 import { useLiveRoomLockRtm } from '../../hooks/useLiveRoomLockRtm';
+import { useLiveRoomRtmEvents } from '../../hooks/useLiveRoomRtmEvents';
 import {
   beautyCssFilter,
   setAgoraBeauty,
@@ -45,6 +46,7 @@ import {
   switchAgoraCamera,
 } from '../../services/agoraService';
 import type { BeautyPreset } from '../../services/agoraTypes';
+import { publishLiveStreamStateRtm } from '../../services/liveRoomRtmService';
 import { useTheme } from '../../theme/ThemeContext';
 import { notify } from '../../utils/notify';
 import { LiveBroadcastSurface } from './LiveBroadcastSurface';
@@ -213,6 +215,17 @@ export function LiveRoomScreen({ navigation, route }: Props) {
   }, [comments, gifts]);
 
   const onEnd = async () => {
+    if (hostMode && room?.channel) {
+      void publishLiveStreamStateRtm({
+        roomId,
+        channel: room.channel,
+        hostId: user.id,
+        muted,
+        cameraOff,
+        ended: true,
+        reason: 'host_ended',
+      });
+    }
     await stopLive();
     await stopAgoraCall();
     navigation.goBack();
@@ -236,6 +249,15 @@ export function LiveRoomScreen({ navigation, route }: Props) {
     await stopAgoraCall();
   }, []);
 
+  const onStreamState = useCallback(
+    async (event: { ended?: boolean }) => {
+      if (!event.ended) return;
+      await stopAgoraCall();
+      if (!hostMode) navigation.goBack();
+    },
+    [hostMode, navigation],
+  );
+
   const lockGate = useLiveRoomLockRtm({
     roomId,
     channel: room?.channel || roomId,
@@ -243,6 +265,14 @@ export function LiveRoomScreen({ navigation, route }: Props) {
     userName: user.name || 'Viewer',
     enabled: !hostMode && Boolean(room?.channel || roomId),
     onKick: kickFromLockedRoom,
+  });
+
+  const liveRtm = useLiveRoomRtmEvents({
+    roomId,
+    channel: room?.channel || roomId,
+    userId: user.id,
+    enabled: Boolean(room?.channel || roomId),
+    onStreamState,
   });
 
   if (!room) {
@@ -258,6 +288,14 @@ export function LiveRoomScreen({ navigation, route }: Props) {
 
   const entryLocked = Boolean(room.entryLocked);
   const entryFee = room.entryFee || 0;
+  const displayGiftCoins = Math.max(
+    room.giftCoins || 0,
+    liveRtm.stats.totalCoins || 0,
+  );
+  const displayViewers = Math.max(
+    room.viewers || 0,
+    liveRtm.stats.viewerCount || 0,
+  );
 
   return (
     <View style={styles.root}>
@@ -311,11 +349,11 @@ export function LiveRoomScreen({ navigation, route }: Props) {
         </View>
         <View style={styles.topRight}>
           <View style={styles.statPill}>
-            <Text style={styles.statText}>💎 {Math.max(room.giftCoins || 0, 0)}</Text>
+            <Text style={styles.statText}>💎 {displayGiftCoins}</Text>
           </View>
           <View style={styles.statPill}>
             <Users size={13} color="#fff" />
-            <Text style={styles.statText}>{Math.max(room.viewers, 0)}</Text>
+            <Text style={styles.statText}>{displayViewers}</Text>
           </View>
           <Pressable
             onPress={hostMode ? () => void onEnd() : () => navigation.goBack()}
@@ -371,6 +409,13 @@ export function LiveRoomScreen({ navigation, route }: Props) {
               const next = !muted;
               setMuted(next);
               await setAgoraMuted(next);
+              void publishLiveStreamStateRtm({
+                roomId,
+                channel: room.channel,
+                hostId: user.id,
+                muted: next,
+                cameraOff,
+              });
             }}
           />
           <Fab
@@ -379,6 +424,13 @@ export function LiveRoomScreen({ navigation, route }: Props) {
               const next = !cameraOff;
               setCameraOff(next);
               await setAgoraCameraOff(next);
+              void publishLiveStreamStateRtm({
+                roomId,
+                channel: room.channel,
+                hostId: user.id,
+                muted,
+                cameraOff: next,
+              });
             }}
           />
           <Fab icon={FlipHorizontal} onPress={() => void switchAgoraCamera()} />

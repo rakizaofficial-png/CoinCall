@@ -11,6 +11,59 @@ export type LiveRoomLockRtmEvent = {
   updatedAt: number;
 };
 
+export type LiveRoomGiftRtmEvent = {
+  type: 'live_gift';
+  id: string;
+  roomId: string;
+  channel: string;
+  fromId: string;
+  fromName: string;
+  giftId: string;
+  giftName: string;
+  giftEmoji: string;
+  coins: number;
+  combo: number;
+  lottie: {
+    source: string;
+    durationMs: number;
+  };
+  totals?: {
+    totalCoins?: number;
+    viewerCount?: number;
+    hostEarnings?: number;
+  };
+  createdAt: number;
+};
+
+export type LiveRoomStatsRtmEvent = {
+  type: 'live_stats';
+  roomId: string;
+  channel: string;
+  totalCoins?: number;
+  viewerCount?: number;
+  viewerDelta?: number;
+  hostEarnings?: number;
+  updatedAt: number;
+};
+
+export type LiveRoomStreamStateRtmEvent = {
+  type: 'live_stream_state';
+  roomId: string;
+  channel: string;
+  hostId: string;
+  muted?: boolean;
+  cameraOff?: boolean;
+  ended?: boolean;
+  reason?: 'host_ended' | 'moderation' | 'network' | string;
+  updatedAt: number;
+};
+
+export type LiveRoomRtmEvent =
+  | LiveRoomLockRtmEvent
+  | LiveRoomGiftRtmEvent
+  | LiveRoomStatsRtmEvent
+  | LiveRoomStreamStateRtmEvent;
+
 type RtmSession = {
   client: any;
   channel: string;
@@ -114,9 +167,7 @@ export async function publishLiveRoomLockRtm(input: {
       recordTs: true,
       recordUserId: true,
     });
-    await session.client.publish?.(channel, JSON.stringify(event), {
-      channelType: 'MESSAGE',
-    });
+    await publishViaSession(session, channel, event);
     return true;
   } catch (e) {
     console.warn('[live-room-rtm] publish lock failed', e);
@@ -124,11 +175,134 @@ export async function publishLiveRoomLockRtm(input: {
   }
 }
 
-export async function subscribeLiveRoomLockRtm(input: {
+async function publishViaSession(session: RtmSession, channel: string, event: LiveRoomRtmEvent) {
+  await session.client.publish?.(channel, JSON.stringify(event), {
+    channelType: 'MESSAGE',
+  });
+}
+
+export async function publishLiveRoomRtmEvent(input: {
+  userId: string;
+  roomId: string;
+  channel?: string;
+  event: LiveRoomRtmEvent;
+}) {
+  if (Platform.OS === 'web') return false;
+  const channel = rtmChannel(input.roomId, input.channel);
+  try {
+    const session = await getSession(input.userId, channel);
+    await publishViaSession(session, channel, { ...input.event, channel } as LiveRoomRtmEvent);
+    return true;
+  } catch (e) {
+    console.warn('[live-room-rtm] publish event failed', e);
+    return false;
+  }
+}
+
+export async function publishLiveGiftRtm(input: {
+  roomId: string;
+  channel?: string;
+  senderId: string;
+  senderName: string;
+  giftId: string;
+  giftName: string;
+  giftEmoji: string;
+  coins: number;
+  combo?: number;
+  lottie: { source: string; durationMs: number };
+  totalCoins?: number;
+  viewerCount?: number;
+  hostEarnings?: number;
+  createdAt?: number;
+}) {
+  const channel = rtmChannel(input.roomId, input.channel);
+  return publishLiveRoomRtmEvent({
+    userId: input.senderId,
+    roomId: input.roomId,
+    channel,
+    event: {
+      type: 'live_gift',
+      id: `gift_${input.roomId}_${input.senderId}_${input.giftId}_${input.createdAt || Date.now()}`,
+      roomId: input.roomId,
+      channel,
+      fromId: input.senderId,
+      fromName: input.senderName,
+      giftId: input.giftId,
+      giftName: input.giftName,
+      giftEmoji: input.giftEmoji,
+      coins: input.coins,
+      combo: input.combo || 1,
+      lottie: input.lottie,
+      totals: {
+        totalCoins: input.totalCoins,
+        viewerCount: input.viewerCount,
+        hostEarnings: input.hostEarnings,
+      },
+      createdAt: input.createdAt || Date.now(),
+    },
+  });
+}
+
+export async function publishLiveStatsRtm(input: {
   roomId: string;
   channel?: string;
   userId: string;
-  onLock: (event: LiveRoomLockRtmEvent) => void;
+  totalCoins?: number;
+  viewerCount?: number;
+  viewerDelta?: number;
+  hostEarnings?: number;
+}) {
+  const channel = rtmChannel(input.roomId, input.channel);
+  return publishLiveRoomRtmEvent({
+    userId: input.userId,
+    roomId: input.roomId,
+    channel,
+    event: {
+      type: 'live_stats',
+      roomId: input.roomId,
+      channel,
+      totalCoins: input.totalCoins,
+      viewerCount: input.viewerCount,
+      viewerDelta: input.viewerDelta,
+      hostEarnings: input.hostEarnings,
+      updatedAt: Date.now(),
+    },
+  });
+}
+
+export async function publishLiveStreamStateRtm(input: {
+  roomId: string;
+  channel?: string;
+  hostId: string;
+  muted?: boolean;
+  cameraOff?: boolean;
+  ended?: boolean;
+  reason?: LiveRoomStreamStateRtmEvent['reason'];
+}) {
+  const channel = rtmChannel(input.roomId, input.channel);
+  return publishLiveRoomRtmEvent({
+    userId: input.hostId,
+    roomId: input.roomId,
+    channel,
+    event: {
+      type: 'live_stream_state',
+      roomId: input.roomId,
+      channel,
+      hostId: input.hostId,
+      muted: input.muted,
+      cameraOff: input.cameraOff,
+      ended: input.ended,
+      reason: input.reason,
+      updatedAt: Date.now(),
+    },
+  });
+}
+
+export async function subscribeLiveRoomRtm(input: {
+  roomId: string;
+  channel?: string;
+  userId: string;
+  onEvent: (event: LiveRoomRtmEvent) => void;
 }) {
   if (Platform.OS === 'web') return () => undefined;
   const channel = rtmChannel(input.roomId, input.channel);
@@ -137,10 +311,10 @@ export async function subscribeLiveRoomLockRtm(input: {
     const handler = (message: { message?: string; channelName?: string }) => {
       try {
         if (message.channelName && message.channelName !== channel) return;
-        const parsed = JSON.parse(String(message.message || '')) as LiveRoomLockRtmEvent;
-        if (parsed.type !== 'live_room_lock') return;
+        const parsed = JSON.parse(String(message.message || '')) as LiveRoomRtmEvent;
+        if (!parsed?.type) return;
         if (parsed.roomId !== input.roomId && parsed.channel !== channel) return;
-        input.onLock(parsed);
+        input.onEvent(parsed);
       } catch {
         /* ignore unrelated RTM messages */
       }
@@ -154,9 +328,25 @@ export async function subscribeLiveRoomLockRtm(input: {
       }
     };
   } catch (e) {
-    console.warn('[live-room-rtm] subscribe lock failed', e);
+    console.warn('[live-room-rtm] subscribe event failed', e);
     return () => undefined;
   }
+}
+
+export async function subscribeLiveRoomLockRtm(input: {
+  roomId: string;
+  channel?: string;
+  userId: string;
+  onLock: (event: LiveRoomLockRtmEvent) => void;
+}) {
+  return subscribeLiveRoomRtm({
+    roomId: input.roomId,
+    channel: input.channel,
+    userId: input.userId,
+    onEvent: (event) => {
+      if (event.type === 'live_room_lock') input.onLock(event);
+    },
+  });
 }
 
 export async function fetchLiveRoomAccess(input: { roomId: string; userId: string }) {
@@ -200,4 +390,3 @@ export async function payLockedLiveEntry(input: {
     free?: boolean;
   };
 }
-

@@ -9,6 +9,7 @@ import {
   type Unsubscribe,
 } from 'firebase/database';
 import { env } from '../config/env';
+import { resolveGiftLottie } from '../data/giftAnimations';
 import { getFirebaseDb, isFirebaseReady } from '../lib/firebase';
 
 export type LiveRoom = {
@@ -302,6 +303,8 @@ export function listenRoomGifts(
 }
 
 export async function sendRoomGift(roomId: string, gift: Omit<LiveGiftEvent, 'id'>) {
+  let nextGiftCoins: number | undefined;
+  const giftTotal = (gift.coins || 0) * Math.max(1, gift.combo || 1);
   if (isFirebaseReady()) {
     const db = getFirebaseDb();
     const r = push(ref(db, `liveRooms/${roomId}/gifts`));
@@ -309,8 +312,9 @@ export async function sendRoomGift(roomId: string, gift: Omit<LiveGiftEvent, 'id
     const roomRef = ref(db, `liveRooms/${roomId}`);
     const snap = await get(roomRef);
     const current = Number(snap.val()?.giftCoins || 0);
+    nextGiftCoins = current + giftTotal;
     await update(roomRef, {
-      giftCoins: current + (gift.coins || 0) * (gift.combo || 1),
+      giftCoins: nextGiftCoins,
     });
   }
   // Also broadcast over WS for realtime overlays
@@ -318,6 +322,32 @@ export async function sendRoomGift(roomId: string, gift: Omit<LiveGiftEvent, 'id
   sendRealtime({
     type: 'gift:send',
     payload: { roomId, ...gift },
+  });
+  void import('./liveRoomRtmService').then(({ publishLiveGiftRtm, publishLiveStatsRtm }) => {
+    const totalCoins = nextGiftCoins ?? giftTotal;
+    const lottie = resolveGiftLottie(gift.giftId);
+    void publishLiveGiftRtm({
+      roomId,
+      channel: roomId,
+      senderId: gift.fromId,
+      senderName: gift.fromName,
+      giftId: gift.giftId,
+      giftName: gift.giftName,
+      giftEmoji: gift.giftEmoji,
+      coins: gift.coins,
+      combo: gift.combo,
+      lottie,
+      totalCoins,
+      hostEarnings: totalCoins,
+      createdAt: gift.createdAt,
+    });
+    void publishLiveStatsRtm({
+      roomId,
+      channel: roomId,
+      userId: gift.fromId,
+      totalCoins,
+      hostEarnings: totalCoins,
+    });
   });
 }
 
@@ -328,6 +358,14 @@ export async function bumpRoomViewers(roomId: string, delta: number) {
     viewersDelta: delta,
     lastViewerAt: Date.now(),
   }).catch(() => undefined);
+  void import('./liveRoomRtmService').then(({ publishLiveStatsRtm }) =>
+    publishLiveStatsRtm({
+      roomId,
+      channel: roomId,
+      userId: `viewer_stats_${roomId}`,
+      viewerDelta: delta,
+    }),
+  );
 }
 
 export async function updatePartySeats(roomId: string, seats: PartySeatPublic[]) {
