@@ -64,6 +64,10 @@ export function ChatScreen({ navigation, route }: Props) {
       text: m.text,
       createdAt: m.createdAt,
       imageUrl: m.imageUrl,
+      kind: m.kind,
+      giftName: m.giftName,
+      giftEmoji: m.giftEmoji,
+      giftCoins: m.giftCoins,
       fromMe: m.fromId === meId,
       status: (m.fromId === meId
         ? m.readAt

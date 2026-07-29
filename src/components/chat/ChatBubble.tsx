@@ -8,6 +8,10 @@ export type ChatBubbleMessage = {
   text: string;
   createdAt: number;
   imageUrl?: string;
+  kind?: 'text' | 'image' | 'support' | 'gift';
+  giftName?: string;
+  giftEmoji?: string;
+  giftCoins?: number;
   fromMe: boolean;
   status?: ChatMessageStatus;
 };
@@ -38,12 +42,26 @@ export function ChatBubble({
           { backgroundColor: mine ? CHAT_THEME.mineBubble : CHAT_THEME.theirsBubble },
         ]}
       >
+        {message.kind === 'gift' ? (
+          <View style={styles.giftCard}>
+            <Text style={styles.giftEmoji}>{message.giftEmoji || '🎁'}</Text>
+            <View style={styles.giftCopy}>
+              <Text style={styles.giftLabel}>
+                {mine ? 'You sent a gift' : 'Gift received'}
+              </Text>
+              <Text style={styles.giftName}>{message.giftName || 'Gift'}</Text>
+              <Text style={styles.giftCoins}>
+                {(message.giftCoins || 0).toLocaleString()} coins
+              </Text>
+            </View>
+          </View>
+        ) : null}
         {message.imageUrl ? (
           <Pressable onPress={() => onImagePress?.(message.imageUrl!)}>
             <Image source={{ uri: message.imageUrl }} style={styles.image} />
           </Pressable>
         ) : null}
-        {message.text ? (
+        {message.text && message.kind !== 'gift' ? (
           <Text
             style={[
               styles.body,
@@ -106,6 +124,39 @@ const styles = StyleSheet.create({
     height: 200,
     borderRadius: 14,
     marginBottom: 6,
+  },
+  giftCard: {
+    minWidth: 210,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderRadius: 14,
+    padding: 10,
+    backgroundColor: 'rgba(255,184,0,0.14)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,210,92,0.45)',
+  },
+  giftEmoji: { fontSize: 38 },
+  giftCopy: { flex: 1 },
+  giftLabel: {
+    fontFamily: font.medium,
+    fontSize: 11,
+    color: '#FFD977',
+    fontWeight: '600',
+  },
+  giftName: {
+    fontFamily: font.bold,
+    fontSize: 15,
+    color: '#FFFFFF',
+    fontWeight: '800',
+    marginTop: 1,
+  },
+  giftCoins: {
+    fontFamily: font.medium,
+    fontSize: 12,
+    color: '#FFD977',
+    fontWeight: '700',
+    marginTop: 2,
   },
   meta: {
     flexDirection: 'row',

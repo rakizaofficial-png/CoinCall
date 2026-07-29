@@ -24,6 +24,14 @@ type ApiMessage = {
   text: string;
   createdAt: number;
   imageUrl?: string;
+  kind?: "text" | "image" | "gift";
+  giftId?: string;
+  giftName?: string;
+  giftEmoji?: string;
+  giftCoins?: number;
+  giftAnimationUrl?: string;
+  giftSoundUrl?: string;
+  giftTxnId?: string;
   readAt?: number;
 };
 
@@ -129,6 +137,10 @@ export default function ChatThreadPage({
         text: m.text,
         createdAt: m.createdAt,
         imageUrl: (m as ApiMessage).imageUrl,
+        kind: (m as ApiMessage).kind,
+        giftName: (m as ApiMessage).giftName,
+        giftEmoji: (m as ApiMessage).giftEmoji,
+        giftCoins: (m as ApiMessage).giftCoins,
         fromMe: m.fromId === userId,
         status:
           m.fromId === userId
