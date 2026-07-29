@@ -35,6 +35,8 @@ export type LiveRoom = {
   /** Coin paywall — viewers must pay entryFee before joining */
   entryLocked?: boolean;
   entryFee?: number;
+  /** Server revision prevents an older heartbeat from reverting the lock. */
+  lockVersion?: number;
   endedAt?: number;
 };
 
@@ -482,19 +484,29 @@ export async function updateLiveRoomLock(
     const body = await response.text().catch(() => '');
     throw new Error(body || `Live lock failed (${response.status})`);
   }
+  const result = (await response.json()) as {
+    entryLocked: boolean;
+    entryFee: number;
+    lockVersion?: number;
+  };
+  const lockVersion = Math.max(0, Number(result.lockVersion) || 0);
+  // REST/WS is authoritative. Optional mirrors must never turn a successful
+  // server lock into a failed Host UI action.
   if (isFirebaseReady()) {
-    await update(ref(getFirebaseDb(), `liveRooms/${roomId}`), {
-      entryLocked: opts.entryLocked,
-      entryFee,
-    });
+    void update(ref(getFirebaseDb(), `liveRooms/${roomId}`), {
+      entryLocked: result.entryLocked,
+      entryFee: result.entryFee,
+      lockVersion,
+    }).catch(() => undefined);
   }
   void import('./liveRoomRtmService').then(({ publishLiveRoomLockRtm }) =>
     publishLiveRoomLockRtm({
       roomId,
       channel: opts.channel || roomId,
       hostId,
-      entryLocked: opts.entryLocked,
-      entryFee,
+      entryLocked: result.entryLocked,
+      entryFee: result.entryFee,
     }),
   );
+  return result;
 }

@@ -129,6 +129,7 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
   } = useApp();
   const [liveRooms, setLiveRooms] = useState<LiveRoom[]>([]);
   const [myLiveRoom, setMyLiveRoom] = useState<LiveRoom | null>(null);
+  const myLiveRoomRef = useRef<LiveRoom | null>(null);
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
   const [comments, setComments] = useState<LiveComment[]>([]);
   const [gifts, setGifts] = useState<LiveGiftEvent[]>([]);
@@ -136,6 +137,10 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
   const giftQueueRef = useRef<LiveGiftEvent[]>([]);
   const giftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const advanceGiftRef = useRef<() => void>(() => {});
+
+  useEffect(() => {
+    myLiveRoomRef.current = myLiveRoom;
+  }, [myLiveRoom]);
 
   // Keep advance function current without stale closures
   useEffect(() => {
@@ -353,6 +358,7 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
             giftEmoji?: string;
             giftId?: string;
             coins?: number;
+            roomGiftCoins?: number;
             createdAt?: number;
           };
           if (p.toHostId && p.toHostId !== user.id) return;
@@ -374,6 +380,32 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
           const coins = Number(p.coins) || 0;
           if (coins > 0) {
             setTodayLiveGiftCoins((c) => c + coins);
+            const authoritativeTotal = Math.max(
+              0,
+              Number(p.roomGiftCoins) || 0,
+            );
+            setMyLiveRoom((current) =>
+              current
+                ? {
+                    ...current,
+                    giftCoins:
+                      authoritativeTotal ||
+                      Math.max(0, Number(current.giftCoins) || 0) + coins,
+                  }
+                : current,
+            );
+            setLiveRooms((rooms) =>
+              rooms.map((current) =>
+                current.id === (p.roomId || activeRoomId)
+                  ? {
+                      ...current,
+                      giftCoins:
+                        authoritativeTotal ||
+                        Math.max(0, Number(current.giftCoins) || 0) + coins,
+                    }
+                  : current,
+              ),
+            );
           }
           return;
         }
@@ -439,8 +471,9 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
   /** Keep API live room + presence fresh so Luma can join the Agora channel */
   useEffect(() => {
     if (!myLiveRoom?.isLive || !myLiveRoom.id) return;
-    const roomSnapshot = myLiveRoom;
     const beat = () => {
+      const roomSnapshot = myLiveRoomRef.current;
+      if (!roomSnapshot?.isLive || roomSnapshot.id !== myLiveRoom.id) return;
       void publishLiveRoom({
         ...roomSnapshot,
         viewers: Math.max(1, roomSnapshot.viewers || 1),
@@ -991,17 +1024,22 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
           ? Math.max(10, Math.min(9999, Math.floor(opts.entryFee) || 50))
           : 0,
       };
-      await updateLiveRoomLock(myLiveRoom.id, user.id, {
+      const saved = await updateLiveRoomLock(myLiveRoom.id, user.id, {
         ...normalized,
         channel: myLiveRoom.channel,
       });
+      const confirmed = {
+        entryLocked: saved.entryLocked,
+        entryFee: saved.entryFee,
+        lockVersion: saved.lockVersion,
+      };
       setMyLiveRoom((r) =>
-        r ? { ...r, ...normalized } : r,
+        r ? { ...r, ...confirmed } : r,
       );
       setLiveRooms((list) =>
         list.map((r) =>
           r.id === myLiveRoom.id
-            ? { ...r, ...normalized }
+            ? { ...r, ...confirmed }
             : r,
         ),
       );
