@@ -1,6 +1,7 @@
 import { Building2, History, Smartphone, Wallet } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useCallback, useEffect, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
+import { useCallback, useState } from 'react';
 import {
   Pressable,
   StyleSheet,
@@ -44,7 +45,8 @@ const GATES: { key: WithdrawalGateway | 'crypto'; label: string; Icon: any }[] =
 export function WithdrawScreen({ navigation }: { navigation: any }) {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
-  const { user, applyPayout } = useApp();
+  const { user, updateUser, applyPayout } = useApp();
+  const [serverBalance, setServerBalance] = useState(user.coinBalance);
   const [gateway, setGateway] = useState<WithdrawalGateway | 'crypto'>('easypaisa');
   const [accountName, setAccountName] = useState(user.name);
   const [accountNumber, setAccountNumber] = useState(user.phone || '');
@@ -59,16 +61,29 @@ export function WithdrawScreen({ navigation }: { navigation: any }) {
 
   const refresh = useCallback(async () => {
     try {
-      const data = await listHostWithdrawals(user.id);
+      const [data, wallet] = await Promise.all([
+        listHostWithdrawals(user.id),
+        syncHostWalletBalance({
+          hostId: user.id,
+          coinBalance: user.coinBalance,
+          displayName: user.name,
+        }),
+      ]);
       setHistory((data.withdrawals as HistoryItem[]) || []);
+      if (typeof wallet?.coinBalance === 'number') {
+        setServerBalance(wallet.coinBalance);
+        updateUser({ coinBalance: wallet.coinBalance });
+      }
     } catch {
       setHistory([]);
     }
-  }, [user.id]);
+  }, [updateUser, user.coinBalance, user.id, user.name]);
 
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+  useFocusEffect(
+    useCallback(() => {
+      void refresh();
+    }, [refresh]),
+  );
 
   const sendOtp = () => {
     const code = String(100000 + Math.floor(Math.random() * 900000));
@@ -91,7 +106,7 @@ export function WithdrawScreen({ navigation }: { navigation: any }) {
       notify('Withdraw', 'Minimum is 100 coins.');
       return;
     }
-    if (coins > user.coinBalance) {
+    if (coins > serverBalance) {
       notify('Withdraw', 'Not enough balance.');
       return;
     }
@@ -131,7 +146,7 @@ export function WithdrawScreen({ navigation }: { navigation: any }) {
         accountName: accountName.trim(),
         accountNumber:
           gateway === 'crypto' ? `CRYPTO:${accountNumber.trim()}` : accountNumber.trim(),
-        knownBalance: user.coinBalance,
+        knownBalance: serverBalance,
         displayName: user.name,
       });
       if (!result.ok) {
@@ -144,7 +159,8 @@ export function WithdrawScreen({ navigation }: { navigation: any }) {
         });
         return;
       }
-      const next = result.wallet?.coinBalance ?? user.coinBalance - coins;
+      const next = result.wallet?.coinBalance ?? serverBalance - coins;
+      setServerBalance(next);
       applyPayout(coins, gateway, result.withdrawal?.id || '', next);
       await pushHostNotification(user.id, {
         type: 'payout',
@@ -155,7 +171,10 @@ export function WithdrawScreen({ navigation }: { navigation: any }) {
         visible: true,
         mode: 'success',
         title: 'Submitted successfully',
-        message: `Status: ${result.withdrawal?.status}. Coins reserved pending admin review.`,
+        message:
+          result.withdrawal?.status === 'agency_pending'
+            ? 'Coins reserved. Your agency will review and pay this request.'
+            : `Status: ${result.withdrawal?.status}. Coins reserved pending admin review.`,
         amountCoins: coins,
       });
       setOtp('');
@@ -177,10 +196,18 @@ export function WithdrawScreen({ navigation }: { navigation: any }) {
   const filtered = history.filter((h) => {
     if (filter === 'all') return true;
     if (filter === 'pending') {
-      return ['pending', 'processing', 'admin_review'].includes(h.status);
+      return [
+        'pending',
+        'processing',
+        'admin_review',
+        'agency_pending',
+        'agency_processing',
+      ].includes(h.status);
     }
-    if (filter === 'paid') return h.status === 'paid';
-    return h.status === 'failed' || h.status === 'rejected';
+    if (filter === 'paid') {
+      return h.status === 'paid' || h.status === 'agency_paid';
+    }
+    return ['failed', 'rejected', 'agency_rejected'].includes(h.status);
   });
 
   return (
@@ -202,7 +229,7 @@ export function WithdrawScreen({ navigation }: { navigation: any }) {
         style={styles.hero}
       >
         <Text style={styles.heroLabel}>Available</Text>
-        <Text style={styles.heroValue}>{user.coinBalance}</Text>
+        <Text style={styles.heroValue}>{serverBalance}</Text>
         <Text style={styles.heroSub}>coins</Text>
       </LinearGradient>
 

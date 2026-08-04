@@ -6,6 +6,7 @@
  */
 
 import { requireApiBase, apiConfig } from "@/config/apiConfig";
+import { getGoogleFirebaseIdToken, signOutFirebaseUser } from "@/lib/firebaseAuth";
 
 const TOKEN_KEY = "luma_auth_token";
 const USER_ID_KEY = "luma_auth_user_id";
@@ -68,7 +69,7 @@ export function getAuthHeaders(userId?: string): Record<string, string> {
   };
 }
 
-function clearAuth() {
+export function clearStoredAuth() {
   try {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_ID_KEY);
@@ -97,7 +98,70 @@ export async function logout(): Promise<void> {
   } catch {
     // Local sign-out must still complete if the network is unavailable.
   } finally {
-    clearAuth();
+    await signOutFirebaseUser();
+    clearStoredAuth();
+  }
+}
+
+function authUserFromResponse(
+  data: Record<string, unknown>,
+  fallback: Pick<AuthUser, "email" | "displayName">,
+): AuthUser {
+  const user: AuthUser = {
+    token: String(data.token ?? data.accessToken ?? ""),
+    userId: String(data.userId ?? data.id ?? ""),
+    email: String(data.email ?? fallback.email),
+    displayName: String(data.displayName ?? fallback.displayName),
+  };
+  if (!user.token || !user.userId) throw new Error("Server returned incomplete auth data");
+  return user;
+}
+
+export async function loginWithGoogle(): Promise<AuthUser> {
+  const idToken = await getGoogleFirebaseIdToken();
+  const response = await fetch(`${requireApiBase()}/users/google`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ idToken }),
+  });
+  const data = await response.json().catch(() => ({})) as Record<string, unknown>;
+  if (!response.ok) {
+    throw new Error(
+      typeof data.error === "string" ? data.error : `Google sign-in failed (${response.status})`,
+    );
+  }
+  const user = authUserFromResponse(data, { email: "", displayName: "Luma User" });
+  saveAuth(user);
+  return user;
+}
+
+export async function validateStoredSession(): Promise<AuthUser | null> {
+  const current = getAuthUser();
+  if (!current) return null;
+  try {
+    const response = await fetch(`${requireApiBase()}/users/session`, {
+      method: "GET",
+      headers: getAuthHeaders(current.userId),
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      clearStoredAuth();
+      return null;
+    }
+    const data = await response.json().catch(() => ({})) as Record<string, unknown>;
+    const verified = authUserFromResponse(data, current);
+    if (
+      verified.userId !== current.userId ||
+      verified.token !== current.token ||
+      verified.email !== current.email ||
+      verified.displayName !== current.displayName
+    ) {
+      saveAuth(verified);
+    }
+    return verified;
+  } catch {
+    clearStoredAuth();
+    return null;
   }
 }
 
@@ -118,15 +182,7 @@ export async function register(
       typeof data.error === "string" ? data.error : `Register failed (${res.status})`,
     );
   }
-  const user: AuthUser = {
-    token: String(data.token ?? data.accessToken ?? ""),
-    userId: String(data.userId ?? data.id ?? ""),
-    email: String(data.email ?? email),
-    displayName: String(data.displayName ?? displayName),
-  };
-  if (!user.token || !user.userId) {
-    throw new Error("Server returned incomplete auth data");
-  }
+  const user = authUserFromResponse(data, { email, displayName });
   saveAuth(user);
   return user;
 }
@@ -147,15 +203,10 @@ export async function login(
       typeof data.error === "string" ? data.error : `Login failed (${res.status})`,
     );
   }
-  const user: AuthUser = {
-    token: String(data.token ?? data.accessToken ?? ""),
-    userId: String(data.userId ?? data.id ?? ""),
-    email: String(data.email ?? email),
-    displayName: String(data.displayName ?? email.split("@")[0]),
-  };
-  if (!user.token || !user.userId) {
-    throw new Error("Server returned incomplete auth data");
-  }
+  const user = authUserFromResponse(data, {
+    email,
+    displayName: email.split("@")[0],
+  });
   saveAuth(user);
   return user;
 }

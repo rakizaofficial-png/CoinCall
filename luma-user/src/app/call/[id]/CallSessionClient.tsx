@@ -31,7 +31,8 @@ import { getDeviceUserId } from "@/lib/walletApi";
 
 /**
  * Active call UI — Agora live OR AI prerecorded fallback.
- * Coin ledger (10s slices) runs for BOTH transports identically.
+ * Live calls are billed by the server; the client timer only retries/syncs UI.
+ * AI fallback continues using local 10-second slices because it has no real host.
  */
 export default function CallSessionClient({
   params,
@@ -110,7 +111,7 @@ export default function CallSessionClient({
     return () => clearTimeout(t);
   }, [isDisconnected]);
 
-  const startLowBalanceGrace = () => {
+  const startLowBalanceGrace = useCallback(() => {
     setLowBalance(true);
     setGraceLeft(15);
     openTopUp(15);
@@ -128,15 +129,15 @@ export default function CallSessionClient({
         });
       }, 1000);
     }
-  };
+  }, [openTopUp, pushToast]);
 
-  const clearLowBalanceGrace = () => {
+  const clearLowBalanceGrace = useCallback(() => {
     setLowBalance(false);
     if (graceRef.current) {
       clearInterval(graceRef.current);
       graceRef.current = null;
     }
-  };
+  }, []);
 
   // Live Agora bridge: authoritative /calls/:id/minute (user debit + host credit)
   // AI fallback: local 10s slices via /wallet/spend (no host on AI path)
@@ -153,8 +154,13 @@ export default function CallSessionClient({
           setBlurReveal((b) => Math.min(1, b + 0.12));
         }
 
-        if (isLiveBridge && bridgeCall?.id && next > 0 && next % 60 === 0) {
-          const minuteIndex = Math.floor(next / 60);
+        if (
+          isLiveBridge &&
+          bridgeCall?.id &&
+          next >= 65 &&
+          (next - 5) % 60 === 0
+        ) {
+          const minuteIndex = 1 + Math.floor((next - 5) / 60);
           if (minuteIndex > billedMinute) {
             billedMinute = minuteIndex;
             void billCallMinute({
@@ -181,7 +187,7 @@ export default function CallSessionClient({
       });
     }, 1000);
 
-    // Bill first minute shortly after connect on live bridge
+    // Retry/sync the server-owned first charge at 5s (always inside 10s).
     if (isLiveBridge && bridgeCall?.id) {
       const t = setTimeout(() => {
         billedMinute = 1;
@@ -197,7 +203,7 @@ export default function CallSessionClient({
             void syncWallet?.();
           }
         });
-      }, 3_000);
+      }, 5_000);
       return () => {
         clearInterval(tick);
         clearTimeout(t);
@@ -225,6 +231,8 @@ export default function CallSessionClient({
     pushToast,
     openTopUp,
     syncWallet,
+    startLowBalanceGrace,
+    clearLowBalanceGrace,
   ]);
 
   const mm = String(Math.floor(secs / 60)).padStart(2, "0");

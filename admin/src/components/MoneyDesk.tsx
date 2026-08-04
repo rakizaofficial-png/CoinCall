@@ -4,18 +4,26 @@ import {
   setWithdrawalStatus,
   type WithdrawalRow,
 } from '../api';
+import {
+  createAgencyWithdrawal,
+  fetchAgencyWithdrawals,
+} from '../agencyApi';
 
 type DeskTab = 'pending' | 'approved' | 'rejected';
 
 function mapTab(status: string): DeskTab {
-  if (status === 'paid') return 'approved';
-  if (status === 'failed') return 'rejected';
+  if (status === 'paid' || status === 'agency_paid') return 'approved';
+  if (status === 'failed' || status === 'agency_rejected') return 'rejected';
   return 'pending';
 }
 
 function statusLabel(s: string) {
   if (s === 'paid') return 'Approved';
+  if (s === 'agency_paid') return 'Paid by agency';
   if (s === 'failed') return 'Rejected';
+  if (s === 'agency_rejected') return 'Rejected by agency';
+  if (s === 'agency_pending') return 'Agency review';
+  if (s === 'agency_processing') return 'Agency processing';
   if (s === 'admin_review') return 'Review';
   if (s === 'processing') return 'Processing';
   return 'Pending';
@@ -31,21 +39,74 @@ function durationLabel(seconds = 0) {
 export function MoneyDesk({
   readOnly,
   agencyHostIds,
+  isAgency = false,
+  agencyName = '',
 }: {
   readOnly?: boolean;
   agencyHostIds?: Set<string>;
+  isAgency?: boolean;
+  agencyName?: string;
 }) {
   const [rows, setRows] = useState<WithdrawalRow[]>([]);
   const [tab, setTab] = useState<DeskTab>('pending');
   const [busyId, setBusyId] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
+  const [agencyRows, setAgencyRows] = useState<WithdrawalRow[]>([]);
+  const [agencyBalance, setAgencyBalance] = useState({
+    available: 0,
+    collected: 0,
+    reserved: 0,
+  });
+  const [agencyForm, setAgencyForm] = useState({
+    amount: '',
+    gateway: 'bank' as 'easypaisa' | 'jazzcash' | 'bank',
+    accountName: agencyName,
+    accountNumber: '',
+  });
 
   const load = async () => {
     try {
       const data = await fetchAdminWithdrawals();
       setRows(data.withdrawals || []);
+      if (isAgency) {
+        const agencyData = await fetchAgencyWithdrawals();
+        setAgencyRows(agencyData.withdrawals || []);
+        setAgencyBalance({
+          available: agencyData.availableCoins || 0,
+          collected: agencyData.collectedCoins || 0,
+          reserved: agencyData.reservedCoins || 0,
+        });
+      }
     } catch {
       setRows([]);
+    }
+  };
+
+  const submitAgencyWithdrawal = async () => {
+    const amountCoins = Math.floor(Number(agencyForm.amount) || 0);
+    if (amountCoins <= 0 || amountCoins > agencyBalance.available) {
+      setMsg(`Enter an amount up to ${agencyBalance.available.toLocaleString()} coins.`);
+      return;
+    }
+    if (!agencyForm.accountName.trim() || agencyForm.accountNumber.trim().length < 6) {
+      setMsg('Enter valid agency payout account details.');
+      return;
+    }
+    setBusyId('agency-submit');
+    try {
+      await createAgencyWithdrawal({
+        amountCoins,
+        gateway: agencyForm.gateway,
+        accountName: agencyForm.accountName.trim(),
+        accountNumber: agencyForm.accountNumber.trim(),
+      });
+      setAgencyForm((current) => ({ ...current, amount: '' }));
+      setMsg('Agency withdrawal sent to platform admin.');
+      await load();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Agency withdrawal failed');
+    } finally {
+      setBusyId(null);
     }
   };
 
@@ -128,6 +189,86 @@ export function MoneyDesk({
 
       {msg ? <div className="hm-toast desk-toast">{msg}</div> : null}
 
+      {isAgency ? (
+        <div className="analytics-card" style={{ marginBottom: 18 }}>
+          <header>
+            <h3>Agency collected wallet</h3>
+            <p>Approve host payouts first, then send the collected balance to admin.</p>
+          </header>
+          <div className="stats">
+            <div className="stat green">
+              <span>Available to request</span>
+              <b>{agencyBalance.available.toLocaleString()}</b>
+            </div>
+            <div className="stat teal">
+              <span>Collected from hosts</span>
+              <b>{agencyBalance.collected.toLocaleString()}</b>
+            </div>
+            <div className="stat gold">
+              <span>Already requested</span>
+              <b>{agencyBalance.reserved.toLocaleString()}</b>
+            </div>
+          </div>
+          <div className="desk-filters" style={{ alignItems: 'end' }}>
+            <label>
+              <span className="meta">Coins</span>
+              <input
+                value={agencyForm.amount}
+                onChange={(e) => setAgencyForm((f) => ({ ...f, amount: e.target.value }))}
+                inputMode="numeric"
+                placeholder="Amount"
+              />
+            </label>
+            <label>
+              <span className="meta">Method</span>
+              <select
+                value={agencyForm.gateway}
+                onChange={(e) =>
+                  setAgencyForm((f) => ({
+                    ...f,
+                    gateway: e.target.value as typeof f.gateway,
+                  }))
+                }
+              >
+                <option value="bank">Bank</option>
+                <option value="easypaisa">EasyPaisa</option>
+                <option value="jazzcash">JazzCash</option>
+              </select>
+            </label>
+            <label>
+              <span className="meta">Account name</span>
+              <input
+                value={agencyForm.accountName}
+                onChange={(e) => setAgencyForm((f) => ({ ...f, accountName: e.target.value }))}
+                placeholder="Agency account name"
+              />
+            </label>
+            <label>
+              <span className="meta">Account number</span>
+              <input
+                value={agencyForm.accountNumber}
+                onChange={(e) => setAgencyForm((f) => ({ ...f, accountNumber: e.target.value }))}
+                placeholder="IBAN / wallet number"
+              />
+            </label>
+            <button
+              type="button"
+              className="btn-green"
+              disabled={busyId === 'agency-submit' || agencyBalance.available <= 0}
+              onClick={() => void submitAgencyWithdrawal()}
+            >
+              Send to admin
+            </button>
+          </div>
+          {agencyRows.length ? (
+            <div className="meta">
+              Latest admin request: {agencyRows[0].amountCoins.toLocaleString()} coins ·{' '}
+              {statusLabel(agencyRows[0].status)}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="stats">
         <div className="stat gold">
           <span>Pending payout coins</span>
@@ -174,7 +315,7 @@ export function MoneyDesk({
           <table className="desk-table">
             <thead>
               <tr>
-                <th>Host</th>
+                <th>Host / agency</th>
                 <th>Wallet &amp; request</th>
                 <th>Performance at request</th>
                 <th>Payout account</th>
@@ -196,8 +337,11 @@ export function MoneyDesk({
                         </span>
                       )}
                       <div>
-                        <strong>{w.hostName || 'Host'}</strong>
+                        <strong>
+                          {w.hostName || (w.kind === 'agency' ? 'Agency' : 'Host')}
+                        </strong>
                         <div className="meta">
+                          {w.kind === 'agency' ? 'Agency payout · ' : ''}
                           <code className="desk-app-id">{w.hostId}</code>
                           {' · '}
                           <span className={`badge solid ${w.isLive ? 'live' : w.isOnline ? 'online' : 'none'}`}>

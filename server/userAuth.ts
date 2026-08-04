@@ -10,8 +10,10 @@ export type UserAccount = {
   userId: string;
   email: string;
   displayName: string;
-  passwordHash: string;
-  salt: string;
+  passwordHash?: string;
+  salt?: string;
+  authProviders?: Array<'password' | 'google'>;
+  firebaseUid?: string;
   createdAt: number;
   token: string;
   /** A small bounded set allows the same account on multiple owned devices. */
@@ -33,12 +35,33 @@ function hashPassword(password: string, salt: string) {
   return scryptSync(password, salt, 64).toString('hex');
 }
 
+function normalizeAccount(row: UserAccount): UserAccount {
+  row.email = normalizeEmail(row.email);
+  row.authProviders = row.authProviders?.length
+    ? [...new Set(row.authProviders)]
+    : row.passwordHash && row.salt
+      ? ['password']
+      : [];
+  return row;
+}
+
+function issueSession(account: UserAccount): void {
+  const token = randomBytes(24).toString('hex');
+  const priorTokens = account.tokens ?? (account.token ? [account.token] : []);
+  account.tokens = [...new Set([...priorTokens, token])].slice(-5);
+  account.token = token;
+  for (const activeToken of account.tokens) byToken.set(activeToken, account);
+  for (const activeToken of priorTokens) {
+    if (!account.tokens.includes(activeToken)) byToken.delete(activeToken);
+  }
+}
+
 function load() {
   try {
     if (!existsSync(FILE)) return;
     const rows = JSON.parse(readFileSync(FILE, 'utf8')) as UserAccount[];
     for (const row of rows) {
-      row.email = normalizeEmail(row.email);
+      normalizeAccount(row);
       byEmail.set(row.email, row);
       byId.set(row.userId, row);
       for (const token of row.tokens?.length ? row.tokens : [row.token]) {
@@ -73,7 +96,7 @@ export function loadUserAccounts(rows: UserAccount[]) {
   byToken.clear();
   for (const row of rows || []) {
     if (!row?.email || !row?.userId) continue;
-    row.email = normalizeEmail(row.email);
+    normalizeAccount(row);
     byEmail.set(row.email, row);
     byId.set(row.userId, row);
     for (const token of row.tokens?.length ? row.tokens : [row.token]) {
@@ -108,6 +131,7 @@ export function registerUser(input: {
     displayName,
     passwordHash,
     salt,
+    authProviders: ['password'],
     createdAt: Date.now(),
     token,
     tokens: [token],
@@ -129,24 +153,62 @@ export function loginUser(input: {
   if (!account) {
     return { ok: false, error: 'Invalid email or password', status: 401 };
   }
+  if (!account.passwordHash || !account.salt) {
+    return { ok: false, error: 'Use Google to sign in to this account', status: 401 };
+  }
   const next = hashPassword(password, account.salt);
   const a = Buffer.from(account.passwordHash, 'hex');
   const b = Buffer.from(next, 'hex');
   if (a.length !== b.length || !timingSafeEqual(a, b)) {
     return { ok: false, error: 'Invalid email or password', status: 401 };
   }
-  // Issue a separate bounded session per login. This preserves other owned
-  // devices without leaving an unbounded set of credentials behind.
-  const token = randomBytes(24).toString('hex');
-  const priorTokens = account.tokens ?? (account.token ? [account.token] : []);
-  account.tokens = [...new Set([...priorTokens, token])].slice(-5);
-  account.token = token;
-  for (const activeToken of account.tokens) byToken.set(activeToken, account);
-  for (const activeToken of priorTokens) {
-    if (!account.tokens.includes(activeToken)) byToken.delete(activeToken);
-  }
+  issueSession(account);
   save();
   return { ok: true, account };
+}
+
+export function loginGoogleUser(input: {
+  email: string;
+  displayName: string;
+  firebaseUid: string;
+}):
+  | { ok: true; account: UserAccount; isNew: boolean }
+  | { ok: false; error: string; status: number } {
+  const email = normalizeEmail(input.email);
+  const firebaseUid = String(input.firebaseUid || '').trim();
+  const displayName = String(input.displayName || '').trim().slice(0, 40) || 'Luma User';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !firebaseUid) {
+    return { ok: false, error: 'Verified Google account required', status: 400 };
+  }
+
+  const existing = byEmail.get(email);
+  if (existing) {
+    if (existing.firebaseUid && existing.firebaseUid !== firebaseUid) {
+      return { ok: false, error: 'Google account does not match this user', status: 409 };
+    }
+    existing.firebaseUid = firebaseUid;
+    existing.authProviders = [...new Set([...(existing.authProviders || []), 'google' as const])];
+    if (!existing.displayName && displayName) existing.displayName = displayName;
+    issueSession(existing);
+    save();
+    return { ok: true, account: existing, isNew: false };
+  }
+
+  const account: UserAccount = {
+    userId: `u_${randomUUID().replace(/-/g, '').slice(0, 16)}`,
+    email,
+    displayName,
+    firebaseUid,
+    authProviders: ['google'],
+    createdAt: Date.now(),
+    token: '',
+    tokens: [],
+  };
+  issueSession(account);
+  byEmail.set(email, account);
+  byId.set(account.userId, account);
+  save();
+  return { ok: true, account, isNew: true };
 }
 
 export function getUserAccountById(userId: string): UserAccount | undefined {
@@ -175,11 +237,12 @@ export function bearerToken(value: string | string[] | undefined): string {
   return match?.[1]?.trim() || '';
 }
 
-export function publicAuthUser(account: UserAccount) {
+export function publicAuthUser(account: UserAccount, sessionToken = account.token) {
   return {
-    token: account.token,
+    token: sessionToken,
     userId: account.userId,
     email: account.email,
     displayName: account.displayName,
+    authProviders: account.authProviders || [],
   };
 }

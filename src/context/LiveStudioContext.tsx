@@ -374,6 +374,7 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
             giftEmoji?: string;
             giftId?: string;
             coins?: number;
+            hostCredited?: number;
             roomGiftCoins?: number;
             createdAt?: number;
           };
@@ -409,8 +410,9 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
           );
           enqueueGiftOverlay(overlay);
           const coins = Number(p.coins) || 0;
+          const hostCoins = Number(p.hostCredited) || 0;
           if (coins > 0) {
-            setTodayLiveGiftCoins((c) => c + coins);
+            setTodayLiveGiftCoins((c) => c + hostCoins);
             const authoritativeTotal = Math.max(
               0,
               Number(p.roomGiftCoins) || 0,
@@ -491,11 +493,6 @@ export function LiveStudioProvider({ children }: { children: React.ReactNode }) 
     const t = setInterval(tick, 1000);
     return () => clearInterval(t);
   }, [myLiveRoom?.isLive, myLiveRoom?.startedAt]);
-
-  // Keep live-gift tile in sync with today's hydrated gift coins
-  useEffect(() => {
-    setTodayLiveGiftCoins((c) => Math.max(c, hostEarnings.gift || 0));
-  }, [hostEarnings.gift]);
 
   const liveSeconds = todayLiveSeconds + sessionLiveSeconds;
 

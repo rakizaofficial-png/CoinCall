@@ -4,7 +4,8 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff, UserPlus } from "lucide-react";
-import { register } from "@/lib/auth";
+import { loginWithGoogle, register } from "@/lib/auth";
+import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -12,7 +13,7 @@ export default function RegisterPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState<"google" | "email" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const submit = async (e: React.FormEvent) => {
@@ -21,14 +22,27 @@ export default function RegisterPage() {
     if (!displayName.trim()) { setError("Display name is required"); return; }
     if (!email.trim()) { setError("Email is required"); return; }
     if (password.length < 6) { setError("Password must be at least 6 characters"); return; }
-    setLoading(true);
+    setLoading("email");
     try {
       await register(email.trim(), password, displayName.trim());
       router.replace("/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Registration failed");
     } finally {
-      setLoading(false);
+      setLoading(null);
+    }
+  };
+
+  const googleSignIn = async () => {
+    setError(null);
+    setLoading("google");
+    try {
+      await loginWithGoogle();
+      router.replace("/");
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Google sign-in failed");
+      setLoading(null);
     }
   };
 
@@ -43,6 +57,18 @@ export default function RegisterPage() {
           <p className="mt-1 text-sm text-muted">Join Luma — live, calls & more</p>
         </div>
 
+        <GoogleSignInButton
+          disabled={loading !== null}
+          busy={loading === "google"}
+          onClick={() => void googleSignIn()}
+        />
+
+        <div className="my-5 flex items-center gap-3" aria-hidden="true">
+          <span className="h-px flex-1 bg-line" />
+          <span className="text-[11px] font-semibold uppercase tracking-widest text-muted">or create with email</span>
+          <span className="h-px flex-1 bg-line" />
+        </div>
+
         <form onSubmit={(e) => void submit(e)} className="space-y-3">
           <div>
             <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted">
@@ -55,7 +81,7 @@ export default function RegisterPage() {
               onChange={(e) => setDisplayName(e.target.value)}
               placeholder="Your name"
               className="auth-input"
-              disabled={loading}
+              disabled={loading !== null}
             />
           </div>
 
@@ -70,7 +96,7 @@ export default function RegisterPage() {
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
               className="auth-input"
-              disabled={loading}
+              disabled={loading !== null}
             />
           </div>
 
@@ -86,7 +112,7 @@ export default function RegisterPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Min. 6 characters"
                 className="auth-input pr-12"
-                disabled={loading}
+                disabled={loading !== null}
               />
               <button
                 type="button"
@@ -105,9 +131,9 @@ export default function RegisterPage() {
             </div>
           )}
 
-          <button type="submit" disabled={loading} className="btn-primary mt-2">
+          <button type="submit" disabled={loading !== null} className="btn-primary mt-2">
             <UserPlus className="h-4 w-4" />
-            {loading ? "Creating account…" : "Create account"}
+            {loading === "email" ? "Creating account…" : "Create email account"}
           </button>
         </form>
 

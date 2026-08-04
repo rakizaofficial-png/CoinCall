@@ -40,6 +40,17 @@ const read = (key: string, fallback = "") =>
   (typeof process !== "undefined" ? process.env[key] : undefined)?.trim() ||
   fallback;
 
+// Firebase web identifiers are public application configuration, not secrets.
+// Environment values can override these defaults for staging deployments.
+const productionFirebase = {
+  apiKey: "AIzaSyBzFRXeuDvjq6RG5VR4oky0Ra93AvVFZ50",
+  authDomain: "lovecall-2291e.firebaseapp.com",
+  projectId: "lovecall-2291e",
+  storageBucket: "lovecall-2291e.firebasestorage.app",
+  messagingSenderId: "469302066716",
+  appId: "1:469302066716:web:79d8e7bce979bcf17529d9",
+} as const;
+
 export const apiConfig = {
   env: read("NEXT_PUBLIC_APP_ENV", "production"),
 
@@ -73,12 +84,15 @@ export const apiConfig = {
   },
 
   firebase: {
-    apiKey: read("NEXT_PUBLIC_FIREBASE_API_KEY"),
-    authDomain: read("NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN"),
-    projectId: read("NEXT_PUBLIC_FIREBASE_PROJECT_ID"),
-    storageBucket: read("NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET"),
-    messagingSenderId: read("NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID"),
-    appId: read("NEXT_PUBLIC_FIREBASE_APP_ID"),
+    apiKey: read("NEXT_PUBLIC_FIREBASE_API_KEY", productionFirebase.apiKey),
+    authDomain: read("NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN", productionFirebase.authDomain),
+    projectId: read("NEXT_PUBLIC_FIREBASE_PROJECT_ID", productionFirebase.projectId),
+    storageBucket: read("NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET", productionFirebase.storageBucket),
+    messagingSenderId: read(
+      "NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID",
+      productionFirebase.messagingSenderId,
+    ),
+    appId: read("NEXT_PUBLIC_FIREBASE_APP_ID", productionFirebase.appId),
     vapidKey: read("NEXT_PUBLIC_FIREBASE_VAPID_KEY"),
   },
 

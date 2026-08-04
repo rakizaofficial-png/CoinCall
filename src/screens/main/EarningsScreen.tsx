@@ -21,10 +21,6 @@ import {
   formatDuration,
   type HostEarningsPayload,
 } from '../../services/hostEarningsApi';
-import {
-  fetchHostWeeklyEarnings,
-  type WeeklyEarningsRow,
-} from '../../services/realtimeService';
 import { radii } from '../../theme/colors';
 import { useTheme } from '../../theme/ThemeContext';
 
@@ -33,30 +29,15 @@ export function EarningsScreen({ navigation }: { navigation: any }) {
   const { colors } = useTheme();
   const { user } = useApp();
   const [payload, setPayload] = useState<HostEarningsPayload | null>(null);
-  const [weekly, setWeekly] = useState<WeeklyEarningsRow | null>(null);
-  const [fbStats, setFbStats] = useState<{
-    totalCallCoins: number;
-    totalMinutes: number;
-    totalCalls: number;
-  } | null>(null);
-  const [fbBalance, setFbBalance] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
 
   const load = useCallback(async () => {
     if (!user.id) return;
     setLoading(true);
     try {
-      const [data, fb] = await Promise.all([
-        fetchHostEarnings(user.id).catch(() => null),
-        fetchHostWeeklyEarnings(user.id).catch(() => null),
-      ]);
+      const data = await fetchHostEarnings(user.id).catch(() => null);
       if (data) setPayload(data);
       else setPayload(null);
-      if (fb) {
-        setWeekly(fb.week);
-        setFbStats(fb.stats);
-        setFbBalance(fb.walletBalance);
-      }
     } catch {
       setPayload(null);
     } finally {
@@ -71,29 +52,16 @@ export function EarningsScreen({ navigation }: { navigation: any }) {
   );
 
   const summary = payload?.summary;
-  const callCoins = Math.max(
-    summary?.callCoins ?? 0,
-    fbStats?.totalCallCoins ?? 0,
-    weekly?.coins ?? 0,
-  );
-  const giftCoins = Math.max(summary?.giftCoins ?? 0, weekly?.giftCoins ?? 0);
-  const totalCoins = Math.max(summary?.totalCoins ?? 0, callCoins + giftCoins);
+  const callCoins = summary?.callCoins ?? 0;
+  const giftCoins = summary?.giftCoins ?? 0;
+  const liveCoins = summary?.liveCoins ?? 0;
+  const totalCoins = summary?.totalCoins ?? 0;
   const balance =
-    typeof fbBalance === 'number' && fbBalance >= 0
-      ? fbBalance
-      : typeof summary?.walletBalance === 'number'
-        ? summary.walletBalance
-        : user.coinBalance;
-  const totalCalls = Math.max(
-    summary?.totalCalls ?? 0,
-    fbStats?.totalCalls ?? 0,
-    weekly?.callCount ?? 0,
-  );
-  const totalDurationSec = Math.max(
-    summary?.totalDurationSec ?? 0,
-    (fbStats?.totalMinutes ?? 0) * 60,
-    (weekly?.callMinutes ?? 0) * 60,
-  );
+    typeof summary?.walletBalance === 'number'
+      ? summary.walletBalance
+      : user.coinBalance;
+  const totalCalls = summary?.totalCalls ?? 0;
+  const totalDurationSec = summary?.totalDurationSec ?? 0;
 
   return (
     <Screen
@@ -151,17 +119,18 @@ export function EarningsScreen({ navigation }: { navigation: any }) {
 
       <GlassCard>
         <Text style={[styles.section, { color: colors.text }]}>
-          This week · withdrawal ledger
+          This month · server ledger
         </Text>
         <Text style={{ color: colors.textMuted, fontSize: 12, marginBottom: 10 }}>
-          {weekly?.weekKey || 'Current week'} · persists across refresh
+          Net host credits after platform commission
         </Text>
         {(
           [
-            ['Weekly call coins', weekly?.coins ?? 0],
-            ['Weekly minutes', weekly?.callMinutes ?? 0],
-            ['Weekly calls', weekly?.callCount ?? 0],
-            ['Weekly gifts', weekly?.giftCoins ?? 0],
+            ['Monthly call coins', payload?.month?.callCoins ?? 0],
+            ['Monthly call minutes', payload?.month?.callMinutes ?? 0],
+            ['Monthly calls', payload?.month?.callsCount ?? 0],
+            ['Monthly gift coins', payload?.month?.giftCoins ?? 0],
+            ['Monthly live entry coins', payload?.month?.liveCoins ?? 0],
           ] as const
         ).map(([label, value]) => (
           <View key={label} style={styles.breakRow}>
@@ -177,6 +146,7 @@ export function EarningsScreen({ navigation }: { navigation: any }) {
           [
             ['Calls', callCoins],
             ['Gifting', giftCoins],
+            ['Live entry', liveCoins],
             ['Combined total', totalCoins],
           ] as const
         ).map(([label, value]) => (

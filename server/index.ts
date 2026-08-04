@@ -43,11 +43,13 @@ import {
   dumpUserAccounts,
   getUserAccountById,
   loadUserAccounts,
+  loginGoogleUser,
   loginUser,
   logoutUserToken,
   publicAuthUser,
   registerUser,
 } from './userAuth.ts';
+import { verifyGoogleFirebaseIdToken } from './firebaseIdToken.ts';
 import {
   dumpHomeBannersForSnapshot,
   getHomeBanners,
@@ -81,6 +83,13 @@ import {
   transferUserToHost,
   type CoinTxn,
 } from './coinLedger.ts';
+import { nextCallChargeAt } from './callBillingPolicy.ts';
+import {
+  availableAgencyCoins as calculateAgencyAvailableCoins,
+  collectedAgencyCoins as calculateAgencyCollectedCoins,
+  reservedAgencyCoins as calculateAgencyReservedCoins,
+  rowKind as calculateWithdrawalKind,
+} from './agencyWithdrawalPolicy.ts';
 import {
   cancelPendingForUser,
   createAutoInvite,
@@ -105,7 +114,6 @@ import {
   claimReferralReward,
   claimSpin,
   dumpRewardsForSnapshot,
-  ENGAGEMENT_CREDIT_BLOCK,
   getRewardStatus,
   hasWelcomeClaimed,
   loadRewardsFromSnapshot,
@@ -194,14 +202,6 @@ if (!process.env.ADMIN_API_KEY) {
   );
 }
 
-/**
- * Non-admin open credits are CLOSED for user rewards.
- * Only host_earn:* (host app sync) may mint without admin key.
- * Welcome / daily / spin / referral → /api/rewards/* or /wallet/me.
- */
-const CLIENT_CREDIT_MAX = 500;
-const CLIENT_CREDIT_REASONS = /^host_earn(:|$)/i;
-
 type CallStatus = 'ringing' | 'accepted' | 'rejected' | 'ended' | 'missed';
 
 type CallRecord = {
@@ -242,6 +242,9 @@ type CallHistoryRecord = {
   ratePerMinute: number;
   billedMinutes: number;
   coinsSpent: number;
+  /** Net amount credited to the host after platform commission. */
+  hostCoinsEarned?: number;
+  platformCoins?: number;
   status: CallStatus;
   startedAt: number;
   endedAt: number;
@@ -258,6 +261,8 @@ type GiftHistoryRecord = {
   giftName: string;
   giftEmoji: string;
   coins: number;
+  hostCoinsEarned?: number;
+  platformCoins?: number;
   roomId?: string | null;
   callId?: string | null;
   createdAt: number;
@@ -366,6 +371,7 @@ function giftMedia(coins: number) {
 }
 
 const calls = new Map<string, CallRecord>();
+const callBillingTimers = new Map<string, ReturnType<typeof setTimeout>>();
 /** Durable call archive (capped) */
 const callHistory: CallHistoryRecord[] = [];
 /** Durable gift ledger for host revenue (capped) */
@@ -377,7 +383,16 @@ function archiveCall(call: CallRecord, endReason: CallEndReason) {
   if (callHistory.some((c) => c.id === call.id)) return;
   const startedAt = call.acceptedAt || call.createdAt;
   const endedAt = call.updatedAt || Date.now();
-  const billedMinutes = Math.max(0, Math.floor(call.billedMinutes || 0));
+  const billingTxns = dumpCoinTxns().filter(
+    (txn) =>
+      txn.status === 'completed' &&
+      txn.type === 'call_minute' &&
+      txn.callId === call.id,
+  );
+  const billedMinutes = Math.max(
+    Math.max(0, Math.floor(call.billedMinutes || 0)),
+    billingTxns.length,
+  );
   const rate = normalizeHostCallPrice(call.ratePerMinute);
   const row: CallHistoryRecord = {
     id: call.id,
@@ -388,7 +403,17 @@ function archiveCall(call: CallRecord, endReason: CallEndReason) {
     userAvatar: call.userAvatar,
     ratePerMinute: rate,
     billedMinutes,
-    coinsSpent: billedMinutes * rate,
+    coinsSpent: billingTxns.length
+      ? billingTxns.reduce((sum, txn) => sum + txn.coinsDeducted, 0)
+      : billedMinutes * rate,
+    hostCoinsEarned: billingTxns.reduce(
+      (sum, txn) => sum + txn.coinsCreditedHost,
+      0,
+    ),
+    platformCoins: billingTxns.reduce(
+      (sum, txn) => sum + txn.coinsCreditedPlatform,
+      0,
+    ),
     status: call.status,
     startedAt,
     endedAt,
@@ -401,6 +426,7 @@ function archiveCall(call: CallRecord, endReason: CallEndReason) {
 }
 
 function forceEndCall(call: CallRecord, endReason: CallEndReason) {
+  clearCallBillingTimer(call.id);
   if (call.status === 'ended' || call.status === 'rejected' || call.status === 'missed') {
     archiveCall(call, call.endReason || endReason);
     return call;
@@ -414,6 +440,12 @@ function forceEndCall(call: CallRecord, endReason: CallEndReason) {
   pushToHost(call.hostId, 'call_ended', call);
   broadcastWs({ type: 'call:ended', payload: call });
   return call;
+}
+
+function clearCallBillingTimer(callId: string) {
+  const timer = callBillingTimers.get(callId);
+  if (timer) clearTimeout(timer);
+  callBillingTimers.delete(callId);
 }
 
 function pushGiftHistory(event: GiftHistoryRecord) {
@@ -431,22 +463,41 @@ function pushLiveSession(session: LiveSessionRecord) {
   persist();
 }
 
+function hostEarningTxns(hostId: string, startAt = 0) {
+  return dumpCoinTxns().filter(
+    (txn) =>
+      txn.status === 'completed' &&
+      txn.hostId === hostId &&
+      txn.coinsCreditedHost > 0 &&
+      txn.createdAt >= startAt &&
+      (txn.type === 'call_minute' || txn.type === 'gift' || txn.type === 'live_entry'),
+  );
+}
+
 function hostEarningsSummary(hostId: string) {
   const hostCalls = callHistory.filter((c) => c.hostId === hostId);
-  const hostGifts = giftHistory.filter((g) => g.toHostId === hostId);
-  const callCoins = hostCalls.reduce((s, c) => s + c.coinsSpent, 0);
-  const giftCoins = hostGifts.reduce((s, g) => s + g.coins, 0);
+  const earnings = hostEarningTxns(hostId);
+  const callTxns = earnings.filter((txn) => txn.type === 'call_minute');
+  const giftTxns = earnings.filter((txn) => txn.type === 'gift');
+  const liveTxns = earnings.filter((txn) => txn.type === 'live_entry');
+  const callCoins = callTxns.reduce((sum, txn) => sum + txn.coinsCreditedHost, 0);
+  const giftCoins = giftTxns.reduce((sum, txn) => sum + txn.coinsCreditedHost, 0);
+  const liveCoins = liveTxns.reduce((sum, txn) => sum + txn.coinsCreditedHost, 0);
   const totalDurationSec = hostCalls.reduce((s, c) => s + c.durationSec, 0);
-  const answered = hostCalls.filter(
-    (c) => c.status === 'ended' || c.status === 'accepted',
+  const answeredCallIds = new Set(
+    hostCalls
+      .filter((c) => c.status === 'ended' || c.status === 'accepted' || c.billedMinutes > 0)
+      .map((call) => call.id),
   );
+  for (const txn of callTxns) if (txn.callId) answeredCallIds.add(txn.callId);
   return {
     callCoins,
     giftCoins,
-    totalCoins: callCoins + giftCoins,
-    totalCalls: answered.length,
+    liveCoins,
+    totalCoins: callCoins + giftCoins + liveCoins,
+    totalCalls: answeredCallIds.size,
     totalDurationSec,
-    totalGifts: hostGifts.length,
+    totalGifts: giftTxns.length,
   };
 }
 
@@ -459,22 +510,25 @@ function hostTodayStats(hostId: string, dayStartMs: number) {
       (c.endedAt || c.startedAt || 0) >= start &&
       (c.status === 'ended' || c.status === 'accepted' || (c.billedMinutes || 0) > 0),
   );
-  const todayGifts = giftHistory.filter(
-    (g) => g.toHostId === hostId && (g.createdAt || 0) >= start,
-  );
+  const earnings = hostEarningTxns(hostId, start);
+  const callTxns = earnings.filter((txn) => txn.type === 'call_minute');
+  const giftTxns = earnings.filter((txn) => txn.type === 'gift');
+  const liveEntryTxns = earnings.filter((txn) => txn.type === 'live_entry');
   const todayLiveSessions = liveSessionHistory.filter(
     (s) => s.hostId === hostId && (s.startedAt || 0) >= start,
   );
-  const callCoins = todayCalls.reduce((s, c) => s + (c.coinsSpent || 0), 0);
-  const giftCoins = todayGifts.reduce((s, g) => s + (g.coins || 0), 0);
-  const liveGiftCoins = todayGifts
-    .filter((g) => Boolean(g.roomId))
-    .reduce((s, g) => s + (g.coins || 0), 0);
-  const callMinutes = todayCalls.reduce((s, c) => {
-    const billed = Math.max(0, Math.floor(c.billedMinutes || 0));
-    if (billed > 0) return s + billed;
-    return s + Math.max(0, Math.ceil((c.durationSec || 0) / 60));
-  }, 0);
+  const callCoins = callTxns.reduce((sum, txn) => sum + txn.coinsCreditedHost, 0);
+  const giftCoins = giftTxns.reduce((sum, txn) => sum + txn.coinsCreditedHost, 0);
+  const liveGiftCoins = giftTxns
+    .filter((txn) => Boolean(txn.meta?.roomId))
+    .reduce((sum, txn) => sum + txn.coinsCreditedHost, 0);
+  const liveEntryCoins = liveEntryTxns.reduce(
+    (sum, txn) => sum + txn.coinsCreditedHost,
+    0,
+  );
+  const callMinutes = callTxns.length;
+  const callIds = new Set(todayCalls.map((call) => call.id));
+  for (const txn of callTxns) if (txn.callId) callIds.add(txn.callId);
   let liveSeconds = todayLiveSessions.reduce(
     (s, row) => s + Math.max(0, row.durationSec || 0),
     0,
@@ -482,11 +536,12 @@ function hostTodayStats(hostId: string, dayStartMs: number) {
   return {
     callCoins,
     giftCoins,
-    liveGiftCoins: liveGiftCoins || giftCoins,
-    totalCoins: callCoins + giftCoins,
-    callsCount: todayCalls.length,
+    liveEntryCoins,
+    liveGiftCoins,
+    totalCoins: callCoins + giftCoins + liveEntryCoins,
+    callsCount: callIds.size,
     callMinutes,
-    giftCount: todayGifts.length,
+    giftCount: giftTxns.length,
     liveSeconds,
     liveSecondsCompleted: liveSeconds,
     liveActiveStartedAt: null as number | null,
@@ -552,7 +607,9 @@ function requireAdmin(req: express.Request, res: express.Response): boolean {
 
 function isPlatformAdmin(req: express.Request): boolean {
   const key = String(req.headers['x-admin-key'] || req.query.key || '').trim();
-  return isAdminCredential(key);
+  if (isAdminCredential(key)) return true;
+  const auth = getAgencyAuth(req) || resolveStaffAuth(req, ADMIN_KEY);
+  return auth?.kind === 'admin';
 }
 
 /** Platform admin OR active agency — binds agency identity server-side */
@@ -673,24 +730,16 @@ app.get('/api/gifts', (_req, res) => {
   res.json({ gifts });
 });
 
-/** Zuko user email+password registration (no OTP) */
-app.post('/api/users/register', (req, res) => {
-  const result = registerUser({
-    email: String(req.body?.email || ''),
-    password: String(req.body?.password || ''),
-    displayName: String(req.body?.displayName || ''),
-  });
-  if (!result.ok) {
-    res.status(result.status).json({ error: result.error });
-    return;
-  }
-  const { account } = result;
+function prepareUserAccount(
+  account: { userId: string; displayName: string },
+  grantWelcomeBonus: boolean,
+) {
   const wallet = ensureWallet(account.userId, {
     role: 'user',
     displayName: account.displayName,
   });
   const welcomeAmount = Math.min(100, Math.max(0, welcomeBonusCoins()));
-  if (!hasWelcomeBonusAlready(account.userId) && welcomeAmount > 0) {
+  if (grantWelcomeBonus && !hasWelcomeBonusAlready(account.userId) && welcomeAmount > 0) {
     const minted = mintCoins(coinDeps(), {
       txnKey: `welcome:${account.userId}`,
       type: 'reward_welcome',
@@ -710,11 +759,27 @@ app.post('/api/users/register', (req, res) => {
     coinBalance: wallet.coinBalance,
     inCall: false,
   });
+  return wallet;
+}
+
+/** Luma user email+password registration. */
+app.post('/api/users/register', (req, res) => {
+  const result = registerUser({
+    email: String(req.body?.email || ''),
+    password: String(req.body?.password || ''),
+    displayName: String(req.body?.displayName || ''),
+  });
+  if (!result.ok) {
+    res.status(result.status).json({ error: result.error });
+    return;
+  }
+  const { account } = result;
+  prepareUserAccount(account, true);
   persist();
   res.status(201).json(publicAuthUser(account));
 });
 
-/** Zuko user email+password login (no OTP) */
+/** Luma user email+password login. */
 app.post('/api/users/login', (req, res) => {
   const result = loginUser({
     email: String(req.body?.email || ''),
@@ -725,12 +790,42 @@ app.post('/api/users/login', (req, res) => {
     return;
   }
   const { account } = result;
-  ensureWallet(account.userId, {
-    role: 'user',
-    displayName: account.displayName,
-  });
+  prepareUserAccount(account, false);
   persist();
   res.json(publicAuthUser(account));
+});
+
+/** Google login/create-account via a server-verified Firebase ID token. */
+app.post('/api/users/google', async (req, res) => {
+  try {
+    const identity = await verifyGoogleFirebaseIdToken(String(req.body?.idToken || ''));
+    const result = loginGoogleUser(identity);
+    if (!result.ok) {
+      res.status(result.status).json({ error: result.error });
+      return;
+    }
+    prepareUserAccount(result.account, result.isNew);
+    persist();
+    res.status(result.isNew ? 201 : 200).json(publicAuthUser(result.account));
+  } catch (error) {
+    console.warn(
+      '[userAuth] Google sign-in rejected:',
+      error instanceof Error ? error.message : 'verification failed',
+    );
+    res.status(401).json({ error: 'Google sign-in could not be verified' });
+  }
+});
+
+/** Validate the stored device session before allowing the protected app to mount. */
+app.get('/api/users/session', (req, res) => {
+  const userId = String(req.headers['x-user-id'] || '').trim();
+  if (!requireUserMatch(req, res, userId)) return;
+  const account = getUserAccountById(userId);
+  if (!account) {
+    res.status(401).json({ error: 'Account session not found' });
+    return;
+  }
+  res.json(publicAuthUser(account, bearerToken(req.headers.authorization)));
 });
 
 /** Revoke only the current device session; other owned devices stay signed in. */
@@ -1276,6 +1371,7 @@ app.post('/api/calls/:id/accept', (req, res) => {
     return;
   }
   if (call.status === 'accepted') {
+    scheduleNextCallCharge(call);
     res.json({ call });
     return;
   }
@@ -1287,6 +1383,7 @@ app.post('/api/calls/:id/accept', (req, res) => {
   call.acceptedAt = Date.now();
   call.updatedAt = Date.now();
   calls.set(call.id, call);
+  scheduleNextCallCharge(call);
   pushToHost(call.hostId, 'call_accepted', call);
   broadcastWs({ type: 'call:updated', payload: call });
   res.json({ call });
@@ -1299,6 +1396,7 @@ app.post('/api/calls/:id/reject', (req, res) => {
     return;
   }
   call.status = 'rejected';
+  clearCallBillingTimer(call.id);
   call.endReason = 'rejected';
   call.updatedAt = Date.now();
   calls.set(call.id, call);
@@ -1325,9 +1423,176 @@ app.post('/api/calls/:id/end', (req, res) => {
   res.json({ call: ended });
 });
 
+type CallBillingResult =
+  | {
+      ok: true;
+      duplicate: boolean;
+      txn?: CoinTxn;
+      billedMinutes: number;
+      userWallet: WalletRow;
+      hostWallet: WalletRow;
+    }
+  | {
+      ok: false;
+      code: number;
+      error: string;
+      billedMinutes: number;
+      userWallet: WalletRow;
+    };
+
+function callBillingTxn(callId: string, minuteIndex: number): CoinTxn | undefined {
+  return (
+    getCoinTxnByKey(`call_minute:${callId}:${minuteIndex}`) ||
+    dumpCoinTxns().find(
+      (txn) =>
+        txn.status === 'completed' &&
+        txn.type === 'call_minute' &&
+        txn.callId === callId &&
+        Number(txn.meta?.billedMinute) === minuteIndex,
+    )
+  );
+}
+
+/** Single authoritative call charge shared by the timer and HTTP retry route. */
+function billAcceptedCall(call: CallRecord, minuteIndex: number): CallBillingResult {
+  const billed = Math.max(0, Math.floor(call.billedMinutes || 0));
+  const nextMinute = Math.max(1, Math.floor(minuteIndex));
+  const userWallet = ensureWallet(call.userId, {
+    role: 'user',
+    displayName: call.userName,
+  });
+
+  if (call.status !== 'accepted') {
+    return {
+      ok: false,
+      code: 409,
+      error: `Call is ${call.status}`,
+      billedMinutes: billed,
+      userWallet,
+    };
+  }
+
+  if (nextMinute <= billed) {
+    return {
+      ok: true,
+      duplicate: true,
+      txn: callBillingTxn(call.id, nextMinute),
+      billedMinutes: billed,
+      userWallet,
+      hostWallet: ensureWallet(call.hostId, { role: 'host' }),
+    };
+  }
+  if (nextMinute !== billed + 1) {
+    return {
+      ok: false,
+      code: 409,
+      error: `Expected minute ${billed + 1}, got ${nextMinute}`,
+      billedMinutes: billed,
+      userWallet,
+    };
+  }
+  if (userWallet.accountStatus === 'banned' || userWallet.accountStatus === 'suspended') {
+    return {
+      ok: false,
+      code: 403,
+      error: userWallet.accountStatus === 'banned' ? 'Account banned' : 'Account suspended',
+      billedMinutes: billed,
+      userWallet,
+    };
+  }
+
+  const amount = normalizeHostCallPrice(call.ratePerMinute);
+  if (userWallet.coinBalance < amount) {
+    return {
+      ok: false,
+      code: 402,
+      error: 'Coins exhausted',
+      billedMinutes: billed,
+      userWallet,
+    };
+  }
+
+  const result = transferUserToHost(coinDeps(), {
+    txnKey: `call_minute:${call.id}:${nextMinute}`,
+    type: 'call_minute',
+    userId: call.userId,
+    hostId: call.hostId,
+    gross: amount,
+    callId: call.id,
+    reason: `call_minute_${call.id}`,
+    meta: { billedMinute: nextMinute, ratePerMinute: amount },
+  });
+  if (!result.ok) {
+    return {
+      ok: false,
+      code: result.code,
+      error: result.txn.error || 'Billing failed',
+      billedMinutes: billed,
+      userWallet: ensureWallet(call.userId),
+    };
+  }
+
+  call.billedMinutes = nextMinute;
+  call.updatedAt = Date.now();
+  calls.set(call.id, call);
+  persist();
+
+  const hostWallet = ensureWallet(call.hostId, { role: 'host' });
+  recordHostEarning(call.hostId, result.txn.coinsCreditedHost, {
+    kind: 'call',
+    coinBalance: hostWallet.coinBalance,
+    incrementCalls: nextMinute === 1,
+    broadcast: broadcastWs,
+  });
+  broadcastWallet(call.userId);
+  broadcastWallet(call.hostId);
+  pushToHost(call.hostId, 'call_minute', {
+    callId: call.id,
+    amount: result.txn.coinsCreditedHost,
+    gross: result.txn.coinsDeducted,
+    platformCut: result.txn.coinsCreditedPlatform,
+    billedMinutes: nextMinute,
+    hostWallet: walletPublic(hostWallet),
+    txnId: result.txn.id,
+  });
+
+  return {
+    ok: true,
+    duplicate: false,
+    txn: result.txn,
+    billedMinutes: nextMinute,
+    userWallet: ensureWallet(call.userId),
+    hostWallet,
+  };
+}
+
+function scheduleNextCallCharge(call: CallRecord) {
+  clearCallBillingTimer(call.id);
+  if (call.status !== 'accepted' || !call.acceptedAt) return;
+  const scheduledMinute = Math.max(0, Math.floor(call.billedMinutes || 0)) + 1;
+  const dueAt = nextCallChargeAt(call.acceptedAt, scheduledMinute - 1);
+  const timer = setTimeout(() => {
+    callBillingTimers.delete(call.id);
+    const current = calls.get(call.id);
+    if (!current || current.status !== 'accepted') return;
+    if ((current.billedMinutes || 0) >= scheduledMinute) {
+      scheduleNextCallCharge(current);
+      return;
+    }
+    const billed = billAcceptedCall(current, scheduledMinute);
+    if (!billed.ok) {
+      console.warn(`[callBilling] ending ${current.id}: ${billed.error}`);
+      forceEndCall(current, 'exhausted');
+      return;
+    }
+    scheduleNextCallCharge(current);
+  }, Math.max(0, dueAt - Date.now()));
+  callBillingTimers.set(call.id, timer);
+}
+
 /**
  * Bill one call minute: deduct rate from user, credit host (net of platform cut).
- * Idempotent via txnKey = callId:minuteN (or client Idempotency-Key).
+ * Idempotent via the server-owned txnKey = callId:minuteN.
  */
 app.post('/api/calls/:id/minute', (req, res) => {
   const call = calls.get(String(req.params.id));
@@ -1347,146 +1612,37 @@ app.post('/api/calls/:id/minute', (req, res) => {
   if (!requireUserMatch(req, res, userId)) return;
   if (!assertUserAccountActive(userId, res)) return;
 
-  const amount = normalizeHostCallPrice(call.ratePerMinute);
   const expectedMinute = (call.billedMinutes || 0) + 1;
   const requestedMinute = Math.floor(Number(req.body?.minuteIndex) || 0);
-  const nextMinute =
-    requestedMinute > 0 ? requestedMinute : expectedMinute;
-
-  // Already billed this minute (retry after success) — return same result
-  if (nextMinute <= (call.billedMinutes || 0)) {
-    const userWallet = ensureWallet(userId);
-    const hostWallet = ensureWallet(call.hostId);
-    const priorKey = `call_minute:${call.id}:${nextMinute}`;
-    const prior = getCoinTxnByKey(priorKey);
-    res.json({
-      ok: true,
-      amount: prior?.coinsDeducted ?? amount,
-      hostCredited: prior?.coinsCreditedHost ?? 0,
-      platformCut: prior?.coinsCreditedPlatform ?? 0,
-      billedMinutes: call.billedMinutes,
-      duplicate: true,
-      txn: prior,
-      userWallet: walletPublic(userWallet),
-      hostWallet: walletPublic(hostWallet),
-    });
-    return;
-  }
-
-  // Only allow sequential minutes (no skip-ahead double-charge gaps)
-  if (nextMinute !== expectedMinute) {
-    res.status(409).json({
-      error: `Expected minute ${expectedMinute}, got ${nextMinute}`,
-      billedMinutes: call.billedMinutes,
-    });
-    return;
-  }
-
-  const txnKey =
-    String(req.headers['idempotency-key'] || req.body?.txnKey || '').trim() ||
-    `call_minute:${call.id}:${nextMinute}`;
-
-  const existing = getCoinTxnByKey(txnKey);
-  if (existing?.status === 'completed') {
-    const userWallet = ensureWallet(userId);
-    const hostWallet = ensureWallet(call.hostId);
-    if ((call.billedMinutes || 0) < nextMinute) {
-      call.billedMinutes = nextMinute;
-      calls.set(call.id, call);
-    }
-    res.json({
-      ok: true,
-      amount: existing.coinsDeducted,
-      hostCredited: existing.coinsCreditedHost,
-      platformCut: existing.coinsCreditedPlatform,
-      billedMinutes: call.billedMinutes,
-      duplicate: true,
-      txn: existing,
-      userWallet: walletPublic(userWallet),
-      hostWallet: walletPublic(hostWallet),
-    });
-    return;
-  }
-
-  const userWallet = ensureWallet(userId, {
-    role: 'user',
-    displayName: call.userName,
-  });
-  if (userWallet.coinBalance < amount) {
-    forceEndCall(call, 'exhausted');
-    res.status(402).json({
-      error: 'Coins exhausted',
-      wallet: walletPublic(userWallet),
-      userWallet: walletPublic(userWallet),
-      need: amount,
-      callEnded: true,
-    });
-    return;
-  }
-
-  const result = transferUserToHost(coinDeps(), {
-    txnKey,
-    type: 'call_minute',
-    userId,
-    hostId: call.hostId,
-    gross: amount,
-    callId: call.id,
-    reason: `call_minute_${call.id}`,
-    meta: { billedMinute: nextMinute, ratePerMinute: amount },
-  });
-
+  const nextMinute = requestedMinute > 0 ? requestedMinute : expectedMinute;
+  const result = billAcceptedCall(call, nextMinute);
   if (!result.ok) {
-    if (result.code === 402) {
-      forceEndCall(call, 'exhausted');
-      res.status(402).json({
-        error: 'Coins exhausted',
-        wallet: walletPublic(ensureWallet(userId)),
-        userWallet: walletPublic(ensureWallet(userId)),
-        need: amount,
-        callEnded: true,
-        txn: result.txn,
-      });
-      return;
-    }
-    res.status(result.code).json({ error: result.txn.error || 'Billing failed', txn: result.txn });
+    if (result.code === 402 || result.code === 403) forceEndCall(call, 'exhausted');
+    res.status(result.code).json({
+      error: result.error,
+      billedMinutes: result.billedMinutes,
+      need: normalizeHostCallPrice(call.ratePerMinute),
+      callEnded: result.code === 402 || result.code === 403,
+      userWallet: walletPublic(result.userWallet),
+      wallet: walletPublic(result.userWallet),
+    });
     return;
   }
 
-  call.billedMinutes = nextMinute;
-  call.updatedAt = Date.now();
-  calls.set(call.id, call);
-  persist();
-
-  const hostWallet = ensureWallet(call.hostId);
-  recordHostEarning(call.hostId, result.txn.coinsCreditedHost, {
-    kind: 'call',
-    coinBalance: hostWallet.coinBalance,
-    incrementCalls: call.billedMinutes === 1,
-    broadcast: broadcastWs,
-  });
-
-  broadcastWallet(userId);
-  broadcastWallet(call.hostId);
-  pushToHost(call.hostId, 'call_minute', {
-    callId: call.id,
-    amount: result.txn.coinsCreditedHost,
-    gross: result.txn.coinsDeducted,
-    platformCut: result.txn.coinsCreditedPlatform,
-    billedMinutes: call.billedMinutes,
-    hostWallet: walletPublic(hostWallet),
-    txnId: result.txn.id,
-  });
-
+  // A client retry may win before the server timer. Always reschedule from the
+  // accepted timestamp so the next charge remains exactly one minute later.
+  scheduleNextCallCharge(call);
   res.json({
     ok: true,
-    amount: result.txn.coinsDeducted,
-    hostCredited: result.txn.coinsCreditedHost,
-    platformCut: result.txn.coinsCreditedPlatform,
-    commissionRate: result.txn.commissionRate,
-    billedMinutes: call.billedMinutes,
+    amount: result.txn?.coinsDeducted ?? normalizeHostCallPrice(call.ratePerMinute),
+    hostCredited: result.txn?.coinsCreditedHost ?? 0,
+    platformCut: result.txn?.coinsCreditedPlatform ?? 0,
+    commissionRate: result.txn?.commissionRate ?? platformCommissionRate(),
+    billedMinutes: result.billedMinutes,
+    duplicate: result.duplicate,
     txn: result.txn,
-    userWallet: walletPublic(ensureWallet(userId)),
-    hostWallet: walletPublic(hostWallet),
+    userWallet: walletPublic(result.userWallet),
+    hostWallet: walletPublic(result.hostWallet),
   });
 });
 
@@ -1833,6 +1989,8 @@ app.post('/api/calls/:id/gift-requests/:reqId/respond', (req, res) => {
     giftName: gr.giftName,
     giftEmoji: gr.giftEmoji,
     coins: gr.coins,
+    hostCoinsEarned: xfer.txn.coinsCreditedHost,
+    platformCoins: xfer.txn.coinsCreditedPlatform,
     callId: call.id,
     roomId: null,
     createdAt: Date.now(),
@@ -1986,6 +2144,8 @@ app.post('/api/gifts/send', (req, res) => {
     giftName: giftEvent.giftName,
     giftEmoji: giftEvent.giftEmoji,
     coins: giftEvent.coins,
+    hostCoinsEarned: xfer.txn.coinsCreditedHost,
+    platformCoins: xfer.txn.coinsCreditedPlatform,
     roomId: giftEvent.roomId,
     callId: giftEvent.callId,
     createdAt: giftEvent.createdAt,
@@ -2235,6 +2395,7 @@ const installUserMap = new Map<string, string>();
 
 type WithdrawalRequest = {
   id: string;
+  kind?: 'host' | 'agency';
   hostId: string;
   hostName?: string;
   hostAvatar?: string;
@@ -2242,8 +2403,20 @@ type WithdrawalRequest = {
   gateway: 'easypaisa' | 'jazzcash' | 'bank';
   accountName: string;
   accountNumber: string;
-  status: 'pending' | 'processing' | 'paid' | 'failed' | 'admin_review';
+  status:
+    | 'pending'
+    | 'processing'
+    | 'paid'
+    | 'failed'
+    | 'admin_review'
+    | 'agency_pending'
+    | 'agency_processing'
+    | 'agency_paid'
+    | 'agency_rejected';
   createdAt: number;
+  agencyId?: string;
+  agencyName?: string;
+  collectedHostWithdrawalIds?: string[];
   /** Immutable audit snapshot taken immediately before/after the debit. */
   walletBalanceBefore?: number;
   walletBalanceAfter?: number;
@@ -2282,6 +2455,22 @@ const wallets = new Map<string, WalletRow>();
 const walletLedger = new Map<string, LedgerEntry[]>();
 const withdrawals: WithdrawalRequest[] = [];
 const reports: ReportRow[] = [];
+
+function withdrawalKind(row: WithdrawalRequest): 'host' | 'agency' {
+  return calculateWithdrawalKind(row);
+}
+
+function agencyCollectedCoins(agencyId: string): number {
+  return calculateAgencyCollectedCoins(withdrawals, agencyId);
+}
+
+function agencyReservedCoins(agencyId: string): number {
+  return calculateAgencyReservedCoins(withdrawals, agencyId);
+}
+
+function agencyAvailableCoins(agencyId: string): number {
+  return calculateAgencyAvailableCoins(withdrawals, agencyId);
+}
 
 const iapReceipts = new Set<string>();
 /** Survives wallet map wipe: never grant welcome twice for same userId */
@@ -2341,20 +2530,29 @@ function hostMonthStats(hostId: string, monthStartMs: number) {
       (c.endedAt || c.startedAt || 0) >= start &&
       (c.status === 'ended' || c.status === 'accepted' || (c.billedMinutes || 0) > 0),
   );
-  const monthGifts = giftHistory.filter(
-    (g) => g.toHostId === hostId && (g.createdAt || 0) >= start,
-  );
+  const earnings = hostEarningTxns(hostId, start);
+  const callTxns = earnings.filter((txn) => txn.type === 'call_minute');
+  const giftTxns = earnings.filter((txn) => txn.type === 'gift');
+  const liveEntryTxns = earnings.filter((txn) => txn.type === 'live_entry');
   const monthLive = liveSessionHistory.filter(
     (s) => s.hostId === hostId && (s.startedAt || 0) >= start,
   );
-  const callCoins = monthCalls.reduce((s, c) => s + (c.coinsSpent || 0), 0);
-  const giftCoins = monthGifts.reduce((s, g) => s + (g.coins || 0), 0);
+  const callCoins = callTxns.reduce((sum, txn) => sum + txn.coinsCreditedHost, 0);
+  const giftCoins = giftTxns.reduce((sum, txn) => sum + txn.coinsCreditedHost, 0);
+  const liveCoins = liveEntryTxns.reduce(
+    (sum, txn) => sum + txn.coinsCreditedHost,
+    0,
+  );
+  const callIds = new Set(monthCalls.map((call) => call.id));
+  for (const txn of callTxns) if (txn.callId) callIds.add(txn.callId);
   return {
     callCoins,
     giftCoins,
-    totalCoins: callCoins + giftCoins,
-    callsCount: monthCalls.length,
-    giftCount: monthGifts.length,
+    liveCoins,
+    totalCoins: callCoins + giftCoins + liveCoins,
+    callsCount: callIds.size,
+    callMinutes: callTxns.length,
+    giftCount: giftTxns.length,
     liveSeconds: monthLive.reduce((s, row) => s + Math.max(0, row.durationSec || 0), 0),
     liveSessions: monthLive.length,
     monthStartMs: start,
@@ -3004,6 +3202,12 @@ app.post('/api/wallet/sync', (req, res) => {
     row.role = req.body.role;
   }
   wallets.set(userId, row);
+  if (row.role === 'host') {
+    ensureHostRecord(userId, {
+      name: row.displayName,
+      coinBalance: row.coinBalance,
+    });
+  }
   persist();
   res.json({
     ok: true,
@@ -3025,34 +3229,16 @@ app.post('/api/wallet/credit', (req, res) => {
     isAdminCredential(req.headers['x-admin-key'] || req.query.key);
   const floored = Math.floor(amount);
   if (!adminOk) {
-    // User engagement must use /api/rewards/* — never forge via this path
-    if (ENGAGEMENT_CREDIT_BLOCK.test(reason)) {
-      res.status(403).json({
-        error:
-          'Engagement credits blocked. Use /api/rewards/daily, /spin, or /referral',
-      });
-      return;
-    }
-    if (floored > CLIENT_CREDIT_MAX) {
-      res.status(400).json({
-        error: `Client credit capped at ${CLIENT_CREDIT_MAX} (use admin for larger)`,
-      });
-      return;
-    }
-    if (!CLIENT_CREDIT_REASONS.test(reason)) {
-      res.status(403).json({
-        error: 'Client coin mint denied',
-        hint: 'Only host_earn:* allowed without admin; rewards use /api/rewards/*',
-      });
-      return;
-    }
+    res.status(403).json({
+      error: 'Coin credits require admin authorization',
+      hint: 'Calls, gifts, live entry, purchases and rewards use dedicated ledger routes',
+    });
+    return;
   }
 
   const txnKey =
     String(req.headers['idempotency-key'] || req.body?.txnKey || '').trim() ||
-    (adminOk
-      ? `admin_credit:${userId}:${floored}:${randomUUID()}`
-      : `host_earn:${userId}:${reason}:${floored}:${randomUUID()}`);
+    `admin_credit:${userId}:${floored}:${randomUUID()}`;
   const mintType = /iap|purchase|recharge|topup/i.test(reason)
     ? ('purchase' as const)
     : ('admin_credit' as const);
@@ -3722,8 +3908,13 @@ app.post('/api/host/withdrawals', async (req, res) => {
     return;
   }
 
+  ensureHostRecord(hostId, { coinBalance: debited.txn.userBalanceAfter });
+
+  const earningSummary = hostEarningsSummary(hostId);
+
   const request: WithdrawalRequest = {
     id: `wd_${randomUUID()}`,
+    kind: 'host',
     hostId,
     hostName:
       row.displayName ||
@@ -3738,7 +3929,11 @@ app.post('/api/host/withdrawals', async (req, res) => {
     gateway,
     accountName,
     accountNumber,
-    status: 'pending',
+    status: linkedAgencyId ? 'agency_pending' : 'pending',
+    agencyId: linkedAgencyId || undefined,
+    agencyName: linkedAgencyId
+      ? getAgency(linkedAgencyId)?.name
+      : undefined,
     createdAt: Date.now(),
     walletBalanceBefore: debited.txn.userBalanceBefore,
     walletBalanceAfter: debited.txn.userBalanceAfter,
@@ -3758,18 +3953,17 @@ app.post('/api/host/withdrawals', async (req, res) => {
     totalCallSecondsAtRequest: callHistory
       .filter((call) => call.hostId === hostId)
       .reduce((sum, call) => sum + Math.max(0, call.durationSec || 0), 0),
-    callCoinsAtRequest: callHistory
-      .filter((call) => call.hostId === hostId)
-      .reduce((sum, call) => sum + Math.max(0, call.coinsSpent || 0), 0),
-    giftCoinsAtRequest: giftHistory
-      .filter((gift) => gift.toHostId === hostId)
-      .reduce((sum, gift) => sum + Math.max(0, gift.coins || 0), 0),
-    lifetimeEarningsAtRequest: hostEarningsSummary(hostId).totalCoins,
+    callCoinsAtRequest: earningSummary.callCoins,
+    giftCoinsAtRequest: earningSummary.giftCoins,
+    lifetimeEarningsAtRequest: earningSummary.totalCoins,
   };
   withdrawals.unshift(request);
 
   try {
-    if (gateway === 'easypaisa') {
+    if (linkedAgencyId) {
+      request.status = 'agency_pending';
+      request.providerRef = `agency_queue_${linkedAgencyId}`;
+    } else if (gateway === 'easypaisa') {
       if (!process.env.EASYPAY_MERCHANT_ID || !process.env.EASYPAY_HASH_KEY) {
         request.status = 'admin_review';
         request.providerRef = `manual_ep_${Date.now()}`;
@@ -3795,13 +3989,16 @@ app.post('/api/host/withdrawals', async (req, res) => {
   } catch (e: unknown) {
     request.status = 'failed';
     request.error = e instanceof Error ? e.message : 'Payout failed';
-    mintCoins(coinDeps(), {
+    const refunded = mintCoins(coinDeps(), {
       txnKey: `withdrawal_refund:${request.id}`,
       type: 'withdrawal_refund',
       userId: hostId,
       amount: amountCoins,
       reason: `withdrawal_refund_${request.id}`,
     });
+    if (refunded.ok) {
+      ensureHostRecord(hostId, { coinBalance: refunded.txn.userBalanceAfter });
+    }
   }
 
   persist();
@@ -3810,6 +4007,12 @@ app.post('/api/host/withdrawals', async (req, res) => {
     type: 'withdrawal:created',
     payload: request,
   });
+  if (linkedAgencyId) {
+    broadcastWs({
+      type: 'agency:host-withdrawal',
+      payload: request,
+    });
+  }
 
   res.json({
     ok: request.status !== 'failed',
@@ -3871,6 +4074,16 @@ app.get('/api/admin/hosts/:hostId/performance', (req, res) => {
   const calls = callHistory.filter((row) => aliases.has(row.hostId));
   const gifts = giftHistory.filter((row) => aliases.has(row.toHostId));
   const lives = liveSessionHistory.filter((row) => aliases.has(row.hostId));
+  const earningTxns = [...aliases].flatMap((hostId) => hostEarningTxns(hostId));
+  const callEarnings = earningTxns
+    .filter((txn) => txn.type === 'call_minute')
+    .reduce((sum, txn) => sum + txn.coinsCreditedHost, 0);
+  const giftEarnings = earningTxns
+    .filter((txn) => txn.type === 'gift')
+    .reduce((sum, txn) => sum + txn.coinsCreditedHost, 0);
+  const liveEarnings = earningTxns
+    .filter((txn) => txn.type === 'live_entry')
+    .reduce((sum, txn) => sum + txn.coinsCreditedHost, 0);
   const totalCallSeconds = calls.reduce((sum, row) => sum + Math.max(0, row.durationSec || 0), 0);
   const lastActiveAt = Math.max(
     Number(managed?.updatedAt || 0),
@@ -3883,8 +4096,10 @@ app.get('/api/admin/hosts/:hostId/performance', (req, res) => {
       totalCalls: calls.length,
       totalCallSeconds,
       averageCallSeconds: calls.length ? Math.round(totalCallSeconds / calls.length) : 0,
-      totalCallCoins: calls.reduce((sum, row) => sum + Math.max(0, row.coinsSpent || 0), 0),
-      giftCoins: gifts.reduce((sum, row) => sum + Math.max(0, row.coins || 0), 0),
+      totalCallCoins: callEarnings,
+      giftCoins: giftEarnings,
+      liveEntryCoins: liveEarnings,
+      totalEarnings: callEarnings + giftEarnings + liveEarnings,
       liveSeconds: lives.reduce((sum, row) => sum + Math.max(0, row.durationSec || 0), 0),
       lastActiveAt,
     },
@@ -3894,6 +4109,7 @@ app.get('/api/admin/hosts/:hostId/performance', (req, res) => {
       status: row.status,
       durationSec: row.durationSec,
       coinsSpent: row.coinsSpent,
+      hostCoinsEarned: row.hostCoinsEarned,
       startedAt: row.startedAt,
       endedAt: row.endedAt,
     })),
@@ -3941,6 +4157,9 @@ app.get('/api/admin/active-sessions', (req, res) => {
     .filter((c) => !allowedHostIds || allowedHostIds.has(c.hostId))
     .map((c) => {
       const startedAt = c.acceptedAt || c.createdAt;
+      const coinsEarned = hostEarningTxns(c.hostId)
+        .filter((txn) => txn.type === 'call_minute' && txn.callId === c.id)
+        .reduce((sum, txn) => sum + txn.coinsCreditedHost, 0);
       return {
         id: c.id,
         kind: 'call' as const,
@@ -3955,7 +4174,7 @@ app.get('/api/admin/active-sessions', (req, res) => {
         billedMinutes: c.billedMinutes || 0,
         startedAt,
         seconds: Math.max(0, Math.floor((nowTs - startedAt) / 1000)),
-        coinsEarned: (c.billedMinutes || 0) * (c.ratePerMinute || 0),
+        coinsEarned,
       };
     });
   const rooms = [...liveRooms.values()]
@@ -4148,16 +4367,135 @@ app.post('/api/admin/wallets/:userId/credit', (req, res) => {
   });
 });
 
+/** Agency sends its collected, already-paid host coins to the platform admin. */
+app.post('/api/agency/withdrawals', (req, res) => {
+  if (!requireStaff(req, res)) return;
+  const auth = getAgencyAuth(req);
+  if (auth?.kind !== 'agency' || !auth.agency) {
+    res.status(403).json({ error: 'Agency account required' });
+    return;
+  }
+  const agency = auth.agency;
+  if (!agency.permissions.canRequestPayout) {
+    res.status(403).json({ error: 'Agency payout permission is disabled' });
+    return;
+  }
+  const amountCoins = Math.floor(Number(req.body?.amountCoins) || 0);
+  const gateway = String(req.body?.gateway || 'bank') as WithdrawalRequest['gateway'];
+  const accountName = String(req.body?.accountName || agency.ownerName || '').trim();
+  const accountNumber = String(req.body?.accountNumber || '').trim();
+  if (
+    amountCoins < agency.minWithdrawCoins ||
+    !['easypaisa', 'jazzcash', 'bank'].includes(gateway) ||
+    !accountName ||
+    accountNumber.length < 6
+  ) {
+    res.status(400).json({
+      error: `Valid payout details and at least ${agency.minWithdrawCoins} coins required`,
+    });
+    return;
+  }
+  const availableBefore = agencyAvailableCoins(agency.id);
+  if (amountCoins > availableBefore) {
+    res.status(409).json({
+      error: 'Agency collected balance is too low',
+      availableCoins: availableBefore,
+    });
+    return;
+  }
+  const collectedRows = withdrawals.filter(
+    (row) =>
+      withdrawalKind(row) === 'host' &&
+      row.agencyId === agency.id &&
+      row.status === 'agency_paid',
+  );
+  const request: WithdrawalRequest = {
+    id: `awd_${randomUUID()}`,
+    kind: 'agency',
+    hostId: agency.id,
+    hostName: agency.name,
+    agencyId: agency.id,
+    agencyName: agency.name,
+    amountCoins,
+    gateway,
+    accountName,
+    accountNumber,
+    status: 'admin_review',
+    createdAt: Date.now(),
+    walletBalanceBefore: availableBefore,
+    walletBalanceAfter: availableBefore - amountCoins,
+    collectedHostWithdrawalIds: collectedRows.map((row) => row.id),
+    providerRef: `agency_to_admin_${agency.id}`,
+  };
+  withdrawals.unshift(request);
+  persist();
+  broadcastWs({ type: 'agency:withdrawal-created', payload: request });
+  res.status(201).json({
+    ok: true,
+    withdrawal: request,
+    availableCoins: agencyAvailableCoins(agency.id),
+  });
+});
+
+app.get('/api/agency/withdrawals', (req, res) => {
+  if (!requireStaff(req, res)) return;
+  const auth = getAgencyAuth(req);
+  const agencyId =
+    auth?.kind === 'agency'
+      ? auth.agency?.id
+      : String(req.query.agencyId || '').trim();
+  if (!agencyId) {
+    res.status(400).json({ error: 'agencyId required' });
+    return;
+  }
+  if (auth?.kind === 'agency' && auth.agency?.id !== agencyId) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  res.json({
+    availableCoins: agencyAvailableCoins(agencyId),
+    collectedCoins: agencyCollectedCoins(agencyId),
+    reservedCoins: agencyReservedCoins(agencyId),
+    withdrawals: withdrawals
+      .filter(
+        (row) =>
+          withdrawalKind(row) === 'agency' && row.agencyId === agencyId,
+      )
+      .slice(0, 100),
+  });
+});
+
 app.get('/api/admin/withdrawals', (req, res) => {
   if (!requireStaff(req, res)) return;
   const auth = getAgencyAuth(req);
   let rows = withdrawals.slice(0, 200);
   if (auth?.kind === 'agency' && auth.agency) {
-    const hostSet = new Set(auth.agency.hostIds);
-    rows = rows.filter((w) => hostSet.has(w.hostId));
+    rows = rows.filter(
+      (row) =>
+        withdrawalKind(row) === 'host' &&
+        row.agencyId === auth.agency?.id,
+    );
+  } else {
+    // Platform admin manages individual hosts and consolidated agency payouts.
+    // Agency-linked host requests stay private to that agency's queue.
+    rows = rows.filter(
+      (row) =>
+        withdrawalKind(row) === 'agency' ||
+        (withdrawalKind(row) === 'host' && !row.agencyId),
+    );
   }
   res.json({
     withdrawals: rows.slice(0, 100).map((withdrawal) => {
+      if (withdrawalKind(withdrawal) === 'agency') {
+        return {
+          ...withdrawal,
+          currentWalletBalance: agencyAvailableCoins(
+            String(withdrawal.agencyId || withdrawal.hostId),
+          ),
+          isOnline: false,
+          isLive: false,
+        };
+      }
       const wallet = ensureWallet(withdrawal.hostId, { role: 'host' });
       const calls = callHistory.filter((call) => call.hostId === withdrawal.hostId);
       const presence = getPresence(withdrawal.hostId);
@@ -4182,11 +4520,11 @@ app.get('/api/admin/withdrawals', (req, res) => {
 });
 
 app.post('/api/admin/withdrawals/:id/status', (req, res) => {
-  if (!requireAdmin(req, res)) return;
+  if (!requireStaff(req, res)) return;
+  const auth = getAgencyAuth(req);
   const id = String(req.params.id || '');
-  const status = String(req.body?.status || '') as WithdrawalRequest['status'];
-  const allowed = ['pending', 'processing', 'paid', 'failed', 'admin_review'];
-  if (!allowed.includes(status)) {
+  const requestedStatus = String(req.body?.status || '');
+  if (!['pending', 'processing', 'paid', 'failed', 'admin_review'].includes(requestedStatus)) {
     res.status(400).json({ error: 'Invalid status' });
     return;
   }
@@ -4195,9 +4533,59 @@ app.post('/api/admin/withdrawals/:id/status', (req, res) => {
     res.status(404).json({ error: 'Withdrawal not found' });
     return;
   }
+  if (
+    (row.status === 'paid' || row.status === 'agency_paid') &&
+    requestedStatus !== 'paid'
+  ) {
+    res.status(409).json({ error: 'A paid withdrawal is final' });
+    return;
+  }
+  if (
+    (row.status === 'failed' || row.status === 'agency_rejected') &&
+    requestedStatus !== 'failed'
+  ) {
+    res.status(409).json({ error: 'A rejected withdrawal is final' });
+    return;
+  }
+  let status = requestedStatus as WithdrawalRequest['status'];
+  if (auth?.kind === 'agency' && auth.agency) {
+    if (
+      withdrawalKind(row) !== 'host' ||
+      row.agencyId !== auth.agency.id
+    ) {
+      res.status(403).json({ error: 'This host request is outside your agency' });
+      return;
+    }
+    if (!auth.agency.permissions.canRequestPayout) {
+      res.status(403).json({ error: 'Payout management is disabled' });
+      return;
+    }
+    if (!['agency_pending', 'agency_processing'].includes(row.status)) {
+      res.status(409).json({ error: `Request is already ${row.status}` });
+      return;
+    }
+    status =
+      requestedStatus === 'paid'
+        ? 'agency_paid'
+        : requestedStatus === 'failed'
+          ? 'agency_rejected'
+          : 'agency_processing';
+  } else if (row.agencyId && withdrawalKind(row) === 'host') {
+    res.status(403).json({
+      error: 'Agency-linked host withdrawals must be managed by their agency',
+    });
+    return;
+  }
   const prev = row.status;
   row.status = status;
-  if (status === 'failed' && prev !== 'failed' && prev !== 'paid') {
+  const shouldRefundHost =
+    withdrawalKind(row) === 'host' &&
+    (status === 'failed' || status === 'agency_rejected') &&
+    prev !== 'failed' &&
+    prev !== 'agency_rejected' &&
+    prev !== 'paid' &&
+    prev !== 'agency_paid';
+  if (shouldRefundHost) {
     const refunded = mintCoins(coinDeps(), {
       txnKey: `withdrawal_refund:${row.id}`,
       type: 'withdrawal_refund',
@@ -4213,7 +4601,27 @@ app.post('/api/admin/withdrawals/:id/status', (req, res) => {
       });
       return;
     }
+    ensureHostRecord(row.hostId, {
+      coinBalance: refunded.txn.userBalanceAfter,
+    });
     broadcastWallet(row.hostId);
+  }
+  if (withdrawalKind(row) === 'host') {
+    notifyHost(row.hostId, {
+      type: 'withdrawal_update',
+      title:
+        status === 'agency_paid' || status === 'paid'
+          ? 'Withdrawal approved'
+          : status === 'agency_rejected' || status === 'failed'
+            ? 'Withdrawal rejected'
+            : 'Withdrawal processing',
+      body:
+        status === 'agency_paid'
+          ? `${row.agencyName || 'Your agency'} approved ${row.amountCoins} coins.`
+          : status === 'agency_rejected'
+            ? `${row.agencyName || 'Your agency'} rejected the request; coins were returned.`
+            : `${row.amountCoins} coin request is ${status}.`,
+    });
   }
   persist();
   broadcastWs({ type: 'withdrawal:updated', payload: row });

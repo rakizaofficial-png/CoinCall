@@ -29,10 +29,10 @@ export async function syncHostWalletBalance(input: {
     : null;
 
   if (isFirebaseReady()) {
-    const patch: Record<string, unknown> = {
-      coinBalance: input.coinBalance,
-      walletUpdatedAt: Date.now(),
-    };
+    const patch: Record<string, unknown> = { walletUpdatedAt: Date.now() };
+    if (typeof data?.wallet?.coinBalance === 'number') {
+      patch.coinBalance = data.wallet.coinBalance;
+    }
     if (data?.wallet?.appId) patch.appId = data.wallet.appId;
     await update(ref(getFirebaseDb(), `hosts/${input.hostId}`), patch).catch(
       () => undefined,
@@ -40,48 +40,6 @@ export async function syncHostWalletBalance(input: {
   }
 
   return data?.wallet ?? null;
-}
-
-export async function creditHostEarnings(input: {
-  hostId: string;
-  amount: number;
-  reason: string;
-  displayName?: string;
-}) {
-  if (input.amount <= 0) return null;
-  const base = env.apiBaseUrl.replace(/\/$/, '');
-  const res = await fetch(`${base}/wallet/credit`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-User-Id': input.hostId,
-    },
-    body: JSON.stringify({
-      userId: input.hostId,
-      amount: input.amount,
-      reason: input.reason.startsWith('host_earn')
-        ? input.reason
-        : `host_earn:${input.reason}`,
-      displayName: input.displayName,
-      role: 'host',
-    }),
-  });
-  const data = (await res.json().catch(() => ({}))) as {
-    wallet?: { coinBalance: number };
-    error?: string;
-  };
-  if (!res.ok) {
-    throw new Error(data.error || 'Could not credit wallet');
-  }
-
-  if (isFirebaseReady() && typeof data.wallet?.coinBalance === 'number') {
-    await update(ref(getFirebaseDb(), `hosts/${input.hostId}`), {
-      coinBalance: data.wallet.coinBalance,
-      walletUpdatedAt: Date.now(),
-    }).catch(() => undefined);
-  }
-
-  return data.wallet ?? null;
 }
 
 export async function persistPayoutMethod(input: {

@@ -1,11 +1,8 @@
 import type { Metadata } from "next";
 import { Syne, Manrope } from "next/font/google";
 import { AppProvider } from "@/lib/store";
-import { BottomNav } from "@/components/BottomNav";
-import { ToastHost } from "@/components/ToastHost";
-import { DiamondEntranceBlast } from "@/components/DiamondEntranceBlast";
-import { WelcomePushEngine } from "@/components/welcome/WelcomePushEngine";
 import { AuthGuard } from "@/components/auth/AuthGuard";
+import { AppShell } from "@/components/auth/AppShell";
 import { GiftAnimationQueueProvider } from "@/components/gifts/GiftAnimationQueue";
 import "./globals.css";
 
@@ -38,13 +35,7 @@ export default function RootLayout({
         <AppProvider>
           <GiftAnimationQueueProvider>
             <AuthGuard>
-              <div className="phone-shell safe-bottom relative overflow-hidden">
-                <DiamondEntranceBlast />
-                {children}
-                <BottomNav />
-                <ToastHost />
-                <WelcomePushEngine />
-              </div>
+              <AppShell>{children}</AppShell>
             </AuthGuard>
           </GiftAnimationQueueProvider>
         </AppProvider>

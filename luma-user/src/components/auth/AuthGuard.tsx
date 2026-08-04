@@ -1,18 +1,22 @@
 "use client";
 
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { AUTH_CHANGED_EVENT, getAuthUser } from "@/lib/auth";
+import { AUTH_CHANGED_EVENT, getAuthUser, validateStoredSession } from "@/lib/auth";
 
 const PUBLIC_PATHS = ["/login", "/register"];
 
 function isPublicPath(pathname: string) {
-  return PUBLIC_PATHS.some((path) => pathname.startsWith(path));
+  return PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
 }
 
 function authSnapshot() {
   const user = getAuthUser();
-  return user ? `${user.userId}:${user.token}` : "";
+  return user ? userSnapshot(user.userId, user.token) : "";
+}
+
+function userSnapshot(userId: string, token: string) {
+  return `${userId}:${token}`;
 }
 
 function subscribeAuth(onChange: () => void) {
@@ -29,20 +33,33 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const authState = useSyncExternalStore(subscribeAuth, authSnapshot, () => "");
   const publicPath = isPublicPath(pathname);
-  const authenticated = Boolean(authState);
+  const [validatedAuthState, setValidatedAuthState] = useState<string | null>(null);
+  const valid = Boolean(authState) && validatedAuthState === authState;
+  const checking = Boolean(authState) && !valid;
 
   useEffect(() => {
-    if (publicPath && authenticated) {
-      router.replace("/");
-    } else if (!publicPath && !authenticated) {
-      router.replace("/login");
+    let active = true;
+    if (!authState) {
+      if (!publicPath) router.replace("/login");
+      return () => { active = false; };
     }
-  }, [authenticated, publicPath, router]);
 
-  if (!publicPath && !authenticated) {
+    void validateStoredSession().then((user) => {
+      if (!active) return;
+      if (!user) {
+        if (!publicPath) router.replace("/login");
+        return;
+      }
+      setValidatedAuthState(userSnapshot(user.userId, user.token));
+      if (publicPath) router.replace("/");
+    });
+    return () => { active = false; };
+  }, [authState, publicPath, router]);
+
+  if (checking || (valid && publicPath) || (!authState && !publicPath)) {
     return (
       <div className="flex min-h-dvh items-center justify-center">
-        <span className="text-sm text-muted">Loading…</span>
+        <span className="text-sm text-muted">Checking account…</span>
       </div>
     );
   }

@@ -460,7 +460,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               ...u,
               hostStatus: 'approved',
               isVerified: true,
-              coinBalance: Math.max(u.coinBalance, 200),
             }
           : u,
       );
@@ -470,7 +469,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       ...user,
       hostStatus: 'approved',
       isVerified: true,
-      coinBalance: Math.max(user.coinBalance, 200),
       isOnline: false,
     });
   }, [setAuthUser, user, usingFirebase]);

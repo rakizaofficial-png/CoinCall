@@ -39,20 +39,14 @@ type SummaryCard = {
 export function ProfileScreen({ navigation }: { navigation: any }) {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
-  const { user, hostOnline, hostLifetime, hostEarnings, myRank, callsToday } =
-    useApp();
-  const { myLiveRoom, todayLiveGiftCoins } = useLiveStudio();
+  const { user, hostOnline, hostLifetime, myRank } = useApp();
+  const { myLiveRoom } = useLiveStudio();
   const { signOut, user: authUser } = useAuth();
 
-  const wallet = Math.max(user.coinBalance, hostLifetime.walletBalance || 0);
-  const earned =
-    hostLifetime.coinsEarned ||
-    hostEarnings.call +
-      Math.max(hostEarnings.gift, todayLiveGiftCoins) +
-      hostEarnings.task +
-      hostEarnings.invite;
+  const wallet = user.coinBalance;
+  const earned = hostLifetime.coinsEarned;
   const rating = Number((user as { rating?: number }).rating || 4.9).toFixed(1);
-  const calls = Math.max(hostLifetime.totalCalls || 0, callsToday || 0);
+  const calls = hostLifetime.totalCalls;
   const liveStatus = myLiveRoom?.isLive
     ? 'Live'
     : hostOnline

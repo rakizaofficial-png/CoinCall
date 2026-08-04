@@ -97,6 +97,7 @@ type AppContextValue = {
   hostEarnings: {
     call: number;
     gift: number;
+    live: number;
     task: number;
     invite: number;
     managed: number;
@@ -190,36 +191,6 @@ const defaultUser: User = {
   hostId: undefined,
   country: undefined,
 };
-
-function addEarn(
-  setUser: React.Dispatch<React.SetStateAction<User>>,
-  setHostEarnings: React.Dispatch<
-    React.SetStateAction<{
-      call: number;
-      gift: number;
-      task: number;
-      invite: number;
-      managed: number;
-    }>
-  >,
-  setTransactions: React.Dispatch<React.SetStateAction<Transaction[]>>,
-  amount: number,
-  bucket: 'call' | 'gift' | 'task' | 'invite' | 'managed',
-  label: string,
-) {
-  setUser((u) => ({ ...u, coinBalance: u.coinBalance + amount }));
-  setHostEarnings((e) => ({ ...e, [bucket]: e[bucket] + amount }));
-  setTransactions((txs) => [
-    {
-      id: `tx_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-      type: 'earn',
-      amount,
-      label,
-      timestamp: Date.now(),
-    },
-    ...txs,
-  ]);
-}
 
 export function AppProvider({
   children,
@@ -338,6 +309,7 @@ export function AppProvider({
   const [hostEarnings, setHostEarnings] = useState({
     call: 0,
     gift: 0,
+    live: 0,
     task: 0,
     invite: 0,
     managed: 0,
@@ -697,7 +669,7 @@ export function AppProvider({
       const dayStart = localDayStartMs();
       if (hydratedDayRef.current && hydratedDayRef.current !== dayStart) {
         // New local day — clear in-memory day counters before hydrate
-        setHostEarnings((e) => ({ ...e, call: 0, gift: 0 }));
+        setHostEarnings((e) => ({ ...e, call: 0, gift: 0, live: 0 }));
         setCallsToday(0);
         setMyTodayMinutes(0);
         setTodayLiveSeconds(0);
@@ -709,6 +681,7 @@ export function AppProvider({
 
       let callCoins = today.callCoins ?? 0;
       let giftCoins = today.giftCoins ?? 0;
+      let liveCoins = today.liveEntryCoins ?? 0;
       let callsCount = today.callsCount ?? 0;
       let callMinutes = today.callMinutes ?? 0;
       let liveSeconds = today.liveSeconds ?? 0;
@@ -727,8 +700,14 @@ export function AppProvider({
         const todayGifts = (data.gifts || []).filter(
           (g) => (g.createdAt || 0) >= dayStart,
         );
-        callCoins = todayCalls.reduce((s, c) => s + (c.coinsSpent || 0), 0);
-        giftCoins = todayGifts.reduce((s, g) => s + (g.coins || 0), 0);
+        callCoins = todayCalls.reduce(
+          (s, c) => s + (c.hostCoinsEarned ?? c.coinsSpent ?? 0),
+          0,
+        );
+        giftCoins = todayGifts.reduce(
+          (s, g) => s + (g.hostCoinsEarned ?? g.coins ?? 0),
+          0,
+        );
         callsCount = todayCalls.length;
         callMinutes = todayCalls.reduce((s, c) => {
           const billed = Math.max(0, Math.floor(c.billedMinutes || 0));
@@ -739,11 +718,12 @@ export function AppProvider({
 
       setHostEarnings((e) => ({
         ...e,
-        call: Math.max(e.call, callCoins),
-        gift: Math.max(e.gift, giftCoins),
+        call: callCoins,
+        gift: giftCoins,
+        live: liveCoins,
       }));
-      setCallsToday((n) => Math.max(n, callsCount));
-      setMyTodayMinutes((m) => Math.max(m, callMinutes));
+      setCallsToday(callsCount);
+      setMyTodayMinutes(callMinutes);
       // Store completed live seconds only; LiveStudio adds the active session timer
       const completed =
         today.liveSecondsCompleted ??
@@ -757,7 +737,7 @@ export function AppProvider({
                 ),
             )
           : liveSeconds);
-      setTodayLiveSeconds((s) => Math.max(s, completed));
+      setTodayLiveSeconds(completed);
       const summary = data.summary;
       const monthCoins = data.month?.totalCoins ?? 0;
       setHostLifetime({
@@ -1307,15 +1287,7 @@ export function AppProvider({
             notify('Hi', 'No online users to greet right now.');
             break;
           }
-          addEarn(
-            setUser,
-            setHostEarnings,
-            setTransactions,
-            5,
-            'managed',
-            `Hi sent to ${online[0].name}`,
-          );
-          notify('Hi sent', `Greeting sent to ${online[0].name}. +5 coins`);
+          notify('Hi sent', `Greeting sent to ${online[0].name}.`);
           break;
         }
         case 'live':
@@ -1331,9 +1303,8 @@ export function AppProvider({
             notify('Task', 'Daily task already completed today.');
             break;
           }
-          addEarn(setUser, setHostEarnings, setTransactions, 40, 'task', 'Daily task completed');
           setPoints((p) => p + 10);
-          notify('Task complete', '+40 coins and +10 points earned.');
+          notify('Task complete', '+10 points earned.');
           break;
         case 'beauty':
           setBeautyOn((v) => {
@@ -1345,8 +1316,7 @@ export function AppProvider({
           notify('Points', `You have ${points} points. Complete tasks to earn more.`);
           break;
         case 'gift':
-          addEarn(setUser, setHostEarnings, setTransactions, 25, 'gift', 'Gift message bonus');
-          notify('Gift Message', 'Template sent. +25 gift coins.');
+          notify('Gift Message', 'Gift message template sent.');
           break;
         case 'profile':
           setUser((u) => ({ ...u, level: Math.min(u.level + 1, 20) }));
@@ -1363,8 +1333,7 @@ export function AppProvider({
           void import('../services/phoneAuthService').then(({ copyInviteCode }) =>
             copyInviteCode(user.hostId || 'HOST2026'),
           );
-          addEarn(setUser, setHostEarnings, setTransactions, 100, 'invite', 'Invite reward claimed');
-          notify('Invite', `Code ${user.hostId || 'HOST2026'} copied. +100 invite coins (one-time).`);
+          notify('Invite', `Code ${user.hostId || 'HOST2026'} copied.`);
           break;
         case 'props':
           setUser((u) => ({ ...u, gems: Number((u.gems + 1).toFixed(2)) }));
@@ -1443,10 +1412,10 @@ export function AppProvider({
     const meCoins =
       hostEarnings.call +
       hostEarnings.gift +
+      hostEarnings.live +
       hostEarnings.task +
       hostEarnings.invite +
-      hostEarnings.managed +
-      320;
+      hostEarnings.managed;
     const me: CompetitionEntry = {
       id: user.id,
       name: user.name,
@@ -1488,6 +1457,7 @@ export function AppProvider({
     call,
     hostEarnings.call,
     hostEarnings.gift,
+    hostEarnings.live,
     hostEarnings.invite,
     hostEarnings.managed,
     hostEarnings.task,

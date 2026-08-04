@@ -87,14 +87,24 @@ data class WalletResponse(val ok: Boolean = true, val wallet: WalletDto? = null)
 data class EarningsSummary(
     val callCoins: Int = 0,
     val giftCoins: Int = 0,
+    val liveCoins: Int = 0,
     val totalCoins: Int = 0,
     val totalCalls: Int = 0,
     val totalDurationSec: Int = 0,
     val totalGifts: Int = 0,
+    val walletBalance: Int = 0,
 )
 
 @JsonClass(generateAdapter = true)
-data class EarningsBucket(val coins: Int = 0, val calls: Int = 0, val gifts: Int = 0, val minutes: Int = 0)
+data class EarningsBucket(
+    val totalCoins: Int = 0,
+    val callCoins: Int = 0,
+    val giftCoins: Int = 0,
+    val liveCoins: Int = 0,
+    val callsCount: Int = 0,
+    val giftCount: Int = 0,
+    val callMinutes: Int = 0,
+)
 
 @JsonClass(generateAdapter = true)
 data class EarningsResponse(
@@ -115,6 +125,8 @@ data class CallHistoryItemDto(
     val ratePerMinute: Int? = null,
     val billedMinutes: Int? = null,
     val coinsSpent: Int? = null,
+    val hostCoinsEarned: Int? = null,
+    val platformCoins: Int? = null,
     val status: String? = null,
     val startedAt: Long? = null,
     val endedAt: Long? = null,

@@ -1,5 +1,6 @@
 import { adminKey, apiBaseUrl } from './firebase';
 import type { AgencyPerms } from './permissions';
+import type { WithdrawalRow } from './api';
 
 export type AgencyStatus = 'pending' | 'active' | 'suspended';
 
@@ -64,31 +65,37 @@ function adminKeyHeader() {
 }
 
 async function get<T>(path: string): Promise<T> {
+  const credential = adminKeyHeader();
   const res = await fetch(
-    `${apiBaseUrl}${path}${path.includes('?') ? '&' : '?'}key=${encodeURIComponent(adminKeyHeader())}`,
-    { headers: { 'x-admin-key': adminKeyHeader() }, cache: 'no-store' },
+    `${apiBaseUrl}${path}`,
+    {
+      headers: { Authorization: `Bearer ${credential}` },
+      cache: 'no-store',
+    },
   );
   if (!res.ok) throw new Error(await res.text());
   return res.json() as Promise<T>;
 }
 
 async function post<T>(path: string, body: Record<string, unknown>): Promise<T> {
+  const credential = adminKeyHeader();
   const res = await fetch(`${apiBaseUrl}${path}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-admin-key': adminKeyHeader(),
+      Authorization: `Bearer ${credential}`,
     },
-    body: JSON.stringify({ ...body, key: adminKeyHeader() }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json() as Promise<T>;
 }
 
 async function del<T>(path: string): Promise<T> {
+  const credential = adminKeyHeader();
   const res = await fetch(`${apiBaseUrl}${path}`, {
     method: 'DELETE',
-    headers: { 'x-admin-key': adminKeyHeader() },
+    headers: { Authorization: `Bearer ${credential}` },
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json() as Promise<T>;
@@ -238,4 +245,26 @@ export async function sendAgencyHostMessage(input: {
     '/admin/agency-host-message',
     input,
   );
+}
+
+export async function fetchAgencyWithdrawals() {
+  return get<{
+    availableCoins: number;
+    collectedCoins: number;
+    reservedCoins: number;
+    withdrawals: WithdrawalRow[];
+  }>('/agency/withdrawals');
+}
+
+export async function createAgencyWithdrawal(input: {
+  amountCoins: number;
+  gateway: 'easypaisa' | 'jazzcash' | 'bank';
+  accountName: string;
+  accountNumber: string;
+}) {
+  return post<{
+    ok: boolean;
+    withdrawal: WithdrawalRow;
+    availableCoins: number;
+  }>('/agency/withdrawals', input);
 }

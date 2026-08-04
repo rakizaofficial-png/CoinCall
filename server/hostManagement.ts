@@ -325,6 +325,7 @@ export function listHosts(): HostManagedRecord[] {
 
   const reconciled = rows.map((host) => {
     const aliases = new Set([host.id, host.hostId].filter(Boolean));
+    let hasLedgerEarnings = false;
     const totals = {
       total: 0,
       month: 0,
@@ -337,6 +338,7 @@ export function listHosts(): HostManagedRecord[] {
     for (const alias of aliases) {
       const item = ledger.get(alias);
       if (!item) continue;
+      hasLedgerEarnings = true;
       totals.total += item.total;
       totals.month += item.month;
       totals.call += item.call;
@@ -347,25 +349,22 @@ export function listHosts(): HostManagedRecord[] {
         totals.latestBalance = item.latestBalance;
       }
     }
-    const revenueGenerated = Math.max(
-      host.revenueGenerated || 0,
-      totals.total,
-    );
+    const revenueGenerated = hasLedgerEarnings
+      ? totals.total
+      : host.revenueGenerated || 0;
     return {
       ...host,
       revenueGenerated,
-      revenueMonth: Math.max(host.revenueMonth || 0, totals.month),
-      callEarnings: Math.max(host.callEarnings || 0, totals.call),
-      giftEarnings: Math.max(host.giftEarnings || 0, totals.gift),
-      liveEarnings: Math.max(host.liveEarnings || 0, totals.live),
-      pendingEarnings: Math.max(
-        host.pendingEarnings || 0,
-        revenueGenerated - (host.paidEarnings || 0),
-      ),
-      coinBalance:
-        totals.latestBalance == null
-          ? host.coinBalance
-          : Math.max(host.coinBalance || 0, totals.latestBalance),
+      revenueMonth: hasLedgerEarnings ? totals.month : host.revenueMonth || 0,
+      callEarnings: hasLedgerEarnings ? totals.call : host.callEarnings || 0,
+      giftEarnings: hasLedgerEarnings ? totals.gift : host.giftEarnings || 0,
+      liveEarnings: hasLedgerEarnings ? totals.live : host.liveEarnings || 0,
+      pendingEarnings: hasLedgerEarnings
+        ? Math.max(0, revenueGenerated - (host.paidEarnings || 0))
+        : host.pendingEarnings || 0,
+      // Balance is synced after every credit/debit/refund. A transfer's
+      // historic hostBalanceAfter cannot represent later withdrawals.
+      coinBalance: host.coinBalance || 0,
     };
   });
 

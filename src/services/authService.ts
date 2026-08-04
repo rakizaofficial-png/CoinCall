@@ -270,7 +270,6 @@ export async function approveHostInFirebase(uid: string) {
   await update(ref(getFirebaseDb(), `hosts/${uid}`), {
     hostStatus: 'approved',
     isVerified: true,
-    coinBalance: 200,
     approvedAt: Date.now(),
   });
 }

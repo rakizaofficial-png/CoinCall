@@ -39,6 +39,8 @@ services:
         sync: false
       - key: ALLOW_IAP_STUB
         value: "0"
+      - key: FIREBASE_PROJECT_ID
+        value: lovecall-2291e
 
   # Host app (Expo web export) — hosts Go Online & accept Luma calls
   # EXPO_PUBLIC_* must be set in the dashboard (baked at build). Code also
@@ -130,3 +132,15 @@ services:
         value: https://coincall-api.onrender.com/api
       - key: NEXT_PUBLIC_AGORA_APP_ID
         sync: false
+      - key: NEXT_PUBLIC_FIREBASE_API_KEY
+        value: AIzaSyBzFRXeuDvjq6RG5VR4oky0Ra93AvVFZ50
+      - key: NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+        value: lovecall-2291e.firebaseapp.com
+      - key: NEXT_PUBLIC_FIREBASE_PROJECT_ID
+        value: lovecall-2291e
+      - key: NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
+        value: lovecall-2291e.firebasestorage.app
+      - key: NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
+        value: "469302066716"
+      - key: NEXT_PUBLIC_FIREBASE_APP_ID
+        value: 1:469302066716:web:79d8e7bce979bcf17529d9

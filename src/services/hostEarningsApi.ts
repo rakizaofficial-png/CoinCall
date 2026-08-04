@@ -10,6 +10,8 @@ export type HostCallHistoryRow = {
   ratePerMinute: number;
   billedMinutes: number;
   coinsSpent: number;
+  hostCoinsEarned?: number;
+  platformCoins?: number;
   status: string;
   startedAt: number;
   endedAt: number;
@@ -26,6 +28,8 @@ export type HostGiftHistoryRow = {
   giftName: string;
   giftEmoji: string;
   coins: number;
+  hostCoinsEarned?: number;
+  platformCoins?: number;
   roomId?: string | null;
   callId?: string | null;
   createdAt: number;
@@ -35,6 +39,7 @@ export type HostTodayStats = {
   callCoins: number;
   giftCoins: number;
   liveGiftCoins: number;
+  liveEntryCoins?: number;
   totalCoins: number;
   callsCount: number;
   callMinutes: number;
@@ -50,9 +55,11 @@ export type HostTodayStats = {
 export type HostMonthStats = {
   callCoins: number;
   giftCoins: number;
+  liveCoins?: number;
   totalCoins: number;
   callsCount: number;
   giftCount: number;
+  callMinutes?: number;
   liveSeconds: number;
   liveSessions: number;
   monthStartMs: number;
@@ -62,6 +69,7 @@ export type HostEarningsPayload = {
   summary: {
     callCoins: number;
     giftCoins: number;
+    liveCoins?: number;
     totalCoins: number;
     totalCalls: number;
     totalDurationSec: number;

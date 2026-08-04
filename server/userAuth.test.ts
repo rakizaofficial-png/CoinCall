@@ -4,6 +4,7 @@ import {
   authenticateUserToken,
   bearerToken,
   getUserAccountById,
+  loginGoogleUser,
   loginUser,
   logoutUserToken,
   registerUser,
@@ -23,6 +24,67 @@ test('email registration persists a named account with a verifiable session', ()
   assert.equal(result.account.displayName, 'Test User');
   assert.equal(getUserAccountById(result.account.userId)?.email, email);
   assert.equal(authenticateUserToken(result.account.token)?.userId, result.account.userId);
+});
+
+test('verified Google identity creates and reuses one account with bounded sessions', () => {
+  const email = `google-${Date.now()}@example.com`;
+  const first = loginGoogleUser({
+    email,
+    displayName: 'Google User',
+    firebaseUid: `firebase-${Date.now()}`,
+  });
+  assert.equal(first.ok, true);
+  if (!first.ok) return;
+  assert.equal(first.isNew, true);
+  const originalUserId = first.account.userId;
+
+  const second = loginGoogleUser({
+    email,
+    displayName: 'Google User',
+    firebaseUid: first.account.firebaseUid || '',
+  });
+  assert.equal(second.ok, true);
+  if (!second.ok) return;
+  assert.equal(second.isNew, false);
+  assert.equal(second.account.userId, originalUserId);
+  assert.ok(second.account.authProviders?.includes('google'));
+  assert.ok((second.account.tokens?.length || 0) <= 5);
+});
+
+test('Google can link to the same verified email without replacing its wallet identity', () => {
+  const email = `link-${Date.now()}@example.com`;
+  const passwordAccount = registerUser({
+    email,
+    password: 'secret5',
+    displayName: 'Linked User',
+  });
+  assert.equal(passwordAccount.ok, true);
+  if (!passwordAccount.ok) return;
+
+  const linked = loginGoogleUser({
+    email,
+    displayName: 'Google Display Name',
+    firebaseUid: `linked-firebase-${Date.now()}`,
+  });
+  assert.equal(linked.ok, true);
+  if (!linked.ok) return;
+  assert.equal(linked.isNew, false);
+  assert.equal(linked.account.userId, passwordAccount.account.userId);
+  assert.ok(linked.account.authProviders?.includes('password'));
+  assert.ok(linked.account.authProviders?.includes('google'));
+});
+
+test('Google-only accounts cannot be opened with an arbitrary password', () => {
+  const email = `google-only-${Date.now()}@example.com`;
+  const account = loginGoogleUser({
+    email,
+    displayName: 'Google Only',
+    firebaseUid: `google-only-firebase-${Date.now()}`,
+  });
+  assert.equal(account.ok, true);
+  const passwordAttempt = loginUser({ email, password: 'anything' });
+  assert.equal(passwordAttempt.ok, false);
+  if (!passwordAttempt.ok) assert.match(passwordAttempt.error, /Use Google/);
 });
 
 test('logging in on another device keeps a bounded set of valid sessions', () => {

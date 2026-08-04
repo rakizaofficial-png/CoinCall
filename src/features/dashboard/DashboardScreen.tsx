@@ -36,20 +36,21 @@ export function DashboardScreen({ navigation }: { navigation: any }) {
     todayLiveSeconds,
     refreshTodayStats,
   } = useApp();
-  const { todayLiveGiftCoins, liveSeconds, myLiveRoom } = useLiveStudio();
+  const { liveSeconds, myLiveRoom } = useLiveStudio();
   const [appIdQuery, setAppIdQuery] = useState('');
   const [searchBusy, setSearchBusy] = useState(false);
 
-  const giftCoinsToday = Math.max(hostEarnings.gift, todayLiveGiftCoins);
+  const giftCoinsToday = hostEarnings.gift;
   const todayEarn =
     hostEarnings.call +
     giftCoinsToday +
+    hostEarnings.live +
     hostEarnings.task +
     hostEarnings.invite;
   const liveTimeMinutes = Math.floor(
     Math.max(liveSeconds, todayLiveSeconds, hostLifetime.liveSeconds) / 60,
   );
-  const walletBalance = Math.max(user.coinBalance, hostLifetime.walletBalance);
+  const walletBalance = user.coinBalance;
 
   useEffect(() => {
     void refreshTodayStats();

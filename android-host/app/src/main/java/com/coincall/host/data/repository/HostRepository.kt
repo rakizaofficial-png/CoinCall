@@ -107,20 +107,20 @@ class HostRepository @Inject constructor(
             val wallet = api.syncWallet(WalletSyncRequest(id, tokens.hostName, "host")).wallet
             val earn = api.earnings(id)
             val history = api.callHistory(id)
-            val today = earn.today?.coins ?: 0
-            val month = earn.month?.coins ?: 0
+            val today = earn.today?.totalCoins ?: 0
+            val month = earn.month?.totalCoins ?: 0
             val total = earn.summary?.totalCoins ?: 0
             val calls = history.calls
             val weekStart = System.currentTimeMillis() - 7L * 24 * 60 * 60 * 1000
             val weekCoins = calls
                 .filter { (it.startedAt ?: 0L) >= weekStart }
-                .sumOf { it.coinsSpent ?: 0 }
+                .sumOf { it.hostCoinsEarned ?: it.coinsSpent ?: 0 }
                 .coerceAtLeast(today)
             val missed = calls.count { it.status?.contains("missed", true) == true || it.endReason == "missed" }
             val answered = calls.count { (it.durationSec ?: 0) > 0 }
             val success = EarningsCalculator.successRate(answered, calls.size)
             val minutes = ((earn.summary?.totalDurationSec ?: 0) / 60f).roundToInt()
-            val balance = wallet?.coinBalance ?: 0
+            val balance = earn.summary?.walletBalance ?: wallet?.coinBalance ?: 0
             val pendingHold = runCatching { withdrawalsInternal(id) }.getOrDefault(emptyList())
                 .filter { it.status == "pending" || it.status == "processing" || it.status == "admin_review" }
                 .sumOf { it.amount }
@@ -128,7 +128,9 @@ class HostRepository @Inject constructor(
             val daily = (0..6).map { day ->
                 val start = System.currentTimeMillis() - (6 - day) * 24L * 60 * 60 * 1000
                 val end = start + 24L * 60 * 60 * 1000
-                val coins = calls.filter { (it.startedAt ?: 0L) in start until end }.sumOf { it.coinsSpent ?: 0 }
+                val coins = calls
+                    .filter { (it.startedAt ?: 0L) in start until end }
+                    .sumOf { it.hostCoinsEarned ?: it.coinsSpent ?: 0 }
                 (coins / 1000f).coerceIn(0.08f, 1f)
             }
             DashboardStats(
@@ -169,7 +171,7 @@ class HostRepository @Inject constructor(
                     userName = it.userName ?: "Fan",
                     userAvatar = it.userAvatar,
                     durationSec = it.durationSec ?: 0,
-                    coinsEarned = it.coinsSpent ?: 0,
+                    coinsEarned = it.hostCoinsEarned ?: it.coinsSpent ?: 0,
                     status = it.status ?: "ended",
                     startedAt = it.startedAt ?: 0L,
                 )

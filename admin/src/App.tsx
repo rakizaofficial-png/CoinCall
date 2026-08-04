@@ -1061,8 +1061,10 @@ export default function App() {
 
             {tab === 'payouts' ? (
               <MoneyDesk
-                readOnly={isAgency}
+                readOnly={isAgency ? !agencyPerms?.canRequestPayout : false}
                 agencyHostIds={isAgency ? agencyHostIds : undefined}
+                isAgency={isAgency}
+                agencyName={agencyName}
               />
             ) : null}
 

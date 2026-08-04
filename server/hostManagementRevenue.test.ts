@@ -35,8 +35,11 @@ test('agency host metrics reconcile from the authoritative coin ledger', () => {
   ensureHostRecord(hostId, {
     name: 'Revenue Test Host',
     categories: ['Beauty', 'Live'],
-    revenueGenerated: 0,
-    pendingEarnings: 0,
+    revenueGenerated: 2_200,
+    revenueMonth: 1_800,
+    callEarnings: 1_400,
+    giftEarnings: 800,
+    pendingEarnings: 2_200,
   });
   loadCoinTxns([
     completedTxn('call', hostId, 'call_minute', 70),

@@ -4,28 +4,42 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff, LogIn } from "lucide-react";
-import { login } from "@/lib/auth";
+import { login, loginWithGoogle } from "@/lib/auth";
+import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
 
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState<"google" | "email" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     if (!email.trim() || !password) { setError("Email and password are required"); return; }
-    setLoading(true);
+    setLoading("email");
     try {
       await login(email.trim(), password);
       router.replace("/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {
-      setLoading(false);
+      setLoading(null);
+    }
+  };
+
+  const googleSignIn = async () => {
+    setError(null);
+    setLoading("google");
+    try {
+      await loginWithGoogle();
+      router.replace("/");
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Google sign-in failed");
+      setLoading(null);
     }
   };
 
@@ -40,6 +54,18 @@ export default function LoginPage() {
           <p className="mt-1 text-sm text-muted">Sign in to your Luma account</p>
         </div>
 
+        <GoogleSignInButton
+          disabled={loading !== null}
+          busy={loading === "google"}
+          onClick={() => void googleSignIn()}
+        />
+
+        <div className="my-5 flex items-center gap-3" aria-hidden="true">
+          <span className="h-px flex-1 bg-line" />
+          <span className="text-[11px] font-semibold uppercase tracking-widest text-muted">or use email</span>
+          <span className="h-px flex-1 bg-line" />
+        </div>
+
         <form onSubmit={(e) => void submit(e)} className="space-y-3">
           <div>
             <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted">
@@ -52,7 +78,7 @@ export default function LoginPage() {
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
               className="auth-input"
-              disabled={loading}
+              disabled={loading !== null}
             />
           </div>
 
@@ -68,7 +94,7 @@ export default function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
                 className="auth-input pr-12"
-                disabled={loading}
+                disabled={loading !== null}
               />
               <button
                 type="button"
@@ -87,9 +113,9 @@ export default function LoginPage() {
             </div>
           )}
 
-          <button type="submit" disabled={loading} className="btn-primary mt-2">
+          <button type="submit" disabled={loading !== null} className="btn-primary mt-2">
             <LogIn className="h-4 w-4" />
-            {loading ? "Signing in…" : "Sign in"}
+            {loading === "email" ? "Signing in…" : "Sign in with email"}
           </button>
         </form>
 

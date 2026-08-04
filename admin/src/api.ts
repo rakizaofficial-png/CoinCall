@@ -176,6 +176,7 @@ export async function fetchMonitorToken(channel: string, uid: number) {
 
 export type WithdrawalRow = {
   id: string;
+  kind?: 'host' | 'agency';
   hostId: string;
   hostName?: string;
   hostAvatar?: string;
@@ -184,6 +185,9 @@ export type WithdrawalRow = {
   accountName: string;
   accountNumber: string;
   status: string;
+  agencyId?: string;
+  agencyName?: string;
+  collectedHostWithdrawalIds?: string[];
   createdAt: number;
   walletBalanceBefore?: number;
   walletBalanceAfter?: number;
@@ -220,18 +224,24 @@ function adminKeyHeader() {
 }
 
 export async function fetchAdminWithdrawals() {
+  const credential = adminKeyHeader();
   const res = await fetch(
-    `${apiBaseUrl}/admin/withdrawals?key=${encodeURIComponent(adminKeyHeader())}`,
+    `${apiBaseUrl}/admin/withdrawals`,
+    { headers: { Authorization: `Bearer ${credential}` }, cache: 'no-store' },
   );
   if (!res.ok) throw new Error('Could not load withdrawals');
   return (await res.json()) as { withdrawals: WithdrawalRow[] };
 }
 
 export async function setWithdrawalStatus(id: string, status: string) {
+  const credential = adminKeyHeader();
   const res = await fetch(`${apiBaseUrl}/admin/withdrawals/${encodeURIComponent(id)}/status`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ key: adminKeyHeader(), status }),
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${credential}`,
+    },
+    body: JSON.stringify({ status }),
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
