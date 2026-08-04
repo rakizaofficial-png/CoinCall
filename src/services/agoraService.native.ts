@@ -16,12 +16,6 @@ import {
   type BeautyPreset,
   type StartAgoraCallOptions,
 } from './agoraTypes';
-import {
-  pauseNativeDeepAR,
-  resumeNativeDeepAR,
-  setNativeDeepARBeautyIntensity,
-  switchNativeDeepAREffect,
-} from './deepArNativeService';
 
 export type { BeautyPreset } from './agoraTypes';
 export {
@@ -93,10 +87,6 @@ async function fetchRtcToken(
     uid: number;
     channel: string;
   };
-}
-
-function applyNativeBeauty(preset: BeautyPreset) {
-  switchNativeDeepAREffect(preset);
 }
 
 function ensureEngine(appId: string): IRtcEngine {
@@ -171,8 +161,6 @@ export async function startAgoraCall(options: StartAgoraCallOptions) {
   // Preview first so surface paints immediately (no black frame)
   rtc.enableLocalVideo(true);
   rtc.startPreview();
-  resumeNativeDeepAR();
-  applyNativeBeauty(preset);
 
   const result = rtc.joinChannel(
     tokenPayload.token,
@@ -224,8 +212,7 @@ export async function setAgoraMuted(muted: boolean) {
 
 export async function setAgoraCameraOff(off: boolean) {
   engine?.muteLocalVideoStream(off);
-  if (off) pauseNativeDeepAR();
-  else resumeNativeDeepAR();
+  engine?.enableLocalVideo(!off);
 }
 
 export async function switchAgoraCamera() {
@@ -244,11 +231,13 @@ export async function setAgoraBeauty(enabledOrPreset: boolean | BeautyPreset) {
         : 'off'
       : enabledOrPreset;
   currentPreset = preset;
-  applyNativeBeauty(preset);
+  // Native beauty is intentionally disabled until a single-pipeline Agora
+  // video-frame processor is available. A second camera owner alongside Agora
+  // crashes some Android devices.
 }
 
-export async function setAgoraBeautyIntensity(intensity: number) {
-  setNativeDeepARBeautyIntensity(intensity);
+export async function setAgoraBeautyIntensity(_intensity: number) {
+  // See setAgoraBeauty: no-op keeps call/live camera ownership stable.
 }
 
 export function getAgoraBeautyPreset(): BeautyPreset {
@@ -265,7 +254,6 @@ export async function startCameraPreview() {
 
 export function stopCameraPreview() {
   try {
-    pauseNativeDeepAR();
     engine?.stopPreview();
   } catch {
     /* ignore */

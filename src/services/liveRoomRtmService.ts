@@ -110,7 +110,10 @@ async function createNativeSession(userId: string, channel: string): Promise<Rtm
   await client.login?.({ token: token.token });
   await client.subscribe?.(channel, {
     withMessage: true,
-    withMetadata: true,
+    // Channel metadata/storage is a separately enabled Agora product. Asking
+    // for it on projects without Storage returns -12019 and rejects the whole
+    // message subscription, which also breaks chat, gifts and live-state sync.
+    withMetadata: false,
     withPresence: true,
   });
   return {
@@ -134,6 +137,10 @@ async function getSession(userId: string, channel: string) {
   if (!pending) {
     pending = createNativeSession(userId, channel);
     sessions.set(key, pending);
+    void pending.catch(() => {
+      // Allow a later retry after a temporary token/network/RTM failure.
+      if (sessions.get(key) === pending) sessions.delete(key);
+    });
   }
   return pending;
 }
@@ -163,11 +170,21 @@ export async function publishLiveRoomLockRtm(input: {
       { key: 'entryFee', value: String(event.entryFee) },
       { key: 'updatedAt', value: String(event.updatedAt) },
     ];
-    await session.client.storage?.updateChannelMetadata?.(channel, 'MESSAGE', metadata, {
-      majorRevision: -1,
-      recordTs: true,
-      recordUserId: true,
-    });
+    try {
+      await session.client.storage?.updateChannelMetadata?.(
+        channel,
+        'MESSAGE',
+        metadata,
+        {
+          majorRevision: -1,
+          recordTs: true,
+          recordUserId: true,
+        },
+      );
+    } catch {
+      // Storage is optional. The RTM message below remains the source of truth
+      // when Agora Channel Metadata is not enabled for the project.
+    }
     await publishViaSession(session, channel, event);
     return true;
   } catch (e) {

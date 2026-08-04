@@ -39,16 +39,19 @@ export function GiftAnimationQueueProvider({
   const [queueLength, setQueueLength] = useState(0);
   const queueRef = useRef<GiftAnimationItem[]>([]);
   const playingRef = useRef(false);
+  const currentIdRef = useRef<string | null>(null);
 
   const playNext = useCallback(() => {
     if (playingRef.current) return;
     const next = queueRef.current.shift() || null;
     setQueueLength(queueRef.current.length);
     if (!next) {
+      currentIdRef.current = null;
       setCurrent(null);
       return;
     }
     playingRef.current = true;
+    currentIdRef.current = next.id;
     setCurrent(next);
   }, []);
 
@@ -65,7 +68,9 @@ export function GiftAnimationQueueProvider({
     [playNext],
   );
 
-  const onFinish = useCallback(() => {
+  const onFinish = useCallback((itemId: string) => {
+    if (currentIdRef.current !== itemId) return;
+    currentIdRef.current = null;
     playingRef.current = false;
     setCurrent(null);
     requestAnimationFrame(playNext);
@@ -74,6 +79,7 @@ export function GiftAnimationQueueProvider({
   const clearGiftAnimations = useCallback(() => {
     queueRef.current = [];
     playingRef.current = false;
+    currentIdRef.current = null;
     setQueueLength(0);
     setCurrent(null);
   }, []);
@@ -107,4 +113,3 @@ export function useGiftAnimationQueue() {
 }
 
 export type { GiftLottieSource, GiftAnimationItem };
-

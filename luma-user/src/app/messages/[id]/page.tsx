@@ -16,6 +16,7 @@ import { ChatThreadLayout } from "@/components/chat/ChatThreadLayout";
 import { ImageViewerModal } from "@/components/chat/ImageViewerModal";
 import { TypingIndicator } from "@/components/chat/TypingIndicator";
 import { CHAT_THEME } from "@/components/chat/chatTheme";
+import { getAuthHeaders, getAuthUser } from "@/lib/auth";
 
 type ApiMessage = {
   id: string;
@@ -95,7 +96,7 @@ export default function ChatThreadPage({
     try {
       const res = await fetch(
         `${requireApiBase()}/dm/messages?a=${encodeURIComponent(userId)}&b=${encodeURIComponent(hostId)}&viewerId=${encodeURIComponent(userId)}`,
-        { cache: "no-store" },
+        { headers: getAuthHeaders(userId), cache: "no-store" },
       );
       const data = (await res.json()) as { messages?: ApiMessage[] };
       if (data.messages?.length) setApiMessages(data.messages);
@@ -194,14 +195,14 @@ export default function ChatThreadPage({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-User-Id": userId,
+          ...getAuthHeaders(userId),
         },
         body: JSON.stringify({
           fromId: userId,
           toId: hostId,
           text: body || "📷 Photo",
           imageUrl,
-          fromName: "Luma Fan",
+          fromName: getAuthUser()?.displayName || "Luma Fan",
           fromRole: "user",
           peerName: hostName,
           clientMessageId: tempId,
@@ -284,7 +285,7 @@ export default function ChatThreadPage({
                       method: "POST",
                       headers: {
                         "Content-Type": "application/json",
-                        "X-User-Id": userId,
+                        ...getAuthHeaders(userId),
                       },
                       body: JSON.stringify({ ownerId: userId, image: String(reader.result || "") }),
                     });

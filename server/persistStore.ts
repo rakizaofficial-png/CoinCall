@@ -67,6 +67,8 @@ export type PersistedSnapshot = {
   hostAppUpdate?: Record<string, unknown>;
   /** installId → userId so Luma profile survives WebView wipe / reinstall */
   installUserMap?: Array<{ installId: string; userId: string }>;
+  /** Email accounts (password hashes + bounded sessions). */
+  userAccounts?: Array<Record<string, unknown>>;
 };
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;

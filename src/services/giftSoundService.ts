@@ -1,4 +1,4 @@
-import { Audio, type AVPlaybackSource } from 'expo-av';
+import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 
 const GIFT_SOUND_SOURCES = {
   sparkle: require('../../assets/gift-sounds/magic-sparkle.ogg'),
@@ -8,8 +8,16 @@ const GIFT_SOUND_SOURCES = {
 
 type GiftSoundKind = keyof typeof GIFT_SOUND_SOURCES;
 
-const loadedSounds = new Map<GiftSoundKind, Audio.Sound>();
-const loadingSounds = new Map<GiftSoundKind, Promise<Audio.Sound | null>>();
+export type GiftSoundPlayback = {
+  player: AudioPlayer;
+  kind: GiftSoundKind;
+  generation: number;
+};
+
+const loadedSounds = new Map<GiftSoundKind, AudioPlayer>();
+const loadingSounds = new Map<GiftSoundKind, Promise<AudioPlayer | null>>();
+const playbackGeneration = new Map<GiftSoundKind, number>();
+let activePlayback: GiftSoundPlayback | null = null;
 
 function soundKindForGift(giftId: string): GiftSoundKind {
   if (
@@ -34,17 +42,16 @@ function soundKindForGift(giftId: string): GiftSoundKind {
   return 'sparkle';
 }
 
-async function loadSound(kind: GiftSoundKind): Promise<Audio.Sound | null> {
+async function loadSound(kind: GiftSoundKind): Promise<AudioPlayer | null> {
   const ready = loadedSounds.get(kind);
   if (ready) return ready;
   const pending = loadingSounds.get(kind);
   if (pending) return pending;
 
-  const task = Audio.Sound.createAsync(
-    GIFT_SOUND_SOURCES[kind] as AVPlaybackSource,
-    { shouldPlay: false, volume: 0.78, positionMillis: 0 },
-  )
-    .then(({ sound }) => {
+  const task = Promise.resolve()
+    .then(() => {
+      const sound = createAudioPlayer(GIFT_SOUND_SOURCES[kind]);
+      sound.volume = 0.78;
       loadedSounds.set(kind, sound);
       loadingSounds.delete(kind);
       return sound;
@@ -59,29 +66,61 @@ async function loadSound(kind: GiftSoundKind): Promise<Audio.Sound | null> {
 
 /** Warm all bundled SFX while the live studio opens, before the first gift. */
 export async function preloadGiftSounds() {
-  await Audio.setAudioModeAsync({
-    playsInSilentModeIOS: true,
-    interruptionModeIOS: 1,
-    interruptionModeAndroid: 1,
-    shouldDuckAndroid: true,
+  await setAudioModeAsync({
+    playsInSilentMode: true,
+    interruptionMode: 'duckOthers',
   }).catch(() => undefined);
   await Promise.all(
     (Object.keys(GIFT_SOUND_SOURCES) as GiftSoundKind[]).map(loadSound),
   );
 }
 
-/** Starts a preloaded gift cue from frame zero and returns its shared player. */
+/**
+ * Starts one bundled gift cue from frame zero.
+ *
+ * A generation lease prevents cleanup from an old overlay from pausing a newer
+ * gift that happens to use the same shared player.
+ */
 export async function playGiftSound(giftId: string) {
-  const sound = await loadSound(soundKindForGift(giftId));
+  const kind = soundKindForGift(giftId);
+  const generation = (playbackGeneration.get(kind) || 0) + 1;
+  playbackGeneration.set(kind, generation);
+  const sound = await loadSound(kind);
   if (!sound) return null;
-  await sound.stopAsync().catch(() => undefined);
-  await sound.setPositionAsync(0).catch(() => undefined);
-  await sound.playAsync().catch(() => undefined);
-  return sound;
+
+  if (activePlayback) {
+    activePlayback.player.pause();
+    await activePlayback.player.seekTo(0).catch(() => undefined);
+    activePlayback = null;
+  }
+
+  if (playbackGeneration.get(kind) !== generation) return null;
+  sound.pause();
+  await sound.seekTo(0).catch(() => undefined);
+  if (playbackGeneration.get(kind) !== generation) return null;
+
+  const playback: GiftSoundPlayback = { player: sound, kind, generation };
+  activePlayback = playback;
+  sound.play();
+  return playback;
 }
 
-export async function stopGiftSound(sound: Audio.Sound | null) {
-  if (!sound) return;
-  await sound.stopAsync().catch(() => undefined);
-  await sound.setPositionAsync(0).catch(() => undefined);
+export async function stopGiftSound(playback: GiftSoundPlayback | null) {
+  if (!playback) return;
+  if (playbackGeneration.get(playback.kind) !== playback.generation) return;
+  if (activePlayback?.generation !== playback.generation) return;
+  playback.player.pause();
+  await playback.player.seekTo(0).catch(() => undefined);
+  activePlayback = null;
+}
+
+export async function stopAllGiftSounds() {
+  for (const kind of Object.keys(GIFT_SOUND_SOURCES) as GiftSoundKind[]) {
+    playbackGeneration.set(kind, (playbackGeneration.get(kind) || 0) + 1);
+  }
+  const current = activePlayback;
+  activePlayback = null;
+  if (!current) return;
+  current.player.pause();
+  await current.player.seekTo(0).catch(() => undefined);
 }

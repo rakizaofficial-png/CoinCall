@@ -10,6 +10,7 @@ import { requireApiBase } from "@/config/apiConfig";
 import { getRealtimeClient } from "@/lib/realtime/websocket";
 import { useGiftAnimationQueue } from "@/components/gifts/GiftAnimationQueue";
 import { giftAnimationSource } from "@/lib/giftAnimations";
+import { getAuthHeaders, getAuthUser } from "@/lib/auth";
 
 /** Floating gift animation — rendered outside the sheet so it persists after close. */
 export function GiftFloatOverlay({ emoji }: { emoji: string | null }) {
@@ -75,11 +76,11 @@ export function GiftSheet({
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "X-User-Id": userId,
+            ...getAuthHeaders(userId),
           },
           body: JSON.stringify({
             userId,
-            userName: "Luma Fan",
+            userName: getAuthUser()?.displayName || "Luma Fan",
             hostId,
             giftId: id,
             roomId,

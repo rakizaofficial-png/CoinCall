@@ -153,7 +153,9 @@ export function AgencyOverview({
               <thead>
                 <tr>
                   <th>Host</th>
+                  <th>Category</th>
                   <th>Revenue</th>
+                  <th>Coins</th>
                   <th>Pending</th>
                 </tr>
               </thead>
@@ -166,7 +168,11 @@ export function AgencyOverview({
                       </strong>
                       <div className="meta">{h.hostId.slice(0, 10)}</div>
                     </td>
+                    <td className="meta">
+                      {h.categories?.length ? h.categories.join(', ') : 'General'}
+                    </td>
                     <td>{(h.revenueGenerated || 0).toLocaleString()}</td>
+                    <td>{(h.coinBalance || 0).toLocaleString()}</td>
                     <td>{(h.pendingEarnings || 0).toLocaleString()}</td>
                   </tr>
                 ))}

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useGiftAnimationQueue } from '../context/GiftAnimationQueueContext';
 import {
   subscribeLiveRoomRtm,
   type LiveRoomGiftRtmEvent,
@@ -26,7 +25,6 @@ export function useLiveRoomRtmEvents(input: {
   onStreamState?: (event: LiveRoomStreamStateRtmEvent) => void;
 }) {
   const { roomId, channel, userId, enabled, onGift, onStats, onStreamState } = input;
-  const { enqueueGiftAnimation } = useGiftAnimationQueue();
   const [stats, setStats] = useState<LiveRoomRtmStats>({});
   const seenGiftIds = useRef(new Set<string>());
 
@@ -37,16 +35,6 @@ export function useLiveRoomRtmEvents(input: {
       if (seenGiftIds.current.size > 120) {
         seenGiftIds.current = new Set([...seenGiftIds.current].slice(-60));
       }
-      enqueueGiftAnimation({
-        id: event.id,
-        source: event.lottie.source,
-        title: 'Gift Sent',
-        senderName: event.fromName,
-        giftName: `${event.giftEmoji} ${event.giftName}${event.combo > 1 ? ` x${event.combo}` : ''}`,
-        coins: event.coins * Math.max(1, event.combo || 1),
-        durationMs: event.lottie.durationMs,
-        soundUrl: event.lottie.soundUrl,
-      });
       setStats((current) => ({
         ...current,
         totalCoins: event.totals?.totalCoins ?? current.totalCoins,
@@ -55,7 +43,7 @@ export function useLiveRoomRtmEvents(input: {
       }));
       onGift?.(event);
     },
-    [enqueueGiftAnimation, onGift],
+    [onGift],
   );
 
   const handleStats = useCallback(

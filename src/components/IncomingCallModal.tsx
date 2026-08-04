@@ -85,6 +85,8 @@ export function IncomingCallModal({ call, onClear, hostBusyOnCall }: Props) {
   const [waitLeft, setWaitLeft] = useState(45);
   const ignoredIds = useRef(new Set<string>());
   const handledRef = useRef(false);
+  const onClearRef = useRef(onClear);
+  onClearRef.current = onClear;
   const pulse = useSharedValue(1);
   const ringScale = useSharedValue(1);
 
@@ -102,12 +104,12 @@ export function IncomingCallModal({ call, onClear, hostBusyOnCall }: Props) {
       return;
     }
     if (ignoredIds.current.has(call.id)) {
-      onClear();
+      onClearRef.current();
       return;
     }
 
     handledRef.current = false;
-    void startIncomingRingtone(30_000);
+    void startIncomingRingtone(30_000, call.id);
     pulse.value = withRepeat(
       withSequence(
         withTiming(1.12, { duration: 700, easing: Easing.inOut(Easing.ease) }),
@@ -158,7 +160,7 @@ export function IncomingCallModal({ call, onClear, hostBusyOnCall }: Props) {
     return () => {
       void stopIncomingRingtone();
     };
-  }, [call, onClear, pulse, ringScale]);
+  }, [call, pulse, ringScale]);
 
   // Settings-driven auto reject / wait timeout
   useEffect(() => {
@@ -289,7 +291,7 @@ export function IncomingCallModal({ call, onClear, hostBusyOnCall }: Props) {
         notify('Accept failed', message.slice(0, 140));
         setBusy(false);
         setPhase('ring');
-        void startIncomingRingtone(30_000);
+        void startIncomingRingtone(30_000, call.id);
       }
     })();
   };

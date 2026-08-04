@@ -326,8 +326,14 @@ type Ctx = {
     hostId: string;
     name: string;
     revenueGenerated: number;
+    revenueMonth: number;
     pendingEarnings: number;
     paidEarnings: number;
+    coinBalance: number;
+    categories: string[];
+    callEarnings: number;
+    giftEarnings: number;
+    liveEarnings: number;
     type: 'agency' | 'individual';
     agencyId?: string;
     agencyName?: string;
@@ -725,19 +731,32 @@ export function registerAgencyRoutes(app: Express, ctx: Ctx) {
     const agencyList = agencyId
       ? listAgencies().filter((a) => a.id === agencyId)
       : listAgencies();
-    const agencyRev = agencyList.map((a) => ({
-      id: a.id,
-      name: a.name,
-      status: a.status,
-      commissionPercent: a.commissionPercent,
-      hostCount: a.hostIds.length,
-      revenueTotal: a.revenueTotal,
-      revenueMonth: a.revenueMonth,
-      agencyShare: Math.round((a.revenueMonth * a.commissionPercent) / 100),
-      platformShare: Math.round(
-        (a.revenueMonth * (100 - a.commissionPercent)) / 100,
-      ),
-    }));
+    const agencyRev = agencyList.map((a) => {
+      const linked = rows.filter((r) => r.agencyId === a.id);
+      const revenueTotal = linked.reduce(
+        (sum, host) => sum + (host.revenueGenerated || 0),
+        0,
+      );
+      const revenueMonth = linked.reduce(
+        (sum, host) => sum + (host.revenueMonth || 0),
+        0,
+      );
+      return {
+        id: a.id,
+        name: a.name,
+        status: a.status,
+        commissionPercent: a.commissionPercent,
+        hostCount: linked.length,
+        revenueTotal,
+        revenueMonth,
+        agencyShare: Math.round(
+          (revenueMonth * a.commissionPercent) / 100,
+        ),
+        platformShare: Math.round(
+          (revenueMonth * (100 - a.commissionPercent)) / 100,
+        ),
+      };
+    });
     const individual = rows.filter((r) => r.type === 'individual');
     const agencyHosts = rows.filter((r) => r.type === 'agency');
     const sum = (list: typeof rows) =>
@@ -788,16 +807,28 @@ export function registerAgencyRoutes(app: Express, ctx: Ctx) {
     const snapshot = ctx
       .getHostRevenueSnapshot()
       .filter((h) => h.agencyId === agencyId);
+    const revenue = snapshot.reduce(
+      (sum, host) => sum + (host.revenueGenerated || 0),
+      0,
+    );
+    const revenueMonth = snapshot.reduce(
+      (sum, host) => sum + (host.revenueMonth || 0),
+      0,
+    );
     const agencyShare = Math.round(
-      (agency.revenueMonth * agency.commissionPercent) / 100,
+      (revenueMonth * agency.commissionPercent) / 100,
     );
     res.json({
-      agency: publicAgency(agency),
+      agency: {
+        ...publicAgency(agency),
+        revenueTotal: revenue,
+        revenueMonth,
+      },
       hosts: snapshot,
       totals: {
         hosts: snapshot.length,
         activeHosts: snapshot.length,
-        revenue: snapshot.reduce((s, h) => s + (h.revenueGenerated || 0), 0),
+        revenue,
         pending: snapshot.reduce((s, h) => s + (h.pendingEarnings || 0), 0),
         paid: snapshot.reduce((s, h) => s + (h.paidEarnings || 0), 0),
         agencyCommissionMonth: agencyShare,

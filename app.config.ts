@@ -4,6 +4,11 @@ const IS_PROD =
   process.env.EXPO_PUBLIC_APP_ENV === 'production' ||
   process.env.EAS_BUILD_PROFILE === 'production' ||
   process.env.NODE_ENV === 'production';
+const GOOGLE_SERVICES_FILE = process.env.GOOGLE_SERVICES_JSON?.trim();
+const NATIVE_PUSH_CONFIGURED = Boolean(
+  GOOGLE_SERVICES_FILE ||
+    process.env.EXPO_PUBLIC_FIREBASE_NATIVE_CONFIGURED === 'true',
+);
 
 /**
  * CoinCall Host — Expo config for web + native (EAS AAB / IPA).
@@ -36,6 +41,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   android: {
     package: 'com.coincall.host',
+    ...(GOOGLE_SERVICES_FILE
+      ? { googleServicesFile: GOOGLE_SERVICES_FILE }
+      : {}),
     versionCode: Number(process.env.ANDROID_VERSION_CODE || 7),
     softwareKeyboardLayoutMode: 'resize',
     adaptiveIcon: {
@@ -116,10 +124,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
           enableMinifyInReleaseBuilds: true,
           enableShrinkResourcesInReleaseBuilds: true,
           enablePngCrunchInReleaseBuilds: true,
-          // Compress .so inside APK (ABI filter via withAndroidSizeOptimizations)
-          useLegacyPackaging: true,
+          // Keep native libraries uncompressed so AGP can preserve 16 KB alignment.
+          useLegacyPackaging: false,
           extraProguardRules:
-            '-keep class io.agora.** { *; }\n-keep class com.facebook.react.** { *; }\n-keepclassmembers class ai.deepar.ar.DeepAR { *; }\n-keepclassmembers class ai.deepar.ar.core.videotexture.VideoTextureAndroidJava { *; }\n-keep class ai.deepar.ar.core.videotexture.VideoTextureAndroidJava\n-keep class ai.deepar.** { *; }\n-dontwarn io.agora.**\n-dontwarn ai.deepar.**',
+            '-keep class io.agora.** { *; }\n-keep class com.facebook.react.** { *; }\n-dontwarn io.agora.**',
         },
         ios: {
           deploymentTarget: '16.4',
@@ -132,5 +140,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       projectId: 'f54e2a7d-a77d-4478-bfae-65f79aac18f6',
     },
     appEnv: IS_PROD ? 'production' : 'development',
+    nativePushConfigured: NATIVE_PUSH_CONFIGURED,
   },
 });

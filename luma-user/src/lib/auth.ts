@@ -11,6 +11,7 @@ const TOKEN_KEY = "luma_auth_token";
 const USER_ID_KEY = "luma_auth_user_id";
 const DISPLAY_NAME_KEY = "luma_auth_display_name";
 const EMAIL_KEY = "luma_auth_email";
+export const AUTH_CHANGED_EVENT = "luma:auth-changed";
 
 export type AuthUser = {
   userId: string;
@@ -42,7 +43,7 @@ export function getAuthUser(): AuthUser | null {
 }
 
 export function isAuthenticated(): boolean {
-  return getAuthToken() !== null;
+  return getAuthUser() !== null;
 }
 
 function saveAuth(user: AuthUser) {
@@ -52,15 +53,52 @@ function saveAuth(user: AuthUser) {
   localStorage.setItem(DISPLAY_NAME_KEY, user.displayName);
   // Migrate device user id to account id so wallet/chat continue working
   localStorage.setItem(apiConfig.deviceUserKey, user.userId);
+  window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
 }
 
-export function logout() {
+export function getAuthHeaders(userId?: string): Record<string, string> {
+  const user = getAuthUser();
+  if (!user) throw new Error("Please sign in to continue");
+  if (userId && user.userId !== userId) {
+    throw new Error("Account changed. Please try again.");
+  }
+  return {
+    "X-User-Id": user.userId,
+    Authorization: `Bearer ${user.token}`,
+  };
+}
+
+function clearAuth() {
   try {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_ID_KEY);
     localStorage.removeItem(EMAIL_KEY);
     localStorage.removeItem(DISPLAY_NAME_KEY);
+    localStorage.removeItem(apiConfig.deviceUserKey);
   } catch { /* ignore */ }
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
+  }
+}
+
+export async function logout(): Promise<void> {
+  const user = getAuthUser();
+  try {
+    if (user) {
+      await fetch(`${requireApiBase()}/users/logout`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders(user.userId),
+        },
+        body: JSON.stringify({ userId: user.userId }),
+      });
+    }
+  } catch {
+    // Local sign-out must still complete if the network is unavailable.
+  } finally {
+    clearAuth();
+  }
 }
 
 export async function register(

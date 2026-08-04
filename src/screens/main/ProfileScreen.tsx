@@ -63,6 +63,17 @@ export function ProfileScreen({ navigation }: { navigation: any }) {
     : hostOnline
       ? colors.success
       : colors.textMuted;
+  const profileFields = [
+    user.name,
+    user.avatarUrl,
+    user.bio,
+    user.country,
+    user.languages?.length,
+    user.categories?.length,
+  ];
+  const profileCompletion = Math.round(
+    (profileFields.filter(Boolean).length / profileFields.length) * 100,
+  );
 
   const cards: SummaryCard[] = [
     {
@@ -75,7 +86,7 @@ export function ProfileScreen({ navigation }: { navigation: any }) {
     },
     {
       key: 'coins',
-      label: 'Coins',
+      label: 'Total earned',
       value: earned,
       icon: Coins,
       onPress: () => navigation.navigate('CoinHistory'),
@@ -96,71 +107,72 @@ export function ProfileScreen({ navigation }: { navigation: any }) {
       icon: Users,
       accent: colors.blush,
     },
-    {
-      key: 'rating',
-      label: 'Rating',
-      value: rating,
-      icon: Star,
-      accent: colors.accent,
-    },
-    {
-      key: 'rank',
-      label: 'Rank',
-      value: `#${myRank || '—'}`,
-      icon: BadgeCheck,
-      accent: colors.primary,
-    },
   ];
 
-  const links = [
+  const menuGroups = [
     {
-      key: 'coinHistory',
-      label: 'Coin History',
-      hint: 'Ledger · filters · pages',
-      icon: History,
-      screen: 'CoinHistory' as const,
+      title: 'Activity',
+      items: [
+        {
+          key: 'coinHistory',
+          label: 'Coin history',
+          hint: 'See every coin received and spent',
+          icon: History,
+          screen: 'CoinHistory' as const,
+        },
+        {
+          key: 'callHistory',
+          label: 'Call history',
+          hint: 'Completed, missed and declined calls',
+          icon: Phone,
+          screen: 'CallHistory' as const,
+        },
+      ],
     },
     {
-      key: 'callHistory',
-      label: 'Call History',
-      hint: 'Completed · missed · filters',
-      icon: Phone,
-      screen: 'CallHistory' as const,
+      title: 'Earnings',
+      items: [
+        {
+          key: 'earnings',
+          label: 'Earnings overview',
+          hint: 'Calls, gifts and other income',
+          icon: Wallet,
+          screen: 'Earnings' as const,
+        },
+        {
+          key: 'withdraw',
+          label: 'Withdraw funds',
+          hint: 'Transfer your available balance',
+          icon: Coins,
+          screen: 'Withdraw' as const,
+        },
+      ],
     },
     {
-      key: 'earnings',
-      label: 'Earnings',
-      hint: 'Wallet summary',
-      icon: Wallet,
-      screen: 'Earnings' as const,
-    },
-    {
-      key: 'withdraw',
-      label: 'Withdraw',
-      hint: 'Cash out',
-      icon: Coins,
-      screen: 'Withdraw' as const,
-    },
-    {
-      key: 'help',
-      label: 'Help Center',
-      hint: 'Support',
-      icon: Headphones,
-      screen: 'HelpCenter' as const,
-    },
-    {
-      key: 'system',
-      label: 'System',
-      hint: 'App info',
-      icon: Info,
-      screen: 'SystemInformation' as const,
-    },
-    {
-      key: 'settings',
-      label: 'Settings',
-      hint: 'Preferences',
-      icon: Settings,
-      screen: 'Settings' as const,
+      title: 'Account',
+      items: [
+        {
+          key: 'help',
+          label: 'Help & support',
+          hint: 'Get help with your account',
+          icon: Headphones,
+          screen: 'HelpCenter' as const,
+        },
+        {
+          key: 'system',
+          label: 'App information',
+          hint: 'Version, device and service status',
+          icon: Info,
+          screen: 'SystemInformation' as const,
+        },
+        {
+          key: 'settings',
+          label: 'Settings',
+          hint: 'Notifications, privacy and preferences',
+          icon: Settings,
+          screen: 'Settings' as const,
+        },
+      ],
     },
   ];
 
@@ -215,8 +227,65 @@ export function ProfileScreen({ navigation }: { navigation: any }) {
               </Text>
             </View>
           </Pressable>
+
+          <View style={styles.heroStats}>
+            <View style={styles.heroStat}>
+              <Star size={14} color="#FACC15" />
+              <Text style={styles.heroStatValue}>{rating}</Text>
+              <Text style={styles.heroStatLabel}>Rating</Text>
+            </View>
+            <View style={styles.heroDivider} />
+            <View style={styles.heroStat}>
+              <BadgeCheck size={14} color="#67E8F9" />
+              <Text style={styles.heroStatValue}>#{myRank || '—'}</Text>
+              <Text style={styles.heroStatLabel}>Rank</Text>
+            </View>
+            <View style={styles.heroDivider} />
+            <View style={styles.heroStat}>
+              <Users size={14} color="#F9A8D4" />
+              <Text style={styles.heroStatValue}>
+                {hostLifetime.followers || 0}
+              </Text>
+              <Text style={styles.heroStatLabel}>Followers</Text>
+            </View>
+          </View>
         </LinearGradient>
 
+        <Pressable
+          onPress={() => navigation.navigate('EditHostProfile')}
+          style={[
+            styles.completionCard,
+            { backgroundColor: colors.bgCard, borderColor: colors.border },
+          ]}
+        >
+          <View style={[styles.completionIcon, { backgroundColor: `${colors.primary}20` }]}>
+            <Pencil size={17} color={colors.primarySoft} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.completionTitle, { color: colors.text }]}>
+              Public profile
+            </Text>
+            <Text style={[styles.completionHint, { color: colors.textMuted }]}>
+              {profileCompletion}% complete · Tap to update photos and details
+            </Text>
+            <View style={[styles.progressTrack, { backgroundColor: colors.border }]}>
+              <View
+                style={[
+                  styles.progressFill,
+                  {
+                    width: `${profileCompletion}%`,
+                    backgroundColor: colors.primary,
+                  },
+                ]}
+              />
+            </View>
+          </View>
+          <ChevronRight size={18} color={colors.textMuted} />
+        </Pressable>
+
+        <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
+          Overview
+        </Text>
         <View style={styles.grid}>
           {cards.map((c) => (
             <Pressable
@@ -239,35 +308,42 @@ export function ProfileScreen({ navigation }: { navigation: any }) {
           ))}
         </View>
 
-        <View
-          style={[
-            styles.menu,
-            { backgroundColor: colors.bgElevated, borderColor: colors.border },
-          ]}
-        >
-          {links.map((l, i) => (
-            <Pressable
-              key={l.key}
-              onPress={() => navigation.navigate(l.screen)}
+        {menuGroups.map((group) => (
+          <View key={group.title}>
+            <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
+              {group.title}
+            </Text>
+            <View
               style={[
-                styles.menuRow,
-                i < links.length - 1 && {
-                  borderBottomWidth: StyleSheet.hairlineWidth,
-                  borderBottomColor: colors.border,
-                },
+                styles.menu,
+                { backgroundColor: colors.bgElevated, borderColor: colors.border },
               ]}
             >
-              <View style={[styles.menuIcon, { backgroundColor: `${colors.primary}18` }]}>
-                <l.icon size={16} color={colors.primarySoft} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.menuLabel, { color: colors.text }]}>{l.label}</Text>
-                <Text style={[styles.menuHint, { color: colors.textMuted }]}>{l.hint}</Text>
-              </View>
-              <ChevronRight size={16} color={colors.textMuted} />
-            </Pressable>
-          ))}
-        </View>
+              {group.items.map((l, i) => (
+                <Pressable
+                  key={l.key}
+                  onPress={() => navigation.navigate(l.screen)}
+                  style={[
+                    styles.menuRow,
+                    i < group.items.length - 1 && {
+                      borderBottomWidth: StyleSheet.hairlineWidth,
+                      borderBottomColor: colors.border,
+                    },
+                  ]}
+                >
+                  <View style={[styles.menuIcon, { backgroundColor: `${colors.primary}18` }]}>
+                    <l.icon size={17} color={colors.primarySoft} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.menuLabel, { color: colors.text }]}>{l.label}</Text>
+                    <Text style={[styles.menuHint, { color: colors.textMuted }]}>{l.hint}</Text>
+                  </View>
+                  <ChevronRight size={16} color={colors.textMuted} />
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        ))}
 
         <Pressable
           style={[styles.signOut, { borderColor: colors.danger }]}
@@ -332,6 +408,80 @@ const styles = StyleSheet.create({
   name: { ...typography.title, fontSize: 20 },
   meta: { ...typography.caption, fontFamily: font.medium },
   bio: { ...typography.caption, fontFamily: font.regular, marginTop: 2, lineHeight: 16 },
+  heroStats: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: radii.md,
+    backgroundColor: 'rgba(0,0,0,0.18)',
+  },
+  heroStat: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+  },
+  heroStatValue: {
+    color: '#fff',
+    fontFamily: font.bold,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  heroStatLabel: {
+    color: 'rgba(255,255,255,0.58)',
+    fontFamily: font.medium,
+    fontSize: 10,
+  },
+  heroDivider: {
+    width: StyleSheet.hairlineWidth,
+    height: 20,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+  },
+  completionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderWidth: 1,
+    borderRadius: radii.lg,
+    padding: 14,
+    marginBottom: spacing.md,
+  },
+  completionIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  completionTitle: {
+    fontFamily: font.bold,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  completionHint: {
+    fontFamily: font.regular,
+    fontSize: 11,
+    marginTop: 2,
+  },
+  progressTrack: {
+    height: 4,
+    borderRadius: 2,
+    overflow: 'hidden',
+    marginTop: 8,
+  },
+  progressFill: { height: 4, borderRadius: 2 },
+  sectionTitle: {
+    fontFamily: font.bold,
+    fontSize: 12,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: 8,
+    marginLeft: 2,
+  },
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -339,10 +489,10 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   card: {
-    width: '31.5%',
+    width: '48%',
     flexGrow: 1,
-    minWidth: '30%',
-    maxWidth: '32.5%',
+    minWidth: '46%',
+    maxWidth: '49%',
     borderWidth: 1,
     borderRadius: radii.md,
     paddingVertical: 12,

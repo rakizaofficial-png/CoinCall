@@ -3,7 +3,7 @@
  * Passwords hashed with scrypt; accounts persisted via disk snapshot hooks.
  */
 import { randomBytes, scryptSync, timingSafeEqual, randomUUID } from 'crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs';
 import { join } from 'path';
 
 export type UserAccount = {
@@ -14,6 +14,8 @@ export type UserAccount = {
   salt: string;
   createdAt: number;
   token: string;
+  /** A small bounded set allows the same account on multiple owned devices. */
+  tokens?: string[];
 };
 
 const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), '.data');
@@ -36,9 +38,12 @@ function load() {
     if (!existsSync(FILE)) return;
     const rows = JSON.parse(readFileSync(FILE, 'utf8')) as UserAccount[];
     for (const row of rows) {
+      row.email = normalizeEmail(row.email);
       byEmail.set(row.email, row);
       byId.set(row.userId, row);
-      byToken.set(row.token, row);
+      for (const token of row.tokens?.length ? row.tokens : [row.token]) {
+        if (token) byToken.set(token, row);
+      }
     }
   } catch {
     /* ignore */
@@ -48,7 +53,9 @@ function load() {
 function save() {
   try {
     if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
-    writeFileSync(FILE, JSON.stringify([...byEmail.values()]), 'utf8');
+    const tempFile = `${FILE}.tmp`;
+    writeFileSync(tempFile, JSON.stringify([...byEmail.values()]), 'utf8');
+    renameSync(tempFile, FILE);
   } catch (e) {
     console.warn('[userAuth] save failed', e);
   }
@@ -61,11 +68,17 @@ export function dumpUserAccounts(): UserAccount[] {
 }
 
 export function loadUserAccounts(rows: UserAccount[]) {
+  byEmail.clear();
+  byId.clear();
+  byToken.clear();
   for (const row of rows || []) {
     if (!row?.email || !row?.userId) continue;
+    row.email = normalizeEmail(row.email);
     byEmail.set(row.email, row);
     byId.set(row.userId, row);
-    byToken.set(row.token, row);
+    for (const token of row.tokens?.length ? row.tokens : [row.token]) {
+      if (token) byToken.set(token, row);
+    }
   }
 }
 
@@ -88,6 +101,7 @@ export function registerUser(input: {
   }
   const salt = randomBytes(16).toString('hex');
   const passwordHash = hashPassword(password, salt);
+  const token = randomBytes(24).toString('hex');
   const account: UserAccount = {
     userId: `u_${randomUUID().replace(/-/g, '').slice(0, 16)}`,
     email,
@@ -95,7 +109,8 @@ export function registerUser(input: {
     passwordHash,
     salt,
     createdAt: Date.now(),
-    token: randomBytes(24).toString('hex'),
+    token,
+    tokens: [token],
   };
   byEmail.set(email, account);
   byId.set(account.userId, account);
@@ -120,12 +135,44 @@ export function loginUser(input: {
   if (a.length !== b.length || !timingSafeEqual(a, b)) {
     return { ok: false, error: 'Invalid email or password', status: 401 };
   }
-  // Rotate session token
-  byToken.delete(account.token);
-  account.token = randomBytes(24).toString('hex');
-  byToken.set(account.token, account);
+  // Issue a separate bounded session per login. This preserves other owned
+  // devices without leaving an unbounded set of credentials behind.
+  const token = randomBytes(24).toString('hex');
+  const priorTokens = account.tokens ?? (account.token ? [account.token] : []);
+  account.tokens = [...new Set([...priorTokens, token])].slice(-5);
+  account.token = token;
+  for (const activeToken of account.tokens) byToken.set(activeToken, account);
+  for (const activeToken of priorTokens) {
+    if (!account.tokens.includes(activeToken)) byToken.delete(activeToken);
+  }
   save();
   return { ok: true, account };
+}
+
+export function getUserAccountById(userId: string): UserAccount | undefined {
+  return byId.get(String(userId || '').trim());
+}
+
+export function authenticateUserToken(token: string): UserAccount | undefined {
+  return byToken.get(String(token || '').trim());
+}
+
+export function logoutUserToken(token: string): boolean {
+  const normalized = String(token || '').trim();
+  const account = byToken.get(normalized);
+  if (!account) return false;
+  byToken.delete(normalized);
+  const activeTokens = account.tokens ?? (account.token ? [account.token] : []);
+  account.tokens = activeTokens.filter((value) => value !== normalized);
+  account.token = account.tokens.at(-1) || '';
+  save();
+  return true;
+}
+
+export function bearerToken(value: string | string[] | undefined): string {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const match = String(raw || '').trim().match(/^Bearer\s+(.+)$/i);
+  return match?.[1]?.trim() || '';
 }
 
 export function publicAuthUser(account: UserAccount) {

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import LottieView from 'lottie-react-native';
-import { Audio } from 'expo-av';
+import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 
 export type GiftLottieSource =
   | string
@@ -22,7 +22,7 @@ export type GiftAnimationItem = {
 
 type Props = {
   item: GiftAnimationItem | null;
-  onFinish: () => void;
+  onFinish: (itemId: string) => void;
 };
 
 function resolveLottieSource(source: GiftLottieSource) {
@@ -42,43 +42,45 @@ export function GiftAnimationPlayer({ item, onFinish }: Props) {
   useEffect(() => {
     if (!item) return;
     let cancelled = false;
-    let sound: Audio.Sound | null = null;
-    const timeout = setTimeout(onFinish, item.durationMs || 5200);
+    let finished = false;
+    let sound: AudioPlayer | null = null;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    const finishOnce = () => {
+      if (finished || cancelled) return;
+      finished = true;
+      onFinish(item.id);
+    };
     const start = async () => {
       if (item.soundUrl) {
         try {
-          await Audio.setAudioModeAsync({
-            playsInSilentModeIOS: true,
-            interruptionModeIOS: 1,
-            interruptionModeAndroid: 1,
-            shouldDuckAndroid: true,
+          await setAudioModeAsync({
+            playsInSilentMode: true,
+            interruptionMode: 'duckOthers',
           });
-          const loaded = await Audio.Sound.createAsync(
-            { uri: item.soundUrl },
-            { shouldPlay: false, volume: 0.78 },
-          );
-          sound = loaded.sound;
+          sound = createAudioPlayer({ uri: item.soundUrl });
+          sound.volume = 0.78;
         } catch {
           sound = null;
         }
       }
       if (cancelled) {
-        await sound?.unloadAsync().catch(() => undefined);
+        sound?.release();
         return;
       }
       requestAnimationFrame(() => {
         lottieRef.current?.reset();
         lottieRef.current?.play();
-        void sound?.playAsync();
+        sound?.play();
+        timeout = setTimeout(finishOnce, item.durationMs || 5200);
       });
     };
     void start();
     return () => {
       cancelled = true;
-      clearTimeout(timeout);
+      if (timeout) clearTimeout(timeout);
       if (sound) {
-        void sound.stopAsync().catch(() => undefined);
-        void sound.unloadAsync().catch(() => undefined);
+        sound.pause();
+        sound.release();
       }
     };
   }, [item, onFinish]);
@@ -93,7 +95,7 @@ export function GiftAnimationPlayer({ item, onFinish }: Props) {
         loop={false}
         autoPlay={false}
         resizeMode="cover"
-        onAnimationFinish={onFinish}
+        onAnimationFinish={() => onFinish(item.id)}
         style={styles.lottie}
       />
       {(item.title || item.senderName || item.giftName) ? (

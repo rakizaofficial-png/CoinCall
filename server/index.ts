@@ -38,7 +38,13 @@ import {
   registerHostAppUpdateRoutes,
 } from './hostAppUpdate.ts';
 import {
+  authenticateUserToken,
+  bearerToken,
+  dumpUserAccounts,
+  getUserAccountById,
+  loadUserAccounts,
   loginUser,
+  logoutUserToken,
   publicAuthUser,
   registerUser,
 } from './userAuth.ts';
@@ -520,7 +526,14 @@ function requireUserMatch(req: express.Request, res: express.Response, userId: s
     res.status(400).json({ error: 'userId required' });
     return false;
   }
-  if (headerId && headerId === userId) return true;
+  if (headerId && headerId === userId) {
+    const registeredAccount = getUserAccountById(userId);
+    if (!registeredAccount) return true;
+    const account = authenticateUserToken(bearerToken(req.headers.authorization));
+    if (account?.userId === userId) return true;
+    res.status(401).json({ error: 'Valid account session required' });
+    return false;
+  }
   res.status(401).json({ error: 'X-User-Id must match userId (or admin key)' });
   return false;
 }
@@ -676,6 +689,22 @@ app.post('/api/users/register', (req, res) => {
     role: 'user',
     displayName: account.displayName,
   });
+  const welcomeAmount = Math.min(100, Math.max(0, welcomeBonusCoins()));
+  if (!hasWelcomeBonusAlready(account.userId) && welcomeAmount > 0) {
+    const minted = mintCoins(coinDeps(), {
+      txnKey: `welcome:${account.userId}`,
+      type: 'reward_welcome',
+      userId: account.userId,
+      amount: welcomeAmount,
+      reason: 'Welcome bonus',
+    });
+    if (minted.ok) {
+      markWelcomeBonusPaid(account.userId);
+      wallet.xp = Math.max(wallet.xp, 10);
+      wallets.set(account.userId, wallet);
+      broadcastWallet(account.userId);
+    }
+  }
   touchAutoCallHeartbeat({
     userId: account.userId,
     coinBalance: wallet.coinBalance,
@@ -702,6 +731,16 @@ app.post('/api/users/login', (req, res) => {
   });
   persist();
   res.json(publicAuthUser(account));
+});
+
+/** Revoke only the current device session; other owned devices stay signed in. */
+app.post('/api/users/logout', (req, res) => {
+  const userId = String(req.body?.userId || req.headers['x-user-id'] || '').trim();
+  if (!requireUserMatch(req, res, userId)) return;
+  const token = bearerToken(req.headers.authorization);
+  logoutUserToken(token);
+  persist();
+  res.json({ ok: true });
 });
 
 /**
@@ -2811,6 +2850,12 @@ function resolveWalletUserId(
 ): { userId: string; restored: boolean } {
   const req = String(requested || '').trim();
   const inst = String(installId || '').trim();
+  // An authenticated account owns one wallet across every device. A stale
+  // install-to-guest mapping must never replace that account wallet.
+  if (getUserAccountById(req)) {
+    if (inst) installUserMap.set(inst, req);
+    return { userId: req, restored: false };
+  }
   if (inst) {
     const mapped = installUserMap.get(inst);
     if (mapped && wallets.has(mapped) && mapped !== req) {
@@ -2851,6 +2896,7 @@ app.post('/api/wallet/me', (req, res) => {
     res.status(400).json({ error: 'userId required' });
     return;
   }
+  if (!requireUserMatch(req, res, requestedId)) return;
   const installId = readInstallId(req);
   const { userId, restored } = resolveWalletUserId(requestedId, installId);
   if (installId && !installUserMap.has(installId)) {
@@ -3265,6 +3311,7 @@ app.get('/api/wallet/history/:userId', (req, res) => {
     res.status(400).json({ error: 'userId required' });
     return;
   }
+  if (!requireUserMatch(req, res, userId)) return;
   ensureWallet(userId);
   res.json({ history: walletLedger.get(userId) || [] });
 });
@@ -3367,6 +3414,11 @@ app.post('/api/wallet/premium', (req, res) => {
 
 app.get('/api/wallet/:userId', (req, res) => {
   const userId = String(req.params.userId || '').trim();
+  if (!userId) {
+    res.status(400).json({ error: 'userId required' });
+    return;
+  }
+  if (!requireUserMatch(req, res, userId)) return;
   const row = ensureWallet(userId);
   res.json({ wallet: walletPublic(row) });
 });
@@ -4555,14 +4607,23 @@ registerAgencyRoutes(app, {
     const hosts = listHosts();
     linkDemoHostsIfEmpty(hosts.map((h) => h.id));
     return hosts.map((h) => {
-      const agencyId = getAgencyIdForHost(h.id) || undefined;
+      const agencyId =
+        getAgencyIdForHost(h.id) ||
+        getAgencyIdForHost(h.hostId) ||
+        undefined;
       const agency = agencyId ? getAgency(agencyId) : undefined;
       return {
         hostId: h.id,
         name: h.name,
         revenueGenerated: h.revenueGenerated || 0,
+        revenueMonth: h.revenueMonth || 0,
         pendingEarnings: h.pendingEarnings || 0,
         paidEarnings: h.paidEarnings || 0,
+        coinBalance: h.coinBalance || 0,
+        categories: h.categories || [],
+        callEarnings: h.callEarnings || 0,
+        giftEarnings: h.giftEarnings || 0,
+        liveEarnings: h.liveEarnings || 0,
         type: (agencyId ? 'agency' : 'individual') as 'agency' | 'individual',
         agencyId,
         agencyName: agency?.name,
@@ -4910,6 +4971,7 @@ function buildSnapshot(): PersistedSnapshot {
       installId,
       userId,
     })),
+    userAccounts: dumpUserAccounts() as unknown as Array<Record<string, unknown>>,
     ...dumpAgenciesForSnapshot(),
     ...dumpManagedHostsForSnapshot(),
     hostAppUpdate: dumpHostAppUpdateForSnapshot() as unknown as Record<string, unknown>,
@@ -4923,6 +4985,9 @@ function persist() {
 function restoreFromDisk() {
   const snap = loadSnapshot();
   if (!snap) return;
+  if (Array.isArray(snap.userAccounts)) {
+    loadUserAccounts(snap.userAccounts as unknown as ReturnType<typeof dumpUserAccounts>);
+  }
   for (const w of snap.wallets || []) {
     const row = w as unknown as WalletRow;
     if (row?.userId) {
@@ -5090,6 +5155,9 @@ async function applyMongoOrDisk() {
       console.warn('[persist] Mongo seed failed', e);
     }
     return;
+  }
+  if (Array.isArray(snap.userAccounts)) {
+    loadUserAccounts(snap.userAccounts as unknown as ReturnType<typeof dumpUserAccounts>);
   }
   for (const w of snap.wallets || []) {
     const row = w as unknown as WalletRow;

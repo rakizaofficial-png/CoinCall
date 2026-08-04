@@ -37,7 +37,7 @@ let session: LiveSession | null = null;
 let beautyRegistered = false;
 let beautyExtension: any = null;
 let currentPreset: BeautyPreset = 'snap';
-let currentDeepARIntensity = 0.82;
+let currentBeautyIntensity = 0.82;
 
 function apiRoot() {
   const raw = (env.apiBaseUrl || 'https://coincall-api.onrender.com/api').replace(
@@ -310,12 +310,12 @@ export async function setAgoraBeauty(
 }
 
 export async function setAgoraBeautyIntensity(intensity: number) {
-  currentDeepARIntensity = Math.max(0, Math.min(1, intensity));
+  currentBeautyIntensity = Math.max(0, Math.min(1, intensity));
   const preset = session?.beautyPreset ?? currentPreset;
   if (session?.beautyProcessor && preset !== 'off') {
     const opts = { ...BEAUTY_PRESETS[preset] };
-    opts.lighteningLevel = Math.min(1, opts.lighteningLevel * (0.55 + currentDeepARIntensity * 0.65));
-    opts.smoothnessLevel = Math.min(1, opts.smoothnessLevel * (0.55 + currentDeepARIntensity * 0.65));
+    opts.lighteningLevel = Math.min(1, opts.lighteningLevel * (0.55 + currentBeautyIntensity * 0.65));
+    opts.smoothnessLevel = Math.min(1, opts.smoothnessLevel * (0.55 + currentBeautyIntensity * 0.65));
     session.beautyProcessor.setOptions(opts);
   }
 }

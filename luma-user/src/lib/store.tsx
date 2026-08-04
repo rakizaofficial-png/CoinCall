@@ -23,6 +23,11 @@ import {
 } from "@/lib/walletApi";
 import { getRealtimeClient } from "@/lib/realtime/websocket";
 import { requireApiBase } from "@/config/apiConfig";
+import {
+  AUTH_CHANGED_EVENT,
+  getAuthHeaders,
+  getAuthUserId,
+} from "@/lib/auth";
 
 type Toast = { id: number; text: string };
 
@@ -80,7 +85,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [entranceBlast, setEntranceBlast] = useState(false);
   const [entranceReady, setEntranceReady] = useState(false);
   const [inbox, setInbox] = useState<InboxMessage[]>([]);
+  const [authUserId, setAuthUserId] = useState("");
   const graceRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const walletRequestRef = useRef(0);
 
   const vipTier = useMemo(() => vipTierFromXp(xp), [xp]);
   const unreadInbox = useMemo(
@@ -107,19 +114,69 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const syncWallet = useCallback(async () => {
-    const wallet = await fetchOrCreateWallet();
+  const applyWallet = useCallback((wallet: {
+    userId: string;
+    coinBalance: number;
+    xp: number;
+    isPremium: boolean;
+  }) => {
+    if (getAuthUserId() !== wallet.userId) return false;
     setUserId(wallet.userId);
     setCoins(wallet.coinBalance);
     setXp(wallet.xp);
     setPremium(wallet.isPremium);
+    return true;
+  }, []);
+
+  const syncWallet = useCallback(async () => {
+    const expectedUserId = getAuthUserId();
+    if (!expectedUserId) throw new Error("Please sign in to continue");
+    const requestId = ++walletRequestRef.current;
+    const wallet = await fetchOrCreateWallet();
+    if (
+      requestId !== walletRequestRef.current ||
+      getAuthUserId() !== expectedUserId
+    ) return;
+    applyWallet(wallet);
+  }, [applyWallet]);
+
+  useEffect(() => {
+    const refreshIdentity = () => setAuthUserId(getAuthUserId() || "");
+    refreshIdentity();
+    window.addEventListener(AUTH_CHANGED_EVENT, refreshIdentity);
+    window.addEventListener("storage", refreshIdentity);
+    return () => {
+      window.removeEventListener(AUTH_CHANGED_EVENT, refreshIdentity);
+      window.removeEventListener("storage", refreshIdentity);
+    };
   }, []);
 
   useEffect(() => {
     let cancelled = false;
     let unsub: (() => void) | undefined;
 
+    ++walletRequestRef.current;
+    if (!authUserId) {
+      void Promise.resolve().then(() => {
+        if (cancelled) return;
+        setUserId("");
+        setCoins(0);
+        setXp(0);
+        setPremium(false);
+        setInbox([]);
+        setReady(true);
+      });
+      return;
+    }
+
     (async () => {
+      await Promise.resolve();
+      if (cancelled) return;
+      setReady(false);
+      setUserId(authUserId);
+      setCoins(0);
+      setXp(0);
+      setPremium(false);
       try {
         const id = getDeviceUserId();
         if (cancelled) return;
@@ -133,6 +190,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         rt.connect();
         unsub = rt.subscribe((ev) => {
           if (ev.type === "wallet:updated" && ev.payload.userId === id) {
+            ++walletRequestRef.current;
             setCoins(ev.payload.coinBalance);
             setXp(ev.payload.xp);
           }
@@ -154,7 +212,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         try {
           const inboxRes = await fetch(
             `${requireApiBase()}/users/inbox?userId=${encodeURIComponent(id)}`,
-            { cache: "no-store" },
+            { headers: getAuthHeaders(id), cache: "no-store" },
           );
           if (inboxRes.ok) {
             const data = (await inboxRes.json()) as {
@@ -195,7 +253,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       unsub?.();
       if (graceRef.current) clearInterval(graceRef.current);
     };
-  }, [prependInbox, pushToast, syncWallet]);
+  }, [authUserId, prependInbox, pushToast, syncWallet]);
 
   const clearEntranceBlast = useCallback(() => setEntranceBlast(false), []);
   const triggerEntranceBlast = useCallback(() => setEntranceBlast(true), []);
@@ -230,13 +288,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const spendAsync = useCallback(
     async (amount: number, label?: string) => {
+      if (!ready || !getAuthUserId()) {
+        pushToast("Wallet is syncing — try again in a moment");
+        return false;
+      }
       try {
+        const expectedUserId = getAuthUserId();
+        const requestId = ++walletRequestRef.current;
         const wallet = await spendCoinsApi({
           amount,
           reason: label || "spend",
         });
-        setCoins(wallet.coinBalance);
-        setXp(wallet.xp);
+        if (
+          requestId === walletRequestRef.current &&
+          expectedUserId === getAuthUserId()
+        ) applyWallet(wallet);
         if (label) pushToast(label);
         return true;
       } catch {
@@ -245,31 +311,41 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return false;
       }
     },
-    [openTopUp, pushToast],
+    [applyWallet, openTopUp, pushToast, ready],
   );
 
   const spend = useCallback(
     (amount: number, label?: string) => {
+      if (!ready || !getAuthUserId()) {
+        pushToast("Wallet is syncing — try again in a moment");
+        return false;
+      }
       if (coins < amount) {
         openTopUp(15);
         pushToast("Not enough coins — recharge required");
         return false;
       }
-      setCoins((c) => c - amount);
-      setXp((x) => x + amount);
-      void spendCoinsApi({ amount, reason: label || "spend" }).catch(() => {
-        void syncWallet();
-        openTopUp(15);
-      });
+      const expectedUserId = getAuthUserId();
+      const requestId = ++walletRequestRef.current;
+      void spendCoinsApi({ amount, reason: label || "spend" })
+        .then((wallet) => {
+          if (
+            requestId === walletRequestRef.current &&
+            expectedUserId === getAuthUserId()
+          ) applyWallet(wallet);
+        })
+        .catch(() => {
+          void syncWallet();
+          openTopUp(15);
+        });
       if (label) pushToast(label);
       return true;
     },
-    [coins, openTopUp, pushToast, syncWallet],
+    [applyWallet, coins, openTopUp, pushToast, ready, syncWallet],
   );
 
   const addCoins = useCallback(
-    (amount: number, label?: string) => {
-      setCoins((c) => c + amount);
+    (_amount: number, label?: string) => {
       if (label) pushToast(label);
       closeTopUp();
       void syncWallet();

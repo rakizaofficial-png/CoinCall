@@ -42,6 +42,18 @@ export type HostPushCategory =
 
 export async function registerHostPushToken(hostId: string): Promise<string | null> {
   if (Platform.OS === 'web' || !hostId) return null;
+  const nativePushConfigured = Boolean(
+    (
+      Constants.expoConfig?.extra as
+        | { nativePushConfigured?: boolean }
+        | undefined
+    )?.nativePushConfigured,
+  );
+  if (Platform.OS === 'android' && !nativePushConfigured) {
+    // Android push requires the project's real google-services.json. Avoid
+    // calling Firebase APIs (and logging a false app failure) until supplied.
+    return null;
+  }
   const mod = await loadNotifications();
   if (!mod) return null;
 

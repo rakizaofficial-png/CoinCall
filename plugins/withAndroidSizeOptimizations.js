@@ -8,7 +8,6 @@
 const {
   withGradleProperties,
   withAppBuildGradle,
-  withProjectBuildGradle,
   withDangerousMod,
   createRunOncePlugin,
 } = require('@expo/config-plugins');
@@ -42,25 +41,6 @@ function setGradleProp(props, key, value) {
 }
 
 function withAndroidSizeOptimizations(config) {
-  config = withProjectBuildGradle(config, (cfg) => {
-    let contents = cfg.modResults.contents;
-    const marker = '// CoinCall: modern SDK overrides for legacy DeepAR RN module';
-    if (!contents.includes(marker)) {
-      contents += `
-
-${marker}
-ext {
-    Deepar_compileSdkVersion = 36
-    Deepar_buildToolsVersion = "36.0.0"
-    Deepar_minSdkVersion = 24
-    Deepar_targetSdkVersion = 35
-}
-`;
-    }
-    cfg.modResults.contents = contents;
-    return cfg;
-  });
-
   config = withGradleProperties(config, (cfg) => {
     const props = cfg.modResults;
     // Phones: arm64 only for universal APK size. AAB still splits per-device.
@@ -68,8 +48,8 @@ ext {
     setGradleProp(props, 'android.enableMinifyInReleaseBuilds', 'true');
     setGradleProp(props, 'android.enableShrinkResourcesInReleaseBuilds', 'true');
     setGradleProp(props, 'android.enablePngCrunchInReleaseBuilds', 'true');
-    // Compress .so inside APK (critical size win vs storeUncompressed)
-    setGradleProp(props, 'expo.useLegacyPackaging', 'true');
+    // Modern native packaging is required for Android 15+ 16 KB page-size support.
+    setGradleProp(props, 'expo.useLegacyPackaging', 'false');
     setGradleProp(
       props,
       'android.packagingOptions.excludes',
@@ -112,6 +92,45 @@ ext {
           );
         },
       );
+    }
+    const agoraAoslMarker =
+      '// CoinCall: Agora RTC and RTM ship incompatible libaosl.so builds.';
+    if (!contents.includes(agoraAoslMarker)) {
+      contents += `
+
+${agoraAoslMarker}
+// Put the RTC copy in the app's own JNI source set so RTC and RTM can coexist
+// without pickFirst selecting RTM's older AOSL runtime.
+def coinCallAgoraRtcJniDir = layout.buildDirectory.dir("generated/coincall-agora-rtc-jni")
+
+configurations {
+    coinCallAgoraRtcAar
+}
+
+dependencies {
+    coinCallAgoraRtcAar("io.agora.rtc:agora-special-full:4.6.2.70@aar") {
+        transitive = false
+    }
+}
+
+tasks.register("prepareCoinCallAgoraRtcAosl", Sync) {
+    from({ configurations.coinCallAgoraRtcAar.collect { zipTree(it) } })
+    include("jni/**/libaosl.so")
+    into(coinCallAgoraRtcJniDir)
+}
+
+android {
+    sourceSets {
+        main {
+            jniLibs.srcDir(coinCallAgoraRtcJniDir)
+        }
+    }
+}
+
+tasks.named("preBuild").configure {
+    dependsOn("prepareCoinCallAgoraRtcAosl")
+}
+`;
     }
     cfg.modResults.contents = contents;
     return cfg;

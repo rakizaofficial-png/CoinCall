@@ -17,6 +17,7 @@ import {
   listPresence,
   pruneHosts,
 } from './presenceStore.ts';
+import { dumpCoinTxns } from './coinLedger.ts';
 
 export type HostLifecycleStatus =
   | 'pending'
@@ -84,6 +85,10 @@ export type HostManagedRecord = {
   rating: number;
   reportsReceived: number;
   revenueGenerated: number;
+  revenueMonth?: number;
+  callEarnings?: number;
+  giftEarnings?: number;
+  liveEarnings?: number;
   loginHistory: { at: number; ip?: string; device?: string }[];
   deviceInfo: {
     platform?: string;
@@ -270,13 +275,115 @@ export function listHosts(): HostManagedRecord[] {
     rows[hit] = merged;
     keysFor(merged).forEach((key) => keyToIndex.set(key, hit));
   }
-  return rows.sort(
+  const monthStart = new Date();
+  monthStart.setUTCDate(1);
+  monthStart.setUTCHours(0, 0, 0, 0);
+  const ledger = new Map<
+    string,
+    {
+      total: number;
+      month: number;
+      call: number;
+      gift: number;
+      live: number;
+      latestBalance?: number;
+      latestAt: number;
+    }
+  >();
+  for (const txn of dumpCoinTxns()) {
+    if (
+      txn.status !== 'completed' ||
+      !txn.hostId ||
+      !Number.isFinite(txn.coinsCreditedHost) ||
+      txn.coinsCreditedHost <= 0
+    ) {
+      continue;
+    }
+    const current = ledger.get(txn.hostId) || {
+      total: 0,
+      month: 0,
+      call: 0,
+      gift: 0,
+      live: 0,
+      latestAt: 0,
+    };
+    const coins = Math.floor(txn.coinsCreditedHost);
+    current.total += coins;
+    if (txn.createdAt >= monthStart.getTime()) current.month += coins;
+    if (txn.type === 'call_minute') current.call += coins;
+    if (txn.type === 'gift') current.gift += coins;
+    if (txn.type === 'live_entry') current.live += coins;
+    if (
+      typeof txn.hostBalanceAfter === 'number' &&
+      txn.createdAt >= current.latestAt
+    ) {
+      current.latestBalance = txn.hostBalanceAfter;
+      current.latestAt = txn.createdAt;
+    }
+    ledger.set(txn.hostId, current);
+  }
+
+  const reconciled = rows.map((host) => {
+    const aliases = new Set([host.id, host.hostId].filter(Boolean));
+    const totals = {
+      total: 0,
+      month: 0,
+      call: 0,
+      gift: 0,
+      live: 0,
+      latestBalance: undefined as number | undefined,
+      latestAt: 0,
+    };
+    for (const alias of aliases) {
+      const item = ledger.get(alias);
+      if (!item) continue;
+      totals.total += item.total;
+      totals.month += item.month;
+      totals.call += item.call;
+      totals.gift += item.gift;
+      totals.live += item.live;
+      if (item.latestAt >= totals.latestAt) {
+        totals.latestAt = item.latestAt;
+        totals.latestBalance = item.latestBalance;
+      }
+    }
+    const revenueGenerated = Math.max(
+      host.revenueGenerated || 0,
+      totals.total,
+    );
+    return {
+      ...host,
+      revenueGenerated,
+      revenueMonth: Math.max(host.revenueMonth || 0, totals.month),
+      callEarnings: Math.max(host.callEarnings || 0, totals.call),
+      giftEarnings: Math.max(host.giftEarnings || 0, totals.gift),
+      liveEarnings: Math.max(host.liveEarnings || 0, totals.live),
+      pendingEarnings: Math.max(
+        host.pendingEarnings || 0,
+        revenueGenerated - (host.paidEarnings || 0),
+      ),
+      coinBalance:
+        totals.latestBalance == null
+          ? host.coinBalance
+          : Math.max(host.coinBalance || 0, totals.latestBalance),
+    };
+  });
+
+  return reconciled.sort(
     (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0),
   );
 }
 
 export function getHost(id: string) {
   return registry.get(id) || null;
+}
+
+function agencyIdForHost(id: string): string | null {
+  const managed = registry.get(id);
+  return (
+    getAgencyIdForHost(id) ||
+    (managed?.hostId ? getAgencyIdForHost(managed.hostId) : null)
+  );
 }
 
 /** Alias used by the call bridge */
@@ -332,7 +439,9 @@ export function recordHostEarning(
   }
   row.updatedAt = now();
   registry.set(hostId, row);
-  creditAgencyRevenue(hostId, n);
+  if (!creditAgencyRevenue(hostId, n) && row.hostId !== hostId) {
+    creditAgencyRevenue(row.hostId, n);
+  }
   opts?.broadcast?.({
     type: 'host:updated',
     payload: {
@@ -491,7 +600,7 @@ function assertAgencyHostAccess(
   if (!meta.agencyId) {
     return { ok: false, status: 403, error: 'Agency scope required' };
   }
-  if (getAgencyIdForHost(hostId) !== meta.agencyId) {
+  if (agencyIdForHost(hostId) !== meta.agencyId) {
     return { ok: false, status: 403, error: 'Host is not under your agency' };
   }
   const agency = getAgency(meta.agencyId);
@@ -928,7 +1037,7 @@ export function registerHostManagementRoutes(
         callsEnabled: managed ? managed.callsEnabled : true,
         banned: managed?.banned || false,
         suspended: managed?.suspended || false,
-        agencyId: getAgencyIdForHost(h.id) || undefined,
+        agencyId: agencyIdForHost(h.id) || undefined,
       };
     });
     if (scopeAgency) {
@@ -953,7 +1062,7 @@ export function registerHostManagementRoutes(
       (meta.adminRole === 'agency' ? meta.agencyId : undefined);
     let rows = listHosts();
     if (scopeAgency) {
-      rows = rows.filter((h) => getAgencyIdForHost(h.id) === scopeAgency);
+      rows = rows.filter((h) => agencyIdForHost(h.id) === scopeAgency);
     }
     if (status !== 'all') {
       rows = rows.filter((h) => h.hostStatus === status);
@@ -983,8 +1092,8 @@ export function registerHostManagementRoutes(
     res.json({
       hosts: rows.map((h) => ({
         ...h,
-        agencyId: getAgencyIdForHost(h.id) || undefined,
-        agencyName: getAgency(getAgencyIdForHost(h.id) || '')?.name,
+        agencyId: agencyIdForHost(h.id) || undefined,
+        agencyName: getAgency(agencyIdForHost(h.id) || '')?.name,
       })),
       total: rows.length,
     });
