@@ -1,36 +1,36 @@
-import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
+import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 import { Platform, Vibration } from 'react-native';
+import { stopAllGiftSounds } from '../services/giftSoundService';
 
 const ringtoneAsset = require('../../assets/audio/incoming-call-ringtone.mp3');
 
-let sound: Audio.Sound | null = null;
+let sound: AudioPlayer | null = null;
 let vibrationTimer: ReturnType<typeof setInterval> | null = null;
 let stopTimer: ReturnType<typeof setTimeout> | null = null;
 let lifecycleId = 0;
+let activeCallKey: string | null = null;
 
 async function configureRingAudioSession() {
   if (Platform.OS === 'web') return;
-  await Audio.setAudioModeAsync({
-    allowsRecordingIOS: false,
-    staysActiveInBackground: true,
-    playsInSilentModeIOS: true,
-    shouldDuckAndroid: false,
-    playThroughEarpieceAndroid: false,
-    interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
-    interruptionModeIOS: InterruptionModeIOS.DoNotMix,
+  await setAudioModeAsync({
+    // Keep the recording category alive when a call rings over an active live.
+    // Switching this off tears down the broadcaster microphone session.
+    allowsRecording: true,
+    shouldPlayInBackground: true,
+    playsInSilentMode: true,
+    shouldRouteThroughEarpiece: false,
+    interruptionMode: 'doNotMix',
   });
 }
 
 async function configureCallAudioSession() {
   if (Platform.OS === 'web') return;
-  await Audio.setAudioModeAsync({
-    allowsRecordingIOS: true,
-    staysActiveInBackground: true,
-    playsInSilentModeIOS: true,
-    shouldDuckAndroid: false,
-    playThroughEarpieceAndroid: false,
-    interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
-    interruptionModeIOS: InterruptionModeIOS.DoNotMix,
+  await setAudioModeAsync({
+    allowsRecording: true,
+    shouldPlayInBackground: true,
+    playsInSilentMode: true,
+    shouldRouteThroughEarpiece: false,
+    interruptionMode: 'doNotMix',
   });
 }
 
@@ -57,34 +57,35 @@ function stopVibration() {
   Vibration.cancel();
 }
 
-export async function startIncomingRingtone(timeoutMs = 30_000) {
+export async function startIncomingRingtone(
+  timeoutMs = 30_000,
+  callKey?: string,
+) {
+  const nextKey = callKey || `ring_${Date.now()}`;
+  if (activeCallKey === nextKey && stopTimer) return;
   const requestId = ++lifecycleId;
+  activeCallKey = nextKey;
   try {
     await releaseCurrentRingtone();
     if (requestId !== lifecycleId) return;
-    await configureRingAudioSession();
-    if (requestId !== lifecycleId) return;
-    const created = await Audio.Sound.createAsync(
-      ringtoneAsset,
-      {
-        isLooping: true,
-        shouldPlay: true,
-        volume: 0.72,
-        progressUpdateIntervalMillis: 500,
-      },
-      undefined,
-      true,
-    );
-    if (requestId !== lifecycleId) {
-      await created.sound.stopAsync().catch(() => undefined);
-      await created.sound.unloadAsync().catch(() => undefined);
-      return;
-    }
-    sound = created.sound;
-    startSubtleVibration();
+    activeCallKey = nextKey;
     stopTimer = setTimeout(() => {
       void stopIncomingRingtone();
     }, timeoutMs);
+    await stopAllGiftSounds();
+    await configureRingAudioSession();
+    if (requestId !== lifecycleId) return;
+    const created = createAudioPlayer(ringtoneAsset);
+    created.loop = true;
+    created.volume = 0.72;
+    created.play();
+    if (requestId !== lifecycleId) {
+      created.pause();
+      created.release();
+      return;
+    }
+    sound = created;
+    startSubtleVibration();
   } catch (e) {
     if (requestId === lifecycleId) {
       console.warn('[ringtone] start failed', e);
@@ -103,12 +104,12 @@ async function releaseCurrentRingtone() {
   sound = null;
   if (!current) return;
   try {
-    await current.stopAsync();
+    current.pause();
   } catch {
     /* already stopped */
   }
   try {
-    await current.unloadAsync();
+    current.release();
   } catch {
     /* already unloaded */
   }
@@ -118,11 +119,13 @@ export async function stopIncomingRingtone() {
   // Invalidates an Audio.Sound load already in progress. Without this token,
   // createAsync could finish after Accept and start ringing inside the call.
   lifecycleId += 1;
+  activeCallKey = null;
   await releaseCurrentRingtone();
 }
 
 export async function prepareAudioForAgoraCall() {
   await stopIncomingRingtone();
+  await stopAllGiftSounds();
   await configureCallAudioSession();
 }
 

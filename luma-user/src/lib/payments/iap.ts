@@ -16,6 +16,7 @@
  */
 
 import { requireApiBase } from "@/config/apiConfig";
+import { getAuthHeaders } from "@/lib/auth";
 import { getIapProduct } from "./iapCatalog";
 
 export type IapPlatform = "google" | "apple" | "web";
@@ -59,7 +60,7 @@ export async function verifyIapPurchase(input: {
 
   return apiJson<VerifyIapResult>("/wallet/iap/verify", {
     method: "POST",
-    headers: { "X-User-Id": input.userId },
+    headers: getAuthHeaders(input.userId),
     body: JSON.stringify({
       userId: input.userId,
       productId: input.productId,
@@ -81,6 +82,7 @@ export async function createIapCheckoutSession(input: {
 }): Promise<{ checkoutUrl: string; sessionId: string }> {
   return apiJson("/wallet/iap/session", {
     method: "POST",
+    headers: getAuthHeaders(input.userId),
     body: JSON.stringify({
       userId: input.userId,
       productId: input.productId,

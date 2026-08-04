@@ -638,6 +638,7 @@ export function HostManagementPanel({
                   <th>Host / User</th>
                   <th>App ID</th>
                   <th>Country</th>
+                  <th>Category</th>
                   <th>Status</th>
                   <th>Presence</th>
                   <th>Earnings</th>
@@ -694,6 +695,11 @@ export function HostManagementPanel({
                         <code className="desk-app-id">{appIdOf(h)}</code>
                       </td>
                       <td className="meta">{h.country || '—'}</td>
+                      <td className="meta">
+                        {h.categories?.length
+                          ? h.categories.slice(0, 2).join(', ')
+                          : 'General'}
+                      </td>
                       <td>
                         <span className={`badge solid ${st}`}>
                           {st.replace('_', ' ')}
@@ -710,6 +716,11 @@ export function HostManagementPanel({
                           <small>
                             pend {(h.pendingEarnings || 0).toLocaleString()} · bal{' '}
                             {(h.coinBalance || 0).toLocaleString()}
+                          </small>
+                          <small>
+                            call {(h.callEarnings || 0).toLocaleString()} · gift{' '}
+                            {(h.giftEarnings || 0).toLocaleString()} · live{' '}
+                            {(h.liveEarnings || 0).toLocaleString()}
                           </small>
                         </div>
                       </td>

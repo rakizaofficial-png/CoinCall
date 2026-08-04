@@ -4,6 +4,7 @@
  */
 
 import { apiConfig, requireApiBase } from "@/config/apiConfig";
+import { getAuthHeaders } from "@/lib/auth";
 
 export const API_BASE_URL = apiConfig.apiBaseUrl;
 
@@ -134,7 +135,7 @@ export async function createCall(input: {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "X-User-Id": input.userId,
+      ...getAuthHeaders(input.userId),
     },
     body: JSON.stringify(input),
   });
@@ -158,7 +159,7 @@ export async function billCallMinute(input: {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "X-User-Id": input.userId,
+      ...getAuthHeaders(input.userId),
     },
     body: JSON.stringify({
       userId: input.userId,
@@ -255,7 +256,7 @@ export async function checkLiveAccess(roomId: string, userId: string) {
     `${requireApiBase()}/live/rooms/${encodeURIComponent(roomId)}/access?userId=${encodeURIComponent(userId)}`,
     {
       cache: "no-store",
-      headers: { "X-User-Id": userId },
+      headers: getAuthHeaders(userId),
     },
   );
   return parse<LiveAccess>(res);
@@ -270,7 +271,7 @@ export async function joinLiveRoom(
     `${requireApiBase()}/live/rooms/${encodeURIComponent(roomId)}/join`,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-User-Id": userId },
+      headers: { "Content-Type": "application/json", ...getAuthHeaders(userId) },
       body: JSON.stringify({ userId, userName }),
     },
   );

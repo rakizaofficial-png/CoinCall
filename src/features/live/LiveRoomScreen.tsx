@@ -97,7 +97,9 @@ export function LiveRoomScreen({ navigation, route }: Props) {
 
   const [muted, setMuted] = useState(false);
   const [cameraOff, setCameraOff] = useState(false);
-  const [beauty, setBeauty] = useState(goLiveDraft.beautyOn);
+  const [beauty, setBeauty] = useState(
+    Platform.OS === 'web' && goLiveDraft.beautyOn,
+  );
   const [beautyPreset, setBeautyPreset] = useState<BeautyPreset>(
     goLiveDraft.beautyPreset,
   );
@@ -173,13 +175,18 @@ export function LiveRoomScreen({ navigation, route }: Props) {
     void setAgoraBeautyIntensity(beauty ? beautyIntensity : 0);
   }, [beauty, beautyIntensity, beautyPreset, cameraReady, hostMode]);
 
-  // Start broadcast immediately on mount — don't block on UI render
+  // Let the previous preview screen fully unmount before Agora claims the
+  // physical camera. This avoids a CameraView/Agora ownership race on Android.
   useEffect(() => {
     if (!hostMode || !room?.channel) return;
     if (livePausedForCall) return;
     broadcastStarted.current = false;
-    void startBroadcast();
+    const startTimer = setTimeout(
+      () => void startBroadcast(),
+      Platform.OS === 'web' ? 0 : 300,
+    );
     return () => {
+      clearTimeout(startTimer);
       broadcastStarted.current = false;
       if (livePausedForCall) return;
       void stopAgoraCall();
@@ -325,8 +332,10 @@ export function LiveRoomScreen({ navigation, route }: Props) {
       {hostMode ? (
         Platform.OS === 'web' ? (
           <div id="live-local-mount" style={webFill} />
-        ) : (
+        ) : cameraReady ? (
           <LiveBroadcastSurface cameraOff={cameraOff} />
+        ) : (
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: '#05070F' }]} />
         )
       ) : (
         <Image
@@ -456,11 +465,13 @@ export function LiveRoomScreen({ navigation, route }: Props) {
             }}
           />
           <Fab icon={FlipHorizontal} onPress={() => void switchAgoraCamera()} />
-          <Fab
-            icon={Sparkles}
-            active={beauty}
-            onPress={() => setSheet(sheet === 'filters' ? 'none' : 'filters')}
-          />
+          {Platform.OS === 'web' ? (
+            <Fab
+              icon={Sparkles}
+              active={beauty}
+              onPress={() => setSheet(sheet === 'filters' ? 'none' : 'filters')}
+            />
+          ) : null}
           <Fab
             icon={entryLocked ? Lock : LockOpen}
             active={entryLocked}
@@ -615,11 +626,11 @@ export function LiveRoomScreen({ navigation, route }: Props) {
       )}
 
       {/* Filter sheet */}
-      {sheet === 'filters' && (
-        <BottomSheet onClose={() => setSheet('none')} title="DeepAR Glam Studio">
+      {Platform.OS === 'web' && sheet === 'filters' && (
+        <BottomSheet onClose={() => setSheet('none')} title="Live Beauty Studio">
           <View style={styles.filterHead}>
             <Text style={styles.filterHint}>
-              Official DeepAR effects swap instantly without stopping Agora live.
+              Browser beauty effects update without stopping your live stream.
             </Text>
             <Switch
               value={beauty}
@@ -670,7 +681,7 @@ export function LiveRoomScreen({ navigation, route }: Props) {
             }}
           />
           <Text style={styles.filterPathHint} numberOfLines={2}>
-            Assets load from EXPO_PUBLIC_DEEPAR_EFFECT_BASE_URL / beauty + accessories folders.
+            Beauty processing is available in the browser studio.
           </Text>
         </BottomSheet>
       )}

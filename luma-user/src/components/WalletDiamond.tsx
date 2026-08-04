@@ -7,7 +7,7 @@ import { useApp } from "@/lib/store";
 
 /** Pulsing metallic diamond wallet indicator */
 export function WalletDiamond({ compact }: { compact?: boolean }) {
-  const { coins } = useApp();
+  const { coins, ready } = useApp();
 
   return (
     <Link
@@ -21,7 +21,7 @@ export function WalletDiamond({ compact }: { compact?: boolean }) {
         <span className="diamond-ring absolute inset-0 rounded-full" />
       </span>
       <span className="text-sm font-bold tabular-nums text-sand">
-        {coins.toLocaleString()}
+        {ready ? coins.toLocaleString() : "…"}
       </span>
       <motion.span
         className="pointer-events-none absolute inset-0 rounded-full border border-cyan/30"

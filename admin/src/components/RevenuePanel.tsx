@@ -119,9 +119,13 @@ export function RevenuePanel({ agencyId }: { agencyId?: string | null }) {
             <thead>
               <tr>
                 <th>Host</th>
+                <th>Category</th>
                 <th>Type</th>
                 <th>Agency</th>
-                <th>Revenue</th>
+                <th>Total earned</th>
+                <th>This month</th>
+                <th>Call / Gift / Live</th>
+                <th>Coins</th>
                 <th>Pending</th>
                 <th>Paid</th>
               </tr>
@@ -131,6 +135,9 @@ export function RevenuePanel({ agencyId }: { agencyId?: string | null }) {
                 <tr key={h.hostId}>
                   <td>
                     <strong>{h.name}</strong>
+                  </td>
+                  <td className="meta">
+                    {h.categories?.length ? h.categories.join(', ') : 'General'}
                   </td>
                   <td>
                     <span
@@ -145,6 +152,13 @@ export function RevenuePanel({ agencyId }: { agencyId?: string | null }) {
                   <td>
                     <strong>{h.revenueGenerated.toLocaleString()}</strong>
                   </td>
+                  <td>{(h.revenueMonth || 0).toLocaleString()}</td>
+                  <td className="meta">
+                    {(h.callEarnings || 0).toLocaleString()} /{' '}
+                    {(h.giftEarnings || 0).toLocaleString()} /{' '}
+                    {(h.liveEarnings || 0).toLocaleString()}
+                  </td>
+                  <td>{(h.coinBalance || 0).toLocaleString()}</td>
                   <td>{h.pendingEarnings.toLocaleString()}</td>
                   <td>{h.paidEarnings.toLocaleString()}</td>
                 </tr>

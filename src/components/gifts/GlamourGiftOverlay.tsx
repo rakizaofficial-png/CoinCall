@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { StyleSheet, Text, Vibration, View } from 'react-native';
 import Animated, {
   Easing,
@@ -138,41 +138,54 @@ function GiftFlyThrough({ gift }: { gift: GiftItem }) {
  * Full-screen glamour gift for host live/call — Reanimated only (60fps-friendly).
  */
 export function GlamourGiftOverlay({ item, onDone }: Props) {
-  const gift = item
-    ? resolveGift(item.giftId || '') ||
-      ({
-        id: 'custom',
-        name: item.giftName,
-        emoji: item.emoji,
-        coins: item.coins,
-        rarity: 'rare' as const,
-        effect: 'cinematic' as const,
-        tier: 'luxury' as const,
-        animMs: 3600,
-        particles: 3,
-        gradient: ['#ff2a7a', '#c9184a'] as [string, string],
-        glow: 'rgba(255,42,122,0.6)',
-        category: 'vip' as const,
-        animationUrl: '',
-        soundUrl: 'https://actions.google.com/sounds/v1/cartoon/magic_chime.ogg',
-      } satisfies GiftItem)
-    : null;
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
+  const itemId = item?.id || null;
+  const gift = useMemo(
+    () =>
+      item
+        ? resolveGift(item.giftId || '') ||
+          ({
+            id: `custom_${item.giftId || item.giftName}`,
+            name: item.giftName,
+            emoji: item.emoji,
+            coins: item.coins,
+            rarity: 'rare' as const,
+            effect: 'cinematic' as const,
+            tier: 'luxury' as const,
+            animMs: 3600,
+            particles: 3,
+            gradient: ['#ff2a7a', '#c9184a'] as [string, string],
+            glow: 'rgba(255,42,122,0.6)',
+            category: 'vip' as const,
+            animationUrl: '',
+            soundUrl: '',
+          } satisfies GiftItem)
+        : null,
+    [item?.coins, item?.emoji, item?.giftId, item?.giftName],
+  );
 
   useEffect(() => {
-    if (!item || !gift) return;
+    if (!itemId || !gift) return;
     let cancelled = false;
+    let finished = false;
     let sound: Awaited<ReturnType<typeof playGiftSound>> = null;
     void playGiftSound(gift.id).then((player) => {
       if (cancelled) void stopGiftSound(player);
       else sound = player;
     });
-    const t = setTimeout(() => onDone?.(), gift.animMs);
+    const finishOnce = () => {
+      if (finished || cancelled) return;
+      finished = true;
+      onDoneRef.current?.();
+    };
+    const t = setTimeout(finishOnce, gift.animMs);
     return () => {
       cancelled = true;
       clearTimeout(t);
       void stopGiftSound(sound);
     };
-  }, [item, gift, onDone]);
+  }, [gift, itemId]);
 
   if (!item || !gift) return null;
 

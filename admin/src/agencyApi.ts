@@ -37,8 +37,14 @@ export type RevenueHostRow = {
   hostId: string;
   name: string;
   revenueGenerated: number;
+  revenueMonth: number;
   pendingEarnings: number;
   paidEarnings: number;
+  coinBalance: number;
+  categories: string[];
+  callEarnings: number;
+  giftEarnings: number;
+  liveEarnings: number;
   type: 'agency' | 'individual';
   agencyId?: string;
   agencyName?: string;

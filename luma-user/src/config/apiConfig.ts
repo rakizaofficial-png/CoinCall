@@ -85,10 +85,7 @@ export const apiConfig = {
   aiHostCdn: read("NEXT_PUBLIC_AI_HOST_CDN"),
   welcomeTeaserUrl: read("NEXT_PUBLIC_WELCOME_TEASER_URL"),
 
-  /**
-   * Anonymous device user id — replace with real auth (Firebase Auth / JWT)
-   * once you wire login. Stored in localStorage under this key.
-   */
+  /** Legacy identity key retained only for migration to email accounts. */
   deviceUserKey: "luma_device_user_id",
 } as const;
 

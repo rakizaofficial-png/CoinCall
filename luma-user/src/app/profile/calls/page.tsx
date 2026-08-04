@@ -7,6 +7,7 @@ import Link from "next/link";
 import { ArrowLeft, Clock, PhoneCall, PhoneMissed } from "lucide-react";
 import { requireApiBase } from "@/config/apiConfig";
 import { getDeviceUserId } from "@/lib/walletApi";
+import { getAuthHeaders } from "@/lib/auth";
 
 type CallRecord = {
   id: string;
@@ -70,7 +71,7 @@ export default function CallHistoryPage() {
         const userId = getDeviceUserId();
         const res = await fetch(
           `${requireApiBase()}/users/${encodeURIComponent(userId)}/calls?limit=100`,
-          { headers: { "X-User-Id": userId }, cache: "no-store" },
+          { headers: getAuthHeaders(userId), cache: "no-store" },
         );
         const data = (await res.json()) as { calls?: CallRecord[]; summary?: CallSummary };
         if (active) {

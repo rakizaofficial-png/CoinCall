@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4",
-    "agora-rtc-sdk-ng": "^4.24.6",
+    "agora-rtc-sdk-ng": "4.23.0",
     "agora-rtm": "^2.2.4",
     "framer-motion": "^12.42.2",
     "lottie-react": "^2.4.1",

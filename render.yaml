@@ -75,14 +75,6 @@ services:
         sync: false
       - key: EXPO_PUBLIC_AGORA_APP_ID
         sync: false
-      - key: EXPO_PUBLIC_DEEPAR_WEB_LICENSE_KEY
-        sync: false
-      - key: EXPO_PUBLIC_DEEPAR_ANDROID_LICENSE_KEY
-        sync: false
-      - key: EXPO_PUBLIC_DEEPAR_ROOT_PATH
-        value: https://cdn.jsdelivr.net/npm/deepar@5.6.22/
-      - key: EXPO_PUBLIC_DEEPAR_EFFECT_BASE_URL
-        value: https://cdn.jsdelivr.net/npm/deepar@5.6.22/effects/
       - key: EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY
         sync: false
 

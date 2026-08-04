@@ -41,6 +41,10 @@ export type ManagedHost = HostRow & {
   rating?: number;
   reportsReceived?: number;
   revenueGenerated?: number;
+  revenueMonth?: number;
+  callEarnings?: number;
+  giftEarnings?: number;
+  liveEarnings?: number;
   agencyId?: string;
   agencyName?: string;
   loginHistory?: { at: number; ip?: string; device?: string }[];

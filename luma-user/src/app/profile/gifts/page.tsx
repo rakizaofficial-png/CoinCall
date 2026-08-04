@@ -6,6 +6,7 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { requireApiBase } from "@/config/apiConfig";
 import { getDeviceUserId } from "@/lib/walletApi";
+import { getAuthHeaders } from "@/lib/auth";
 
 type LedgerEntry = {
   id?: string;
@@ -40,7 +41,7 @@ export default function GiftsHistoryPage() {
         const userId = getDeviceUserId();
         const res = await fetch(
           `${requireApiBase()}/wallet/history/${encodeURIComponent(userId)}`,
-          { headers: { "X-User-Id": userId }, cache: "no-store" },
+          { headers: getAuthHeaders(userId), cache: "no-store" },
         );
         const data = (await res.json()) as { history?: LedgerEntry[] };
         const gifts = (data.history ?? []).filter(

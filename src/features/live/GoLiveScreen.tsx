@@ -55,6 +55,7 @@ export function GoLiveScreen({ navigation, mode = 'solo' }: Props) {
   const [camOn, setCamOn] = useState(true);
   const [flash, setFlash] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [nativePreviewMounted, setNativePreviewMounted] = useState(true);
   const [previewReady, setPreviewReady] = useState(Platform.OS !== 'web');
 
   // Cover always uses profile photo — skip country / language / image setup
@@ -178,10 +179,18 @@ export function GoLiveScreen({ navigation, mode = 'solo' }: Props) {
         category: goLiveDraft.category || 'Beauty',
         language: goLiveDraft.language || 'English',
       });
-      if (Platform.OS === 'web') stopCameraPreview(videoRef.current);
+      if (Platform.OS === 'web') {
+        stopCameraPreview(videoRef.current);
+      } else {
+        // CameraView releases the physical camera when unmounted. Give Android
+        // a short hand-off window before Agora opens its own camera session.
+        setNativePreviewMounted(false);
+        await new Promise<void>((resolve) => setTimeout(resolve, 450));
+      }
       const room = await startSoloLive();
       navigation.replace('LiveRoom', { roomId: room.id, hostMode: true });
     } catch (e) {
+      if (Platform.OS !== 'web') setNativePreviewMounted(true);
       notify('Go Live failed', e instanceof Error ? e.message : 'Try again');
     } finally {
       setBusy(false);
@@ -193,7 +202,7 @@ export function GoLiveScreen({ navigation, mode = 'solo' }: Props) {
       <View style={[styles.preview, { paddingTop: insets.top }]}>
         {Platform.OS === 'web' ? (
           <div id="golive-preview-mount" style={webMountStyle} />
-        ) : permission?.granted && camOn ? (
+        ) : permission?.granted && camOn && nativePreviewMounted ? (
           <CameraView
             style={StyleSheet.absoluteFill}
             facing={facing}
@@ -238,12 +247,16 @@ export function GoLiveScreen({ navigation, mode = 'solo' }: Props) {
 
         <View style={styles.sideTools}>
           <Tool icon={FlipHorizontal} label="Flip" onPress={() => void onFlip()} />
-          <Tool
-            icon={Sparkles}
-            label="Filter"
-            active={goLiveDraft.beautyOn}
-            onPress={() => setGoLiveDraft({ beautyOn: !goLiveDraft.beautyOn })}
-          />
+          {Platform.OS === 'web' ? (
+            <Tool
+              icon={Sparkles}
+              label="Filter"
+              active={goLiveDraft.beautyOn}
+              onPress={() =>
+                setGoLiveDraft({ beautyOn: !goLiveDraft.beautyOn })
+              }
+            />
+          ) : null}
           <Tool
             icon={micOn ? Mic : MicOff}
             label="Mic"
@@ -281,37 +294,36 @@ export function GoLiveScreen({ navigation, mode = 'solo' }: Props) {
             Cover uses your profile photo. Language & category stay from last time.
           </Text>
 
-          <View style={styles.filterPanel}>
-            <Text style={[styles.label, { color: colors.textSecondary }]}>
-              Deep AR filters
-            </Text>
-            <View style={styles.filterRow}>
-              {LIVE_FILTERS.map((filter) => {
-                const on =
-                  goLiveDraft.beautyOn &&
-                  goLiveDraft.beautyPreset === filter.id;
-                return (
-                  <Pressable
-                    key={filter.id}
-                    onPress={() =>
-                      setGoLiveDraft({
-                        beautyOn: true,
-                        beautyPreset: filter.id,
-                      })
-                    }
-                    style={[styles.filterChip, on && styles.filterChipOn]}
-                  >
-                    <Text style={[styles.filterText, on && styles.filterTextOn]}>
-                      {filter.shortLabel}
-                    </Text>
-                  </Pressable>
-                );
-              })}
+          {Platform.OS === 'web' ? (
+            <View style={styles.filterPanel}>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>
+                Live filters
+              </Text>
+              <View style={styles.filterRow}>
+                {LIVE_FILTERS.map((filter) => {
+                  const on =
+                    goLiveDraft.beautyOn &&
+                    goLiveDraft.beautyPreset === filter.id;
+                  return (
+                    <Pressable
+                      key={filter.id}
+                      onPress={() =>
+                        setGoLiveDraft({
+                          beautyOn: true,
+                          beautyPreset: filter.id,
+                        })
+                      }
+                      style={[styles.filterChip, on && styles.filterChipOn]}
+                    >
+                      <Text style={[styles.filterText, on && styles.filterTextOn]}>
+                        {filter.shortLabel}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
             </View>
-            <Text style={[styles.hint, { color: '#A78BFA', marginTop: 8 }]}>
-              Free live beauty engine · no paid SDK required
-            </Text>
-          </View>
+          ) : null}
 
           <View style={[styles.lockRow, { borderColor: colors.border }]}>
             <View style={styles.lockLeft}>

@@ -1,25 +1,42 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Coins, Crown, LogOut, Phone, Settings, Star, Wallet } from "lucide-react";
 import { useApp } from "@/lib/store";
 import { vipLabel } from "@/lib/ledger";
-import { logout, getAuthUser } from "@/lib/auth";
+import {
+  AUTH_CHANGED_EVENT,
+  logout,
+  getAuthUser,
+  type AuthUser,
+} from "@/lib/auth";
 import { APP_VERSION } from "@/lib/version";
 
 export default function ProfilePage() {
   const { coins, xp, vipTier, isPremium, userId, ready } = useApp();
   const router = useRouter();
-  const authUser = typeof window !== "undefined" ? getAuthUser() : null;
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+
+  useEffect(() => {
+    const refresh = () => setAuthUser(getAuthUser());
+    refresh();
+    window.addEventListener(AUTH_CHANGED_EVENT, refresh);
+    window.addEventListener("storage", refresh);
+    return () => {
+      window.removeEventListener(AUTH_CHANGED_EVENT, refresh);
+      window.removeEventListener("storage", refresh);
+    };
+  }, []);
 
   const displayName =
     authUser?.displayName ||
-    (ready ? `Guest ${userId.slice(-4)}` : "Syncing…");
+    (ready && userId ? `User ${userId.slice(-4)}` : "Syncing…");
   const email = authUser?.email ?? null;
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     router.replace("/login");
   };
 
@@ -173,7 +190,7 @@ export default function ProfilePage() {
 
         <button
           type="button"
-          onClick={handleLogout}
+          onClick={() => void handleLogout()}
           className="mt-1 flex w-full items-center gap-3 rounded-2xl border border-red-500/25 bg-red-500/10 px-4 py-3.5 active:bg-red-500/20"
         >
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-red-500/15">

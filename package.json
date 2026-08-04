@@ -17,7 +17,7 @@
     "agora-rte-extension": "^1.2.4",
     "babel-preset-expo": "^57.0.3",
     "expo": "~57.0.8",
-    "expo-av": "^16.0.8",
+    "expo-audio": "~57.0.3",
     "expo-blur": "~57.0.2",
     "expo-build-properties": "~57.0.7",
     "expo-camera": "^57.0.3",
@@ -41,7 +41,6 @@
     "react-dom": "^19.2.3",
     "react-native": "0.86.0",
     "react-native-agora": "^4.6.2",
-    "react-native-deepar": "^0.11.0",
     "react-native-reanimated": "4.5.0",
     "react-native-safe-area-context": "5.7.0",
     "react-native-screens": "~4.26.0",
@@ -67,6 +66,7 @@
     }
   },
   "scripts": {
+    "postinstall": "node scripts/patch-native-bridges.mjs",
     "start": "__UNSAFE_EXPO_HOME_DIRECTORY=$PWD/.expo-home expo start",
     "android": "__UNSAFE_EXPO_HOME_DIRECTORY=$PWD/.expo-home expo start --android",
     "ios": "__UNSAFE_EXPO_HOME_DIRECTORY=$PWD/.expo-home expo start --ios",

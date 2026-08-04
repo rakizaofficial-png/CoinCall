@@ -21,6 +21,7 @@ export function LoungeShell({
 }) {
   const {
     coins,
+    ready,
     topUpOpen,
     openTopUp,
     closeTopUp,
@@ -42,7 +43,7 @@ export function LoungeShell({
   }, [entranceReady, isPremium, triggerEntranceBlast, vipTier]);
 
   useEffect(() => {
-    if (!enableAutoTopUp) return;
+    if (!enableAutoTopUp || !ready) return;
     if (coins < minuteRate && !topUpOpen && !topUpOnce.current) {
       topUpOnce.current = true;
       openTopUp(15);
@@ -50,7 +51,7 @@ export function LoungeShell({
     if (coins >= minuteRate) {
       topUpOnce.current = false;
     }
-  }, [coins, enableAutoTopUp, minuteRate, openTopUp, topUpOpen]);
+  }, [coins, enableAutoTopUp, minuteRate, openTopUp, ready, topUpOpen]);
 
   return (
     <div className="lounge-shell relative min-h-dvh overflow-hidden bg-[#06040b]">
