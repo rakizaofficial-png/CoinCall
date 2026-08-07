@@ -5428,6 +5428,7 @@ async function applyMongoOrDisk() {
   const ok = await initMongo();
   if (!ok) return;
   await ensurePaymentIndexes();
+  console.log('[payments] Mongo indexes and product catalog ready');
   const snap = await loadMongoSnapshot();
   if (!snap) {
     // First Atlas connect: push disk/RAM state so both apps share durable cloud data

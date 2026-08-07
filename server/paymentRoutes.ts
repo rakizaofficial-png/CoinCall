@@ -7,7 +7,7 @@ import {
   verifyGooglePlayProduct, verifyGooglePlaySubscription, verifyGooglePubSubIdentity,
 } from './googlePlayBilling.ts';
 import {
-  claimWebhook, completePayment, currentSubscription, ensurePaymentIndexes, finishWebhook,
+  claimWebhook, completePayment, currentSubscription, finishWebhook,
   findGooglePaymentByToken, getPaymentForUser, getProviderPaymentForUser, listAdminPayments,
   paymentHistory, recordPaymentAttempt, reversePayment, revokeSubscriptionEntitlement,
   updateGoogleSettlement, updateSubscriptionState,
@@ -256,6 +256,4 @@ export function registerPaymentRoutes(app: express.Express, deps: Dependencies) 
       limit: Number(req.query.limit) || 25, provider: String(req.query.provider || ''),
       status: String(req.query.status || ''), search: String(req.query.search || '') })) });
   });
-
-  ensurePaymentIndexes().catch((error) => console.warn('[payments] indexes pending:', message(error)));
 }
