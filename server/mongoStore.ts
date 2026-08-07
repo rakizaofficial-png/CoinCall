@@ -5,6 +5,7 @@
  * crashes if Mongo is missing or unreachable.
  */
 import type { PersistedSnapshot } from './persistStore.ts';
+import type { Db, MongoClient } from 'mongodb';
 
 const URI = (process.env.MONGODB_URI || process.env.DATABASE_URL || '').trim();
 const DB_NAME = process.env.MONGODB_DB || 'coincall';
@@ -26,6 +27,7 @@ type MongoClientLike = {
 };
 
 let client: MongoClientLike | null = null;
+let database: Db | null = null;
 let collection: MongoCollection | null = null;
 let mongoReady = false;
 
@@ -35,6 +37,24 @@ export function mongoConfigured(): boolean {
 
 export function mongoConnected(): boolean {
   return mongoReady;
+}
+
+/**
+ * Payment writes deliberately do not use the disk snapshot fallback. Payments
+ * require MongoDB transactions and therefore fail closed when Mongo is absent.
+ */
+export function requireMongoDb(): Db {
+  if (!mongoReady || !database) {
+    throw new Error('PAYMENTS_DATABASE_UNAVAILABLE');
+  }
+  return database;
+}
+
+export function requireMongoClient(): MongoClient {
+  if (!mongoReady || !client) {
+    throw new Error('PAYMENTS_DATABASE_UNAVAILABLE');
+  }
+  return client as unknown as MongoClient;
 }
 
 export function persistenceLabel(): string {
@@ -57,13 +77,15 @@ export async function initMongo(): Promise<boolean> {
     const MongoClient = mod.MongoClient as unknown as new (uri: string) => MongoClientLike;
     client = new MongoClient(URI);
     await client.connect();
-    collection = client.db(DB_NAME).collection('coincall_snapshots');
+    database = client.db(DB_NAME) as unknown as Db;
+    collection = database.collection('coincall_snapshots') as unknown as MongoCollection;
     mongoReady = true;
     console.log(`[persist] MongoDB connected (db=${DB_NAME})`);
     return true;
   } catch (e) {
     mongoReady = false;
     client = null;
+    database = null;
     collection = null;
     console.warn('[persist] MongoDB unavailable — continuing with disk fallback', e);
     return false;
@@ -105,5 +127,6 @@ export async function closeMongo(): Promise<void> {
   }
   client = null;
   collection = null;
+  database = null;
   mongoReady = false;
 }

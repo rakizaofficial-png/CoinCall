@@ -50,6 +50,8 @@ import {
   registerUser,
 } from './userAuth.ts';
 import { verifyGoogleFirebaseIdToken } from './firebaseIdToken.ts';
+import { registerPaymentRoutes, type PaymentRequest } from './paymentRoutes.ts';
+import { ensurePaymentIndexes } from './paymentStore.ts';
 import {
   dumpHomeBannersForSnapshot,
   getHomeBanners,
@@ -183,7 +185,14 @@ const { RtcRole, RtcTokenBuilder, RtmTokenBuilder } = agoraToken as {
 const app = express();
 app.use(cors());
 // Host presence / live rooms used to POST huge data: avatar URLs — allow 2mb
-app.use(express.json({ limit: '3mb' }));
+app.use(express.json({
+  limit: '3mb',
+  verify: (req, _res, buffer) => {
+    if (req.originalUrl.startsWith('/api/payments/stripe/webhook')) {
+      (req as PaymentRequest).rawBody = Buffer.from(buffer);
+    }
+  },
+}));
 
 const APP_ID = process.env.AGORA_APP_ID || '';
 const APP_CERT = process.env.AGORA_APP_CERTIFICATE || '';
@@ -3665,6 +3674,13 @@ app.post('/api/wallet/spend', (req, res) => {
  * Create checkout / deep-link session for web or native handoff.
  * Replace checkoutUrl with your Play Billing / Stripe Payment Link.
  */
+app.all(['/api/wallet/iap/session', '/api/wallet/iap/verify'], (_req, res) => {
+  res.status(410).json({
+    error: 'LEGACY_PAYMENT_ENDPOINT_DISABLED',
+    message: 'Update the app to use the secure /api/payments provider endpoints.',
+  });
+});
+
 app.post('/api/wallet/iap/session', (req, res) => {
   const userId = String(req.body?.userId || '').trim();
   const productId = String(req.body?.productId || '').trim();
@@ -5553,6 +5569,7 @@ restoreFromDisk();
 async function applyMongoOrDisk() {
   const ok = await initMongo();
   if (!ok) return;
+  await ensurePaymentIndexes();
   const snap = await loadMongoSnapshot();
   if (!snap) {
     // First Atlas connect: push disk/RAM state so both apps share durable cloud data
@@ -6859,6 +6876,20 @@ wss.on('connection', (socket, req) => {
 });
 
 /** Static help-center articles for Host app (admin-managed copy) */
+registerPaymentRoutes(app, {
+  authenticate: (req) => authenticateUserToken(bearerToken(req.headers.authorization)),
+  requireAdmin,
+  walletBalance: (userId) => ensureWallet(userId).coinBalance,
+  syncEntitlement: (userId, balance, vip) => {
+    const wallet = ensureWallet(userId);
+    wallet.coinBalance = Math.max(0, Math.floor(balance));
+    if (vip) wallet.isPremium = true;
+    wallets.set(userId, wallet);
+    persist();
+    broadcastWallet(userId);
+  },
+});
+
 const HELP_CENTER_ARTICLES = [
   {
     id: 'go-online',

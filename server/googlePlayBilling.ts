@@ -20,6 +20,14 @@ export type VerifiedGooglePlayPurchase = {
   regionCode?: string;
 };
 
+type SubscriptionPurchaseV2 = {
+  subscriptionState?: string;
+  latestOrderId?: string;
+  regionCode?: string;
+  externalAccountIdentifiers?: { obfuscatedExternalAccountId?: string };
+  lineItems?: Array<{ productId?: string; expiryTime?: string; acknowledgementState?: string }>;
+};
+
 function serviceAccountCredentials() {
   const raw = String(process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON || '').trim();
   if (!raw) throw new Error('GOOGLE_PLAY_SERVICE_ACCOUNT_JSON is not configured');
@@ -123,4 +131,34 @@ export async function consumeGooglePlayProduct(input: {
     method: 'POST',
     body: '{}',
   });
+}
+
+export async function verifyGooglePlaySubscription(input: {
+  packageName: string; productId: string; purchaseToken: string; userId: string;
+}) {
+  const base = 'https://androidpublisher.googleapis.com/androidpublisher/v3';
+  const url = `${base}/applications/${encodeURIComponent(input.packageName)}/purchases/subscriptionsv2/tokens/${encodeURIComponent(input.purchaseToken)}`;
+  const purchase = await googleRequest<SubscriptionPurchaseV2>(url);
+  const activeStates = new Set(['SUBSCRIPTION_STATE_ACTIVE', 'SUBSCRIPTION_STATE_IN_GRACE_PERIOD']);
+  if (!activeStates.has(String(purchase.subscriptionState || ''))) {
+    throw new Error(`Google Play subscription is ${purchase.subscriptionState || 'unknown'}`);
+  }
+  const owner = purchase.externalAccountIdentifiers?.obfuscatedExternalAccountId;
+  if (owner && owner !== input.userId) throw new Error('Google Play purchase belongs to another account');
+  const line = purchase.lineItems?.find((item) => item.productId === input.productId);
+  if (!line) throw new Error('Google Play subscription product mismatch');
+  return {
+    orderId: String(purchase.latestOrderId || ''),
+    acknowledgementState: String(line.acknowledgementState || ''),
+    expiresAt: line.expiryTime ? new Date(line.expiryTime) : undefined,
+    regionCode: purchase.regionCode,
+  };
+}
+
+export async function acknowledgeGooglePlaySubscription(input: {
+  packageName: string; productId: string; purchaseToken: string;
+}) {
+  const base = 'https://androidpublisher.googleapis.com/androidpublisher/v3';
+  const url = `${base}/applications/${encodeURIComponent(input.packageName)}/purchases/subscriptions/${encodeURIComponent(input.productId)}/tokens/${encodeURIComponent(input.purchaseToken)}:acknowledge`;
+  await googleRequest<void>(url, { method: 'POST', body: '{}' });
 }

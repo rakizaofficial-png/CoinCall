@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "tsx index.ts",
     "start": "tsx index.ts",
-    "build": "echo 'No build step'"
+    "build": "tsc --noEmit",
+    "typecheck:payments": "tsc --ignoreConfig --noEmit --allowImportingTsExtensions --moduleResolution bundler --module esnext --target es2022 --skipLibCheck paymentCatalog.ts paymentStore.ts googlePlayBilling.ts stripePayments.ts paymentRoutes.ts mongoStore.ts",
+    "test": "tsx --test *.test.ts",
+    "migrate:payments": "tsx migratePayments.ts"
   },
   "engines": {
     "node": ">=20"
@@ -19,6 +22,7 @@
     "google-auth-library": "^10.9.1",
     "mongodb": "^6.21.0",
     "multer": "^2.2.0",
+    "stripe": "^22.4.0",
     "tsx": "^4.23.1",
     "typescript": "^7.0.2",
     "ws": "^8.21.1"

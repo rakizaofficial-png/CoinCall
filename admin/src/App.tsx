@@ -37,6 +37,7 @@ import {
 import { MoneyDesk } from './components/MoneyDesk';
 import { RevenuePanel } from './components/RevenuePanel';
 import { PricingPanel } from './components/PricingPanel';
+import { PaymentsPanel } from './components/PaymentsPanel';
 import { UsersWalletsPanel } from './components/UsersWallets';
 import { VideoLibraryPanel } from './components/VideoLibraryPanel';
 import { HomeBannersPanel } from './components/HomeBannersPanel';
@@ -75,6 +76,7 @@ const ICONS: Partial<Record<Tab, string>> = {
   users: 'M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 11a4 4 0 100-8 4 4 0 000 8z',
   revenue: 'M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6',
   pricing: 'M4 7h16M7 4v6M4 17h16M17 14v6',
+  payments: 'M3 6h18v12H3zM3 10h18M7 15h3',
   referrals: 'M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71',
   inbox: 'M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2zM22 6l-10 7L2 6',
   calls: 'M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z',
@@ -92,6 +94,7 @@ const LABELS: Record<Tab, string> = {
   users: 'User List',
   revenue: 'Revenue',
   pricing: 'Pricing',
+  payments: 'Payments',
   referrals: 'Referrals',
   inbox: 'Inbox',
   calls: 'Live Monitor',
@@ -109,6 +112,7 @@ const GROUPS: Record<Tab, string> = {
   users: 'Management',
   revenue: 'Finance',
   pricing: 'Finance',
+  payments: 'Finance',
   referrals: 'Growth',
   inbox: 'Growth',
   payouts: 'Finance',
@@ -873,6 +877,7 @@ export default function App() {
             {tab === 'banners' ? <HomeBannersPanel /> : null}
             {tab === 'revenue' ? <RevenuePanel agencyId={agencyId} /> : null}
             {tab === 'pricing' ? <PricingPanel /> : null}
+            {tab === 'payments' ? <PaymentsPanel /> : null}
             {tab === 'referrals' ? (
               <AgencyReferralsPanel agencyId={agencyId || ''} />
             ) : null}
