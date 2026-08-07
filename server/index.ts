@@ -154,10 +154,6 @@ import {
   verifyAdminCredentials,
   verifyStaffToken,
 } from './staffAuth.ts';
-import {
-  consumeGooglePlayProduct,
-  verifyGooglePlayProduct,
-} from './googlePlayBilling.ts';
 
 const { RtcRole, RtcTokenBuilder, RtmTokenBuilder } = agoraToken as {
   RtcRole: { PUBLISHER: number; SUBSCRIBER: number };
@@ -2886,36 +2882,64 @@ const IAP_PRODUCTS = [
     productId: 'luma_coins_50',
     coins: 50,
     bonusCoins: 0,
-    priceLabel: '$0.99',
-    title: 'Starter 50',
+    priceLabel: 'Store price',
+    title: '50',
+  },
+  {
+    productId: 'luma_coins_100',
+    coins: 100,
+    bonusCoins: 0,
+    priceLabel: 'Store price',
+    title: '100',
+  },
+  {
+    productId: 'luma_coins_250',
+    coins: 250,
+    bonusCoins: 10,
+    priceLabel: 'Store price',
+    title: '250',
   },
   {
     productId: 'luma_coins_500',
     coins: 500,
     bonusCoins: 50,
-    priceLabel: '$4.99',
-    title: 'Boost 500',
+    priceLabel: 'Store price',
+    title: '500',
   },
   {
-    productId: 'luma_coins_1200',
-    coins: 1200,
-    bonusCoins: 200,
-    priceLabel: '$9.99',
-    title: 'Lounge 1200',
+    productId: 'luma_coins_1000',
+    coins: 1000,
+    bonusCoins: 120,
+    priceLabel: 'Store price',
+    title: '1,000',
     popular: true,
   },
   {
-    productId: 'luma_coins_2500',
-    coins: 2500,
-    bonusCoins: 500,
-    priceLabel: '$19.99',
-    title: 'Elite 2500',
+    productId: 'luma_coins_2000',
+    coins: 2000,
+    bonusCoins: 350,
+    priceLabel: 'Store price',
+    title: '2,000',
+  },
+  {
+    productId: 'luma_coins_5000',
+    coins: 5000,
+    bonusCoins: 1000,
+    priceLabel: 'Store price',
+    title: '5,000',
+  },
+  {
+    productId: 'luma_coins_10000',
+    coins: 10000,
+    bonusCoins: 2500,
+    priceLabel: 'Store price',
+    title: '10,000',
   },
 ];
 let VIP_PLANS = [
-  { id: 'week', name: 'VIP Week', priceLabel: '$4.99', period: '/ week', coins: 200 },
-  { id: 'month', name: 'VIP Month', priceLabel: '$12.99', period: '/ month', coins: 800 },
-  { id: 'year', name: 'VIP Year', priceLabel: '$79.99', period: '/ year', coins: 12000 },
+  { id: 'luma_vip_week', name: 'VIP Week', priceLabel: 'Store price', period: '/ week', coins: 100 },
+  { id: 'luma_vip_month', name: 'VIP Month', priceLabel: 'Store price', period: '/ month', coins: 500 },
+  { id: 'luma_vip_year', name: 'VIP Year', priceLabel: 'Store price', period: '/ year', coins: 7500 },
 ];
 
 function publicPricingConfig() {
@@ -3678,172 +3702,6 @@ app.all(['/api/wallet/iap/session', '/api/wallet/iap/verify'], (_req, res) => {
   res.status(410).json({
     error: 'LEGACY_PAYMENT_ENDPOINT_DISABLED',
     message: 'Update the app to use the secure /api/payments provider endpoints.',
-  });
-});
-
-app.post('/api/wallet/iap/session', (req, res) => {
-  const userId = String(req.body?.userId || '').trim();
-  const productId = String(req.body?.productId || '').trim();
-  const product = IAP_PRODUCTS.find((p) => p.productId === productId);
-  if (!userId || !product) {
-    res.status(400).json({ error: 'userId and valid productId required' });
-    return;
-  }
-  const sessionId = randomUUID();
-  // PRODUCTION: return a real Play Store / App Store / Stripe URL
-  const checkoutUrl = `https://play.google.com/store/account/subscriptions?sku=${encodeURIComponent(productId)}&package=${encodeURIComponent(process.env.GOOGLE_PLAY_PACKAGE_NAME || 'com.yourcompany.luma')}`;
-  res.json({ sessionId, checkoutUrl, product });
-});
-
-/**
- * Verify IAP receipt then credit wallet.
- * Replace stub with Google androidpublisher + Apple App Store Server API.
- */
-app.post('/api/wallet/iap/verify', async (req, res) => {
-  const userId = String(req.body?.userId || '').trim();
-  const productId = String(req.body?.productId || '').trim();
-  const purchaseToken = String(req.body?.purchaseToken || '').trim();
-  const platform = String(req.body?.platform || 'web');
-  const product = IAP_PRODUCTS.find((p) => p.productId === productId);
-  if (!userId || !product || !purchaseToken) {
-    res.status(400).json({ error: 'userId, productId, purchaseToken required' });
-    return;
-  }
-  if (!requireUserMatch(req, res, userId)) return;
-  const receiptKey = createHash('sha256').update(purchaseToken).digest('hex');
-  if (iapReceipts.has(receiptKey) || iapReceipts.has(purchaseToken)) {
-    res.status(409).json({ error: 'Purchase already redeemed' });
-    return;
-  }
-
-  const googleReady = Boolean(process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON);
-  const appleReady = Boolean(process.env.APPLE_IAP_SHARED_SECRET);
-  const allowStub =
-    process.env.ALLOW_IAP_STUB === '1' || process.env.NODE_ENV !== 'production';
-  let googlePurchase:
-    | Awaited<ReturnType<typeof verifyGooglePlayProduct>>
-    | undefined;
-  if (platform === 'google' && !googleReady) {
-    if (!allowStub) {
-      res.status(503).json({
-        error: 'Google Play IAP not configured. Set GOOGLE_PLAY_SERVICE_ACCOUNT_JSON.',
-      });
-      return;
-    }
-    console.warn('[IAP] GOOGLE_PLAY_SERVICE_ACCOUNT_JSON missing — dev stub accept');
-  } else if (platform === 'google') {
-    const packageName = String(
-      process.env.GOOGLE_PLAY_PACKAGE_NAME || 'com.zuko.user',
-    ).trim();
-    try {
-      googlePurchase = await verifyGooglePlayProduct({
-        packageName,
-        productId,
-        purchaseToken,
-        userId,
-      });
-      if (googlePurchase.alreadyConsumed) {
-        res.status(409).json({ error: 'Purchase already consumed' });
-        return;
-      }
-    } catch (error) {
-      console.warn(
-        '[IAP] Google verification rejected:',
-        error instanceof Error ? error.message : 'unknown error',
-      );
-      res.status(422).json({
-        error:
-          error instanceof Error
-            ? error.message
-            : 'Google Play purchase verification failed',
-      });
-      return;
-    }
-  }
-  if (platform === 'apple' && !appleReady) {
-    if (!allowStub) {
-      res.status(503).json({
-        error: 'Apple IAP not configured. Set APPLE_IAP_SHARED_SECRET.',
-      });
-      return;
-    }
-    console.warn('[IAP] APPLE_IAP_SHARED_SECRET missing — stub accept');
-  }
-  if (platform === 'web' && !allowStub) {
-    res.status(503).json({
-      error: 'Web IAP stub disabled in production. Set ALLOW_IAP_STUB=1 for demo only.',
-    });
-    return;
-  }
-
-  iapReceipts.add(receiptKey);
-  const credited = product.coins + product.bonusCoins;
-  const minted = mintCoins(coinDeps(), {
-    txnKey: `iap:${purchaseToken}`,
-    type: 'purchase',
-    userId,
-    amount: credited,
-    reason: `IAP · ${product.title}`,
-    meta: {
-      productId,
-      platform,
-      orderId: googlePurchase?.orderId,
-      regionCode: googlePurchase?.regionCode,
-    },
-  });
-  if (!minted.ok) {
-    iapReceipts.delete(receiptKey);
-    res.status(minted.code).json({
-      error: minted.txn.error || 'Credit failed',
-      txn: minted.txn,
-    });
-    return;
-  }
-  if (platform === 'google' && googlePurchase) {
-    try {
-      await consumeGooglePlayProduct({
-        packageName: String(
-          process.env.GOOGLE_PLAY_PACKAGE_NAME || 'com.zuko.user',
-        ).trim(),
-        productId,
-        purchaseToken,
-      });
-    } catch (error) {
-      // Entitlement is already granted and receipt is reserved. A retry must
-      // never mint twice; operations can reconcile consumption from logs/RTDN.
-      console.error(
-        '[IAP] Purchase credited but Google consume failed:',
-        error instanceof Error ? error.message : 'unknown error',
-      );
-    }
-  }
-  const row = ensureWallet(userId);
-  cancelPendingForUser(userId, 'iap_purchase');
-  touchAutoCallHeartbeat({
-    userId,
-    coinBalance: row.coinBalance,
-    inCall: false,
-  });
-  sendWsToUser(userId, {
-    type: 'auto_call:cancel',
-    payload: { reason: 'iap_purchase' },
-  });
-  const userName = String(req.body?.userName || row.displayName || 'Viewer').slice(0, 40);
-  const liveRoomId = String(req.body?.roomId || '').trim() || undefined;
-  recordUserRecharge({
-    userId,
-    coins: credited,
-    userName,
-    roomId: liveRoomId,
-  });
-  broadcastWallet(userId);
-  res.json({
-    ok: true,
-    balance: row.coinBalance,
-    credited,
-    transactionId: minted.txn.id,
-    txn: minted.txn,
-    wallet: walletPublic(row),
   });
 });
 
@@ -6883,7 +6741,7 @@ registerPaymentRoutes(app, {
   syncEntitlement: (userId, balance, vip) => {
     const wallet = ensureWallet(userId);
     wallet.coinBalance = Math.max(0, Math.floor(balance));
-    if (vip) wallet.isPremium = true;
+    if (typeof vip === 'boolean') wallet.isPremium = vip;
     wallets.set(userId, wallet);
     persist();
     broadcastWallet(userId);

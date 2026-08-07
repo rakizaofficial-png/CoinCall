@@ -3,13 +3,14 @@ import type Stripe from 'stripe';
 import { createHash } from 'crypto';
 import { getPaymentProduct, publicPaymentCatalog } from './paymentCatalog.ts';
 import {
-  acknowledgeGooglePlaySubscription, consumeGooglePlayProduct,
-  verifyGooglePlayProduct, verifyGooglePlaySubscription,
+  acknowledgeGooglePlaySubscription, consumeGooglePlayProduct, getGooglePlaySubscriptionLifecycle,
+  verifyGooglePlayProduct, verifyGooglePlaySubscription, verifyGooglePubSubIdentity,
 } from './googlePlayBilling.ts';
 import {
-  claimWebhook, completePayment, currentSubscription, ensurePaymentIndexes,
+  claimWebhook, completePayment, currentSubscription, ensurePaymentIndexes, finishWebhook,
   findGooglePaymentByToken, getPaymentForUser, getProviderPaymentForUser, listAdminPayments,
-  paymentHistory, recordPaymentAttempt, reversePayment, updateSubscriptionState,
+  paymentHistory, recordPaymentAttempt, reversePayment, revokeSubscriptionEntitlement,
+  updateGoogleSettlement, updateSubscriptionState,
 } from './paymentStore.ts';
 import { createStripeCheckout, verifyStripeWebhook } from './stripePayments.ts';
 import type { UserAccount } from './userAuth.ts';
@@ -20,7 +21,7 @@ type Dependencies = {
   authenticate(req: express.Request): UserAccount | undefined;
   requireAdmin(req: express.Request, res: express.Response): boolean;
   walletBalance(userId: string): number;
-  syncEntitlement(userId: string, balance: number, vip: boolean): void;
+  syncEntitlement(userId: string, balance: number, vip?: boolean): void;
 };
 
 function message(error: unknown): string {
@@ -59,17 +60,21 @@ export function registerPaymentRoutes(app: express.Express, deps: Dependencies) 
         purchaseToken, orderId: verified.orderId, product, seedBalance: deps.walletBalance(account.userId),
         subscriptionId: product.type === 'vip' ? providerTransactionId : undefined,
         subscriptionExpiresAt: 'expiresAt' in verified ? verified.expiresAt : undefined,
+        purchaseTime: 'purchasedAt' in verified ? verified.purchasedAt : undefined,
+        acknowledgementStatus: String(verified.acknowledgementState),
         metadata: { packageName, regionCode: verified.regionCode },
       });
-      if (!transaction.duplicate) {
-        if (product.googleProductType === 'subs') {
-          if (verified.acknowledgementState !== 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED')
-            await acknowledgeGooglePlaySubscription({ packageName, productId, purchaseToken });
-        } else if ('alreadyConsumed' in verified && !verified.alreadyConsumed) {
-          await consumeGooglePlayProduct({ packageName, productId, purchaseToken });
-        }
+      // Settlement is retried even for duplicate verification calls. A transient
+      // Google failure must not leave a securely credited purchase unconsumed.
+      if (product.googleProductType === 'subs' &&
+          verified.acknowledgementState !== 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED') {
+        await acknowledgeGooglePlaySubscription({ packageName, productId, purchaseToken });
+        await updateGoogleSettlement({ paymentId: transaction.id, acknowledgementStatus: 'ACKNOWLEDGED' });
+      } else if ('alreadyConsumed' in verified && !verified.alreadyConsumed) {
+        await consumeGooglePlayProduct({ packageName, productId, purchaseToken });
+        await updateGoogleSettlement({ paymentId: transaction.id, acknowledgementStatus: 'CONSUMED' });
       }
-      deps.syncEntitlement(account.userId, transaction.walletBalance, product.type === 'vip');
+      deps.syncEntitlement(account.userId, transaction.walletBalance, product.type === 'vip' ? true : undefined);
       res.json({ ok: true, transaction });
     } catch (error) {
       await recordPaymentAttempt({ userId: account.userId, provider: 'google_play', productId,
@@ -127,7 +132,7 @@ export function registerPaymentRoutes(app: express.Express, deps: Dependencies) 
           seedBalance: deps.walletBalance(userId), metadata: {
             paymentIntentId: typeof session.payment_intent === 'string' ? session.payment_intent : undefined,
           } });
-        deps.syncEntitlement(userId, tx.walletBalance, product.type === 'vip');
+        deps.syncEntitlement(userId, tx.walletBalance, product.type === 'vip' ? true : undefined);
       } else if (event.type === 'charge.refunded' || event.type === 'charge.dispute.created') {
         const charge = event.data.object as Stripe.Charge;
         const paymentIntentId = typeof charge.payment_intent === 'string' ? charge.payment_intent : '';
@@ -145,13 +150,24 @@ export function registerPaymentRoutes(app: express.Express, deps: Dependencies) 
             metadata: { checkoutSessionId: session.id } });
         }
       }
+      await finishWebhook('stripe', event.id);
       res.json({ received: true });
-    } catch (error) { res.status(400).json({ error: 'INVALID_STRIPE_WEBHOOK', message: message(error) }); }
+    } catch (error) {
+      const eventId = String(req.body?.id || '');
+      if (eventId) await finishWebhook('stripe', eventId, error).catch(() => undefined);
+      res.status(400).json({ error: 'INVALID_STRIPE_WEBHOOK', message: message(error) });
+    }
   });
 
   app.post('/api/payments/google/notifications', async (req, res) => {
     const expected = String(process.env.GOOGLE_PLAY_PUBSUB_VERIFICATION_TOKEN || '');
     if (!expected || String(req.query.token || '') !== expected) { res.status(401).json({ error: 'INVALID_NOTIFICATION_TOKEN' }); return; }
+    try {
+      await verifyGooglePubSubIdentity(String(req.headers.authorization || ''));
+    } catch (error) {
+      res.status(401).json({ error: 'INVALID_NOTIFICATION_IDENTITY', message: message(error) });
+      return;
+    }
     const eventId = String(req.body?.message?.messageId || '');
     if (!eventId) { res.status(400).json({ error: 'INVALID_NOTIFICATION' }); return; }
     const fresh = await claimWebhook('google_play', eventId);
@@ -164,29 +180,52 @@ export function registerPaymentRoutes(app: express.Express, deps: Dependencies) 
       const notice = data.subscriptionNotification || data.oneTimeProductNotification;
       const purchaseToken = String(notice?.purchaseToken || '');
       const payment = purchaseToken ? await findGooglePaymentByToken(purchaseToken) : null;
-      if (!payment) { res.status(202).json({ ok: true, reconciliation: 'purchase_not_yet_known' }); return; }
+      if (!payment) {
+        throw new Error('RTDN_PURCHASE_NOT_YET_KNOWN');
+      }
       if (data.subscriptionNotification) {
         const type = Number(data.subscriptionNotification.notificationType || 0);
-        if (type === 12 || type === 13) {
+        if (type === 12) {
           await reversePayment({ provider: 'google_play', providerTransactionId: payment.providerTransactionId,
-            eventId, reason: type === 12 ? 'GOOGLE_SUBSCRIPTION_REVOKED' : 'GOOGLE_SUBSCRIPTION_EXPIRED', revoke: true });
+            eventId, reason: 'GOOGLE_SUBSCRIPTION_REVOKED', revoke: true });
+          deps.syncEntitlement(payment.userId, deps.walletBalance(payment.userId), false);
+        } else if (type === 13) {
+          await revokeSubscriptionEntitlement({
+            providerSubscriptionId: payment.subscriptionId || payment.providerTransactionId,
+            status: 'EXPIRED', eventId,
+          });
+          deps.syncEntitlement(payment.userId, deps.walletBalance(payment.userId), false);
         } else if (type === 3) {
           await updateSubscriptionState({ providerSubscriptionId: payment.subscriptionId || payment.providerTransactionId,
             status: 'CANCELLED_PENDING_EXPIRY' });
         } else {
-          const verified = await verifyGooglePlaySubscription({
+          const lifecycle = await getGooglePlaySubscriptionLifecycle({
             packageName: String(process.env.GOOGLE_PLAY_PACKAGE_NAME || 'com.zuko.user'),
             productId: payment.productId, purchaseToken, userId: payment.userId,
           });
+          const statusByType: Record<number, string> = {
+            1: 'ACTIVE', 2: 'ACTIVE', 4: 'ACTIVE', 5: 'ON_HOLD',
+            6: 'IN_GRACE_PERIOD', 7: 'ACTIVE', 9: 'ACTIVE',
+            10: 'PAUSED', 11: 'ACTIVE', 20: 'PENDING_PURCHASE_CANCELLED',
+          };
           await updateSubscriptionState({ providerSubscriptionId: payment.subscriptionId || payment.providerTransactionId,
-            status: 'ACTIVE', expiresAt: verified.expiresAt });
+            status: statusByType[type] || lifecycle.state, expiresAt: lifecycle.expiresAt });
+          deps.syncEntitlement(
+            payment.userId,
+            deps.walletBalance(payment.userId),
+            ['ACTIVE', 'IN_GRACE_PERIOD'].includes(statusByType[type] || lifecycle.state),
+          );
         }
       } else if (Number(data.oneTimeProductNotification?.notificationType) === 2) {
         await reversePayment({ provider: 'google_play', providerTransactionId: payment.providerTransactionId,
           eventId, reason: 'GOOGLE_ONE_TIME_PRODUCT_CANCELLED', revoke: true });
       }
+      await finishWebhook('google_play', eventId);
       res.json({ ok: true });
-    } catch (error) { res.status(500).json({ error: 'RTDN_RECONCILIATION_FAILED', message: message(error) }); }
+    } catch (error) {
+      await finishWebhook('google_play', eventId, error).catch(() => undefined);
+      res.status(500).json({ error: 'RTDN_RECONCILIATION_FAILED', message: message(error) });
+    }
   });
 
   app.get('/api/payments/history', async (req, res) => {

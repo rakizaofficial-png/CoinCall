@@ -4,7 +4,10 @@ import { adminKey, apiBaseUrl } from '../firebase';
 type Payment = {
   id: string; userId: string; provider: string; providerTransactionId: string;
   productId: string; status: string; amount?: number; currency?: string;
-  coinsGranted: number; createdAt: string;
+  coinsGranted: number; createdAt: string; orderId?: string;
+  purchaseTokenReference?: string; verificationStatus?: string;
+  acknowledgementStatus?: string; purchaseTime?: string;
+  subscriptionExpiry?: string; verifiedAt?: string; refundedAt?: string;
 };
 
 function mask(value: string) {
@@ -44,8 +47,8 @@ export function PaymentsPanel() {
       <select value={status} onChange={(e) => setStatus(e.target.value)}><option value="">All statuses</option>{['COMPLETED','PENDING','FAILED','REFUNDED','REVOKED'].map((value) => <option key={value}>{value}</option>)}</select>
     </div>
     {error ? <div className="error">{error}</div> : null}
-    <div className="desk-table-wrap"><table className="desk-table"><thead><tr><th>Date</th><th>User</th><th>Provider</th><th>Product</th><th>Coins</th><th>Amount</th><th>Status</th><th>Provider ref</th></tr></thead>
-      <tbody>{items.map((payment) => <tr key={payment.id}><td>{new Date(payment.createdAt).toLocaleString()}</td><td>{payment.userId}</td><td>{payment.provider}</td><td>{payment.productId}</td><td>{payment.coinsGranted}</td><td>{payment.amount != null ? `${payment.amount / 100} ${(payment.currency || '').toUpperCase()}` : 'Provider price'}</td><td><span className="badge solid">{payment.status}</span></td><td title={payment.providerTransactionId}>{mask(payment.providerTransactionId)}</td></tr>)}</tbody></table>
+    <div className="desk-table-wrap"><table className="desk-table"><thead><tr><th>Date</th><th>User</th><th>Provider</th><th>Product</th><th>Coins</th><th>Amount</th><th>Status</th><th>Verification</th><th>Order / token</th><th>Ack / expiry</th></tr></thead>
+      <tbody>{items.map((payment) => <tr key={payment.id}><td>{new Date(payment.purchaseTime || payment.createdAt).toLocaleString()}</td><td>{payment.userId}</td><td>{payment.provider}</td><td>{payment.productId}</td><td>{payment.coinsGranted}</td><td>{payment.amount != null ? `${payment.amount / 100} ${(payment.currency || '').toUpperCase()}` : 'Provider price'}</td><td><span className="badge solid">{payment.status}</span>{payment.refundedAt ? <small><br />{new Date(payment.refundedAt).toLocaleString()}</small> : null}</td><td>{payment.verificationStatus || '—'}{payment.verifiedAt ? <small><br />{new Date(payment.verifiedAt).toLocaleString()}</small> : null}</td><td title={payment.providerTransactionId}>{payment.orderId ? mask(payment.orderId) : mask(payment.providerTransactionId)}<small><br />Token {payment.purchaseTokenReference || '—'}</small></td><td>{payment.acknowledgementStatus || '—'}{payment.subscriptionExpiry ? <small><br />Expires {new Date(payment.subscriptionExpiry).toLocaleString()}</small> : null}</td></tr>)}</tbody></table>
       {!loading && items.length === 0 ? <div className="empty-state">No payment transactions found.</div> : null}</div>
   </div>;
 }

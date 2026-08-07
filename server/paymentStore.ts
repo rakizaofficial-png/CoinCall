@@ -14,6 +14,8 @@ type PaymentTransaction = {
   purchaseTokenHash?: string; purchaseTokenEncrypted?: string; orderId?: string;
   amount?: number; currency?: string; status: PaymentStatus; coinsGranted: number;
   subscriptionId?: string; verifiedAt?: Date; completedAt?: Date; refundedAt?: Date;
+  purchaseTime?: Date; verificationStatus?: string; acknowledgementStatus?: string;
+  subscriptionExpiry?: Date; purchaseTokenReference?: string;
   createdAt: Date; updatedAt: Date; metadata?: Record<string, unknown>;
 };
 
@@ -84,9 +86,27 @@ export async function claimWebhook(provider: PaymentProvider, eventId: string): 
     });
     return true;
   } catch (error) {
-    if ((error as { code?: number }).code === 11000) return false;
+    if ((error as { code?: number }).code === 11000) {
+      const reclaimed = await collection(requireMongoDb(), names.webhooks).findOneAndUpdate(
+        { provider, eventId, status: 'FAILED' },
+        { $set: { status: 'PROCESSING', updatedAt: new Date() } },
+        { returnDocument: 'after' },
+      );
+      return Boolean(reclaimed);
+    }
     throw error;
   }
+}
+
+export async function finishWebhook(provider: PaymentProvider, eventId: string, error?: unknown) {
+  await collection(requireMongoDb(), names.webhooks).updateOne(
+    { provider, eventId },
+    { $set: {
+      status: error ? 'FAILED' : 'COMPLETED',
+      errorCode: error instanceof Error ? error.message.slice(0, 160) : undefined,
+      updatedAt: new Date(),
+    } },
+  );
 }
 
 export async function completePayment(input: {
@@ -94,6 +114,7 @@ export async function completePayment(input: {
   providerEventId?: string; purchaseToken?: string; orderId?: string;
   product: PaymentProduct; amount?: number; currency?: string;
   subscriptionId?: string; subscriptionExpiresAt?: Date; seedBalance: number;
+  purchaseTime?: Date; acknowledgementStatus?: string;
   metadata?: Record<string, unknown>;
 }): Promise<PaymentTransaction & { walletBalance: number; duplicate: boolean }> {
   const db = requireMongoDb();
@@ -155,8 +176,12 @@ export async function completePayment(input: {
         productId: input.product.id, productType: input.product.type,
         purchaseTokenHash: tokenHash,
         purchaseTokenEncrypted: input.purchaseToken ? encryptToken(input.purchaseToken) : undefined,
+        purchaseTokenReference: tokenHash ? `${tokenHash.slice(0, 12)}…${tokenHash.slice(-8)}` : undefined,
         orderId: input.orderId, amount: input.amount, currency: input.currency,
         status: 'COMPLETED', coinsGranted, subscriptionId: input.subscriptionId,
+        purchaseTime: input.purchaseTime, verificationStatus: 'VERIFIED',
+        acknowledgementStatus: input.acknowledgementStatus,
+        subscriptionExpiry: input.subscriptionExpiresAt,
         verifiedAt: now, completedAt: now, createdAt: now, updatedAt: now, metadata: input.metadata,
       };
       await collection<PaymentTransaction>(db, names.transactions).insertOne(transaction, { session });
@@ -175,6 +200,19 @@ export async function completePayment(input: {
   }
 }
 
+export async function updateGoogleSettlement(input: {
+  paymentId: string; acknowledgementStatus: string; error?: string;
+}) {
+  await collection(requireMongoDb(), names.transactions).updateOne(
+    { id: input.paymentId, provider: 'google_play' },
+    { $set: {
+      acknowledgementStatus: input.acknowledgementStatus,
+      settlementError: input.error?.slice(0, 160),
+      updatedAt: new Date(),
+    } },
+  );
+}
+
 export async function paymentHistory(userId: string, page: number, limit: number) {
   const db = requireMongoDb();
   const safeLimit = Math.min(100, Math.max(1, limit));
@@ -190,7 +228,8 @@ export async function paymentHistory(userId: string, page: number, limit: number
 
 export async function currentSubscription(userId: string) {
   return collection(requireMongoDb(), names.subscriptions).findOne(
-    { userId, status: 'ACTIVE', expiresAt: { $gt: new Date() } },
+    { userId, status: { $in: ['ACTIVE', 'IN_GRACE_PERIOD', 'CANCELLED_PENDING_EXPIRY'] },
+      expiresAt: { $gt: new Date() } },
     { sort: { expiresAt: -1 } },
   );
 }
@@ -223,6 +262,22 @@ export async function updateSubscriptionState(input: {
     { provider: 'google_play', providerSubscriptionId: input.providerSubscriptionId },
     { $set: update },
   );
+}
+
+export async function revokeSubscriptionEntitlement(input: {
+  providerSubscriptionId: string; status: string; eventId: string;
+}) {
+  const now = new Date();
+  const db = requireMongoDb();
+  await collection(db, names.subscriptions).updateOne(
+    { provider: 'google_play', providerSubscriptionId: input.providerSubscriptionId },
+    { $set: { status: input.status, updatedAt: now } },
+  );
+  await collection(db, names.audits).insertOne({
+    id: randomUUID(), action: 'SUBSCRIPTION_ENTITLEMENT_CHANGED',
+    providerSubscriptionId: input.providerSubscriptionId, status: input.status,
+    eventId: input.eventId, createdAt: now,
+  });
 }
 
 export async function reversePayment(input: {

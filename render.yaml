@@ -47,6 +47,10 @@ services:
         sync: false
       - key: GOOGLE_PLAY_PUBSUB_VERIFICATION_TOKEN
         sync: false
+      - key: GOOGLE_PLAY_PUBSUB_AUDIENCE
+        value: https://coincall-api.onrender.com/api/payments/google/notifications
+      - key: GOOGLE_PLAY_PUBSUB_SERVICE_ACCOUNT_EMAIL
+        sync: false
       - key: ALLOW_IAP_STUB
         value: "0"
       - key: FIREBASE_PROJECT_ID
