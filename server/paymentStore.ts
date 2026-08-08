@@ -255,11 +255,12 @@ export async function findGooglePaymentByToken(purchaseToken: string) {
 
 export async function updateSubscriptionState(input: {
   providerSubscriptionId: string; status: string; expiresAt?: Date;
+  provider?: PaymentProvider;
 }) {
   const update: Record<string, unknown> = { status: input.status, updatedAt: new Date() };
   if (input.expiresAt) update.expiresAt = input.expiresAt;
   await collection(requireMongoDb(), names.subscriptions).updateOne(
-    { provider: 'google_play', providerSubscriptionId: input.providerSubscriptionId },
+    { provider: input.provider || 'google_play', providerSubscriptionId: input.providerSubscriptionId },
     { $set: update },
   );
 }

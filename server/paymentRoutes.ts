@@ -142,6 +142,30 @@ export function registerPaymentRoutes(app: express.Express, deps: Dependencies) 
         const subscription = event.data.object as Stripe.Subscription;
         await reversePayment({ provider: 'stripe', providerTransactionId: subscription.id,
           eventId: event.id, reason: event.type, revoke: true });
+      } else if (event.type === 'customer.subscription.updated') {
+        const subscription = event.data.object as Stripe.Subscription;
+        const stripeStatus = String(subscription.status || '').toLowerCase();
+        const status = stripeStatus === 'active' || stripeStatus === 'trialing'
+          ? 'ACTIVE'
+          : stripeStatus === 'past_due'
+            ? 'IN_GRACE_PERIOD'
+            : stripeStatus === 'canceled' || stripeStatus === 'unpaid'
+              ? 'EXPIRED'
+              : 'ON_HOLD';
+        const periodEnd = subscription.items.data.reduce(
+          (latest, item) => Math.max(latest, Number(item.current_period_end || 0)), 0,
+        );
+        await updateSubscriptionState({ provider: 'stripe', providerSubscriptionId: subscription.id,
+          status, expiresAt: periodEnd > 0 ? new Date(periodEnd * 1000) : undefined });
+      } else if (event.type === 'payment_intent.payment_failed') {
+        const intent = event.data.object as Stripe.PaymentIntent;
+        const userId = String(intent.metadata?.userId || '');
+        const productId = String(intent.metadata?.internalProductId || '');
+        if (userId && getPaymentProduct(productId)) {
+          await recordPaymentAttempt({ userId, provider: 'stripe', productId, status: 'FAILED',
+            failureCode: String(intent.last_payment_error?.code || 'PAYMENT_FAILED').slice(0, 120),
+            metadata: { paymentIntentId: intent.id } });
+        }
       } else if (event.type === 'checkout.session.expired') {
         const session = event.data.object as Stripe.Checkout.Session;
         if (session.client_reference_id && session.metadata?.internalProductId) {
