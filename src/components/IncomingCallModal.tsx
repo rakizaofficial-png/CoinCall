@@ -167,7 +167,7 @@ export function IncomingCallModal({ call, onClear, hostBusyOnCall }: Props) {
     if (!call || !settings) return;
 
     if (settings.callAvailability === 'offline') {
-      void rejectBridgeCall(call.id).catch(() => undefined);
+      void rejectBridgeCall(call.id, call.hostId).catch(() => undefined);
       onClear();
       return;
     }
@@ -176,7 +176,7 @@ export function IncomingCallModal({ call, onClear, hostBusyOnCall }: Props) {
       isLive &&
       !settings.acceptCallsWhileLive
     ) {
-      void rejectBridgeCall(call.id).catch(() => undefined);
+      void rejectBridgeCall(call.id, call.hostId).catch(() => undefined);
       void pushLiveCallHistory({
         id: call.id,
         userId: call.userId,
@@ -195,7 +195,7 @@ export function IncomingCallModal({ call, onClear, hostBusyOnCall }: Props) {
     }
 
     if (settings.autoRejectWhenBusy && (hostBusyOnCall || settings.callAvailability === 'busy')) {
-      void rejectBridgeCall(call.id).catch(() => undefined);
+      void rejectBridgeCall(call.id, call.hostId).catch(() => undefined);
       void pushLiveCallHistory({
         id: call.id,
         userId: call.userId,
@@ -222,7 +222,7 @@ export function IncomingCallModal({ call, onClear, hostBusyOnCall }: Props) {
           if (!handledRef.current) {
             handledRef.current = true;
             void stopIncomingRingtone();
-            void rejectBridgeCall(call.id).catch(() => undefined);
+            void rejectBridgeCall(call.id, call.hostId).catch(() => undefined);
             onClear();
           }
           return 0;
@@ -279,7 +279,7 @@ export function IncomingCallModal({ call, onClear, hostBusyOnCall }: Props) {
         if (myLiveRoom?.isLive) {
           await pauseLiveForPrivateCall();
         }
-        const accepted = await acceptBridgeCall(call.id);
+        const accepted = await acceptBridgeCall(call.id, call.hostId);
         goToCall({ ...accepted.call, ratePerMinute: rate });
       } catch (e: unknown) {
         const message =
@@ -303,7 +303,7 @@ export function IncomingCallModal({ call, onClear, hostBusyOnCall }: Props) {
     setPhase('rejecting');
     void stopIncomingRingtone();
     try {
-      await rejectBridgeCall(call.id);
+      await rejectBridgeCall(call.id, call.hostId);
       await pushLiveCallHistory({
         id: call.id,
         userId: call.userId,

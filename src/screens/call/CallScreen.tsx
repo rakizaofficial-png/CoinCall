@@ -51,6 +51,7 @@ import { radii } from '../../theme/colors';
 import { useTheme } from '../../theme/ThemeContext';
 import { notify } from '../../utils/notify';
 import { prepareAudioForAgoraCall } from '../../utils/ringtone';
+import { ensureCallMediaPermissions } from '../../utils/mediaPermissions';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Call'>;
 
@@ -333,6 +334,15 @@ export function CallScreen({ navigation, route }: Props) {
     let active = true;
     (async () => {
       try {
+        const permission = await ensureCallMediaPermissions();
+        if (!permission.granted) {
+          throw new Error(
+            permission.reason === 'blocked'
+              ? 'Camera and microphone are disabled in Settings'
+              : 'Camera and microphone permission is required',
+          );
+        }
+        if (!active) return;
         await prepareAudioForAgoraCall();
         let localEl: HTMLElement | null = null;
         let remoteEl: HTMLElement | null = null;
@@ -475,7 +485,7 @@ export function CallScreen({ navigation, route }: Props) {
     }
     if (bridgeCallId) {
       try {
-        await endBridgeCall(bridgeCallId);
+        await endBridgeCall(bridgeCallId, user.id, 'host');
       } catch {
         // ignore
       }

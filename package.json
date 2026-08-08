@@ -17,6 +17,7 @@
     "agora-rte-extension": "^1.2.4",
     "babel-preset-expo": "^57.0.3",
     "expo": "~57.0.8",
+    "expo-asset": "~57.0.9",
     "expo-audio": "~57.0.3",
     "expo-blur": "~57.0.2",
     "expo-build-properties": "~57.0.7",

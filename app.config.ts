@@ -76,6 +76,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   plugins: [
     'expo-dev-client',
+    'expo-asset',
     'expo-font',
     'expo-video',
     'expo-secure-store',

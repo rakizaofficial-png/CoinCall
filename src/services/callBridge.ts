@@ -164,20 +164,36 @@ export async function fetchBridgeHosts(): Promise<BridgeHost[]> {
   return (data.hosts || []).filter((h) => h.isOnline || h.isLive);
 }
 
-export async function acceptBridgeCall(callId: string) {
-  const res = await fetch(`${base()}/calls/${callId}/accept`, { method: 'POST' });
+function participantHeaders(actorId: string) {
+  return {
+    'Content-Type': 'application/json',
+    'X-User-Id': actorId,
+  };
+}
+
+export async function acceptBridgeCall(callId: string, hostId: string) {
+  const res = await fetch(`${base()}/calls/${callId}/accept`, {
+    method: 'POST', headers: participantHeaders(hostId),
+    body: JSON.stringify({ userId: hostId }),
+  });
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as { call: BridgeCall };
 }
 
-export async function rejectBridgeCall(callId: string) {
-  const res = await fetch(`${base()}/calls/${callId}/reject`, { method: 'POST' });
+export async function rejectBridgeCall(callId: string, hostId: string) {
+  const res = await fetch(`${base()}/calls/${callId}/reject`, {
+    method: 'POST', headers: participantHeaders(hostId),
+    body: JSON.stringify({ userId: hostId }),
+  });
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as { call: BridgeCall };
 }
 
-export async function endBridgeCall(callId: string) {
-  const res = await fetch(`${base()}/calls/${callId}/end`, { method: 'POST' });
+export async function endBridgeCall(callId: string, actorId: string, reason?: 'host' | 'user') {
+  const res = await fetch(`${base()}/calls/${callId}/end`, {
+    method: 'POST', headers: participantHeaders(actorId),
+    body: JSON.stringify({ userId: actorId, reason }),
+  });
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as { call: BridgeCall };
 }

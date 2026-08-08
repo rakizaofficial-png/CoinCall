@@ -28,7 +28,21 @@ let joined = false;
 let localUid = 0;
 let remoteUid: number | null = null;
 let currentPreset: BeautyPreset = 'snap';
+let joinWaiter: {
+  resolve: () => void;
+  reject: (error: Error) => void;
+  timeout: ReturnType<typeof setTimeout>;
+} | null = null;
 const remoteListeners = new Set<(uid: number | null) => void>();
+
+function settleJoin(error?: Error) {
+  if (!joinWaiter) return;
+  const pending = joinWaiter;
+  joinWaiter = null;
+  clearTimeout(pending.timeout);
+  if (error) pending.reject(error);
+  else pending.resolve();
+}
 
 function apiRoot() {
   return (env.apiBaseUrl || 'https://coincall-api.onrender.com/api').replace(
@@ -101,6 +115,7 @@ function ensureEngine(appId: string): IRtcEngine {
     onJoinChannelSuccess: (_connection, uid) => {
       localUid = uid;
       joined = true;
+      settleJoin();
     },
     onUserJoined: (_connection, uid) => {
       setRemoteUid(uid);
@@ -110,6 +125,7 @@ function ensureEngine(appId: string): IRtcEngine {
     },
     onError: (err, msg) => {
       console.warn('[agora-native] error', err, msg);
+      settleJoin(new Error(`Agora error ${err}${msg ? `: ${msg}` : ''}`));
     },
   };
   rtc.registerEventHandler(handler);
@@ -162,6 +178,18 @@ export async function startAgoraCall(options: StartAgoraCallOptions) {
   rtc.enableLocalVideo(true);
   rtc.startPreview();
 
+  // Register the waiter before invoking the native method. On fast Android
+  // devices onJoinChannelSuccess can arrive before joinChannel returns.
+  const joinedPromise = new Promise<void>((resolve, reject) => {
+    joinWaiter = {
+      resolve,
+      reject,
+      timeout: setTimeout(
+        () => settleJoin(new Error('Agora join timed out. Check network and token.')),
+        15_000,
+      ),
+    };
+  });
   const result = rtc.joinChannel(
     tokenPayload.token,
     tokenPayload.channel || options.channel,
@@ -176,10 +204,9 @@ export async function startAgoraCall(options: StartAgoraCallOptions) {
   );
 
   if (result < 0) {
-    throw new Error(`joinChannel failed (${result})`);
+    settleJoin(new Error(`joinChannel failed (${result})`));
   }
-
-  joined = true;
+  await joinedPromise;
   return { localUid: uid, remoteUid };
 }
 
@@ -266,6 +293,7 @@ export async function flipPreviewCamera() {
 }
 
 export async function stopAgoraCall() {
+  settleJoin(new Error('Agora call stopped before joining'));
   if (!engine) {
     joined = false;
     setRemoteUid(null);

@@ -1407,6 +1407,7 @@ app.post('/api/calls/:id/accept', (req, res) => {
     res.status(404).json({ error: 'Call not found' });
     return;
   }
+  if (!requireCallParticipant(req, res, call, 'host')) return;
   if (call.status === 'accepted') {
     scheduleNextCallCharge(call);
     res.json({ call });
@@ -1432,6 +1433,7 @@ app.post('/api/calls/:id/reject', (req, res) => {
     res.status(404).json({ error: 'Call not found' });
     return;
   }
+  if (!requireCallParticipant(req, res, call, 'host')) return;
   call.status = 'rejected';
   clearCallBillingTimer(call.id);
   call.endReason = 'rejected';
@@ -1449,6 +1451,7 @@ app.post('/api/calls/:id/end', (req, res) => {
     res.status(404).json({ error: 'Call not found' });
     return;
   }
+  if (!requireCallParticipant(req, res, call)) return;
   const reasonRaw = String(req.body?.reason || '').trim();
   const endReason: CallEndReason =
     reasonRaw === 'exhausted'
