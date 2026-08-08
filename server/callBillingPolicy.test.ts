@@ -6,12 +6,11 @@ import {
   nextCallChargeAt,
 } from './callBillingPolicy.ts';
 
-test('first accepted-call charge is due inside ten seconds', () => {
-  const acceptedAt = 1_000_000;
-  const dueAt = nextCallChargeAt(acceptedAt, 0);
-  assert.equal(dueAt - acceptedAt, FIRST_CALL_CHARGE_DELAY_MS);
-  assert.ok(dueAt - acceptedAt > 0);
-  assert.ok(dueAt - acceptedAt < 10_000);
+test('first connected-call charge is due immediately at confirmed connection', () => {
+  const connectedAt = 1_000_000;
+  const dueAt = nextCallChargeAt(connectedAt, 0);
+  assert.equal(dueAt - connectedAt, FIRST_CALL_CHARGE_DELAY_MS);
+  assert.equal(dueAt, connectedAt);
 });
 
 test('later call charges remain one minute apart without drift', () => {

@@ -31,6 +31,7 @@ export type BridgeCall = {
   userName: string;
   userAvatar?: string;
   ratePerMinute: number;
+  chargePerMinute?: number;
   status: "ringing" | "accepted" | "rejected" | "ended" | "missed";
   hostUidAgora: number;
   userUidAgora: number;
@@ -202,9 +203,10 @@ export async function endCall(callId: string) {
   await fetch(`${requireApiBase()}/calls/${callId}/end`, { method: "POST" });
 }
 
-export async function fetchCallToken(callId: string) {
+export async function fetchCallToken(callId: string, userId: string) {
   const res = await fetch(
     `${requireApiBase()}/calls/${callId}/token?role=user`,
+    { headers: getAuthHeaders(userId) },
   );
   return parse<{
     token: string;
@@ -213,6 +215,15 @@ export async function fetchCallToken(callId: string) {
     channel: string;
     call: BridgeCall;
   }>(res);
+}
+
+export async function reportRtcConnected(callId: string, userId: string) {
+  const res = await fetch(`${requireApiBase()}/calls/${callId}/rtc-connected`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders(userId) },
+    body: JSON.stringify({ userId, role: 'user' }),
+  });
+  return parse<{ ok: boolean; connectedAt: number | null }>(res);
 }
 
 export async function waitForAccept(

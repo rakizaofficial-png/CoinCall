@@ -1,8 +1,11 @@
 import type { NextConfig } from "next";
+import path from "node:path";
 
 const nextConfig: NextConfig = {
   turbopack: {
-    root: process.cwd(),
+    // This nested app intentionally shares the root workspace dependency
+    // installation. Turbopack must therefore watch their common parent.
+    root: path.resolve(process.cwd(), "..", ".."),
   },
   images: {
     remotePatterns: [

@@ -85,7 +85,8 @@ import {
   transferUserToHost,
   type CoinTxn,
 } from './coinLedger.ts';
-import { nextCallChargeAt } from './callBillingPolicy.ts';
+import { nextCallChargeAt, RECURRING_CALL_CHARGE_MS } from './callBillingPolicy.ts';
+import { chargePerMinute, configureRateUnitCoins, publicCallPricing, rateUnitCoins } from './callPricing.ts';
 import {
   availableAgencyCoins as calculateAgencyAvailableCoins,
   collectedAgencyCoins as calculateAgencyCollectedCoins,
@@ -194,6 +195,7 @@ const APP_ID = process.env.AGORA_APP_ID || '';
 const APP_CERT = process.env.AGORA_APP_CERTIFICATE || '';
 const PORT = Number(process.env.PORT || 4000);
 const ADMIN_KEY = process.env.ADMIN_API_KEY || 'coincall-admin';
+const CALL_RING_TIMEOUT_MS = Math.min(120_000, Math.max(15_000, Number(process.env.CALL_RING_TIMEOUT_MS || 45_000)));
 function isAdminCredential(value: unknown) {
   const credential = String(value || '').trim();
   return (
@@ -227,6 +229,11 @@ type CallRecord = {
   giftRequest?: GiftRequestRecord | null;
   /** How many full minutes have been billed user → host */
   billedMinutes?: number;
+  /** Set only after both authenticated Agora participants confirm the issued channel. */
+  connectedAt?: number;
+  rtcConnected?: Partial<Record<'user' | 'host', number>>;
+  /** Final server-derived charge; never accepted from a client. */
+  chargePerMinute?: number;
   endReason?: CallEndReason;
 };
 
@@ -598,6 +605,25 @@ function requireUserMatch(req: express.Request, res: express.Response, userId: s
   return false;
 }
 
+/** Authorize a request against the immutable server call participants. */
+function requireCallParticipant(
+  req: express.Request,
+  res: express.Response,
+  call: CallRecord,
+  requestedRole?: string,
+): 'user' | 'host' | null {
+  const claimed = String(req.headers['x-user-id'] || req.body?.userId || req.query.userId || '').trim();
+  const role = requestedRole === 'host' ? 'host' : requestedRole === 'user' ? 'user' : undefined;
+  const userMatch = claimed === call.userId;
+  const hostMatch = claimed === call.hostId;
+  if (!claimed || (!userMatch && !hostMatch) || (role === 'user' && !userMatch) || (role === 'host' && !hostMatch)) {
+    res.status(403).json({ error: 'Only a participant in this call may perform this action' });
+    return null;
+  }
+  if (!requireUserMatch(req, res, claimed)) return null;
+  return userMatch ? 'user' : 'host';
+}
+
 /** Platform master key only — never accept agency login keys here */
 function requireAdmin(req: express.Request, res: express.Response): boolean {
   const token = verifyStaffToken(requestStaffToken(req));
@@ -856,8 +882,10 @@ app.get('/api/agora/token', (req, res) => {
     const adminOk = isAdminCredential(
       req.query.key || req.headers['x-admin-key'],
     );
-    if (!adminOk && !channel.startsWith('call_') && !channel.startsWith('live_') && !channel.startsWith('party_')) {
-      res.status(403).json({ error: 'Channel not allowed' });
+    // Participants receive scoped tokens from call/live authorization routes.
+    // This generic endpoint remains only for tightly controlled operations.
+    if (!adminOk) {
+      res.status(403).json({ error: 'Use a scoped call or live token endpoint' });
       return;
     }
     const uid = Number(req.query.uid || 0);
@@ -878,6 +906,7 @@ app.get('/api/agora/rtm-token', (req, res) => {
       res.status(400).json({ error: 'userId is required' });
       return;
     }
+    if (!requireUserMatch(req, res, userId)) return;
     res.json(mintRtmToken(userId));
   } catch (e: any) {
     res.status(500).json({ error: e?.message || 'RTM token error' });
@@ -1275,6 +1304,7 @@ app.post('/api/calls', (req, res) => {
     res.status(400).json({ error: 'hostId, userId, userName required' });
     return;
   }
+  if (!requireUserMatch(req, res, String(userId))) return;
 
   const hid = String(hostId);
   const gate = assertHostCanReceiveCalls(hid);
@@ -1298,14 +1328,15 @@ app.post('/api/calls', (req, res) => {
   }
 
   const rate = normalizeHostCallPrice(host.ratePerMinute);
+  const pricing = publicCallPricing(rate);
   const userWallet = ensureWallet(String(userId), {
     role: 'user',
     displayName: String(userName),
   });
-  if (userWallet.coinBalance < rate) {
+  if (userWallet.coinBalance < pricing.chargePerMinute) {
     res.status(402).json({
       error: 'Insufficient balance, please recharge',
-      need: rate,
+      need: pricing.chargePerMinute,
       wallet: walletPublic(userWallet),
     });
     return;
@@ -1321,6 +1352,7 @@ app.post('/api/calls', (req, res) => {
     userName: String(userName),
     userAvatar: userAvatar ? String(userAvatar) : undefined,
     ratePerMinute: rate,
+    chargePerMinute: pricing.chargePerMinute,
     status: 'ringing',
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -1343,7 +1375,7 @@ app.post('/api/calls', (req, res) => {
     inCall: true,
   });
 
-  // Auto-miss after 45s
+  // Auto-miss after the server-authoritative ring window.
   setTimeout(() => {
     const current = calls.get(id);
     if (current?.status === 'ringing') {
@@ -1355,7 +1387,7 @@ app.post('/api/calls', (req, res) => {
       archiveCall(current, 'missed');
       pushToHost(current.hostId, 'call_missed', current);
     }
-  }, 45_000);
+  }, CALL_RING_TIMEOUT_MS);
 
   res.status(201).json({ call });
 });
@@ -1467,11 +1499,11 @@ function billAcceptedCall(call: CallRecord, minuteIndex: number): CallBillingRes
     displayName: call.userName,
   });
 
-  if (call.status !== 'accepted') {
+  if (call.status !== 'accepted' || !call.connectedAt) {
     return {
       ok: false,
       code: 409,
-      error: `Call is ${call.status}`,
+      error: call.connectedAt ? `Call is ${call.status}` : 'Call media is not connected',
       billedMinutes: billed,
       userWallet,
     };
@@ -1506,7 +1538,7 @@ function billAcceptedCall(call: CallRecord, minuteIndex: number): CallBillingRes
     };
   }
 
-  const amount = normalizeHostCallPrice(call.ratePerMinute);
+  const amount = chargePerMinute(call.ratePerMinute);
   if (userWallet.coinBalance < amount) {
     return {
       ok: false,
@@ -1525,7 +1557,7 @@ function billAcceptedCall(call: CallRecord, minuteIndex: number): CallBillingRes
     gross: amount,
     callId: call.id,
     reason: `call_minute_${call.id}`,
-    meta: { billedMinute: nextMinute, ratePerMinute: amount },
+    meta: { billedMinute: nextMinute, hostRate: call.ratePerMinute, chargePerMinute: amount },
   });
   if (!result.ok) {
     return {
@@ -1573,9 +1605,9 @@ function billAcceptedCall(call: CallRecord, minuteIndex: number): CallBillingRes
 
 function scheduleNextCallCharge(call: CallRecord) {
   clearCallBillingTimer(call.id);
-  if (call.status !== 'accepted' || !call.acceptedAt) return;
+  if (call.status !== 'accepted' || !call.connectedAt) return;
   const scheduledMinute = Math.max(0, Math.floor(call.billedMinutes || 0)) + 1;
-  const dueAt = nextCallChargeAt(call.acceptedAt, scheduledMinute - 1);
+  const dueAt = nextCallChargeAt(call.connectedAt, scheduledMinute - 1);
   const timer = setTimeout(() => {
     callBillingTimers.delete(call.id);
     const current = calls.get(call.id);
@@ -1626,7 +1658,7 @@ app.post('/api/calls/:id/minute', (req, res) => {
     res.status(result.code).json({
       error: result.error,
       billedMinutes: result.billedMinutes,
-      need: normalizeHostCallPrice(call.ratePerMinute),
+      need: chargePerMinute(call.ratePerMinute),
       callEnded: result.code === 402 || result.code === 403,
       userWallet: walletPublic(result.userWallet),
       wallet: walletPublic(result.userWallet),
@@ -1639,7 +1671,7 @@ app.post('/api/calls/:id/minute', (req, res) => {
   scheduleNextCallCharge(call);
   res.json({
     ok: true,
-    amount: result.txn?.coinsDeducted ?? normalizeHostCallPrice(call.ratePerMinute),
+    amount: result.txn?.coinsDeducted ?? chargePerMinute(call.ratePerMinute),
     hostCredited: result.txn?.coinsCreditedHost ?? 0,
     platformCut: result.txn?.coinsCreditedPlatform ?? 0,
     commissionRate: result.txn?.commissionRate ?? platformCommissionRate(),
@@ -1797,6 +1829,7 @@ app.get('/api/calls/:id/token', (req, res) => {
     return;
   }
   const role = String(req.query.role || 'user');
+  if (!requireCallParticipant(req, res, call, role)) return;
   const uid = role === 'host' ? call.hostUidAgora : call.userUidAgora;
   try {
     const token = mintToken(call.channel, uid, 'publisher');
@@ -1804,6 +1837,39 @@ app.get('/api/calls/:id/token', (req, res) => {
   } catch (e: any) {
     res.status(500).json({ error: e?.message || 'Token error' });
   }
+});
+
+/**
+ * Clients can report an Agora join only for their own participant identity.
+ * The backend starts billing exactly once after both reports are present.
+ */
+app.post('/api/calls/:id/rtc-connected', (req, res) => {
+  const call = calls.get(String(req.params.id));
+  if (!call) {
+    res.status(404).json({ error: 'Call not found' });
+    return;
+  }
+  if (call.status !== 'accepted') {
+    res.status(409).json({ error: `Call is ${call.status}` });
+    return;
+  }
+  const role = String(req.body?.role || '').toLowerCase();
+  const participant = requireCallParticipant(req, res, call, role);
+  if (!participant) return;
+  const connected = { ...(call.rtcConnected || {}) };
+  connected[participant] ||= Date.now();
+  call.rtcConnected = connected;
+  if (!call.connectedAt && connected.user && connected.host) {
+    call.connectedAt = Math.max(connected.user, connected.host);
+    call.updatedAt = Date.now();
+    calls.set(call.id, call);
+    scheduleNextCallCharge(call);
+    broadcastWs({ type: 'call:connected', payload: { callId: call.id, connectedAt: call.connectedAt } });
+  } else {
+    calls.set(call.id, call);
+  }
+  persist();
+  res.json({ ok: true, callId: call.id, participant, connectedAt: call.connectedAt || null, waitingFor: call.connectedAt ? [] : (connected.user ? ['host'] : connected.host ? ['user'] : ['user', 'host']) });
 });
 
 /** Host asks user for a gift during an active call */
@@ -2947,6 +3013,13 @@ function publicPricingConfig() {
     updatedAt: pricingUpdatedAt,
     coinPackages: IAP_PRODUCTS,
     vipPlans: VIP_PLANS,
+    callBilling: {
+      rateUnitCoins: rateUnitCoins(),
+      formula: 'chargePerMinute = hostRate × rateUnitCoins',
+      intervalMs: RECURRING_CALL_CHARGE_MS,
+      firstCharge: 'after_both_rtc_connected',
+      livePrivateCallPolicy: 'pause_live',
+    },
   };
 }
 
@@ -2962,6 +3035,7 @@ app.post('/api/admin/config/pricing', (req, res) => {
     ? req.body.coinPackages
     : null;
   const plans = Array.isArray(req.body?.vipPlans) ? req.body.vipPlans : null;
+  const requestedRateUnit = req.body?.callBilling?.rateUnitCoins;
   if (!packages?.length || !plans?.length) {
     res.status(400).json({ error: 'coinPackages and vipPlans are required' });
     return;
@@ -2994,6 +3068,7 @@ app.post('/api/admin/config/pricing', (req, res) => {
   }
   IAP_PRODUCTS.splice(0, IAP_PRODUCTS.length, ...nextPackages);
   VIP_PLANS = nextPlans;
+  if (requestedRateUnit !== undefined) configureRateUnitCoins(requestedRateUnit);
   pricingUpdatedAt = Date.now();
   persist();
   res.json({ ok: true, ...publicPricingConfig() });
@@ -5337,6 +5412,7 @@ function restoreFromDisk() {
     const raw = snap.pricingConfig as {
       coinPackages?: typeof IAP_PRODUCTS;
       vipPlans?: typeof VIP_PLANS;
+      callBilling?: { rateUnitCoins?: number };
       updatedAt?: number;
     };
     if (Array.isArray(raw.coinPackages) && raw.coinPackages.length) {
@@ -5344,6 +5420,9 @@ function restoreFromDisk() {
     }
     if (Array.isArray(raw.vipPlans) && raw.vipPlans.length) {
       VIP_PLANS = raw.vipPlans;
+    }
+    if (raw.callBilling?.rateUnitCoins !== undefined) {
+      configureRateUnitCoins(raw.callBilling.rateUnitCoins);
     }
     pricingUpdatedAt = Number(raw.updatedAt) || pricingUpdatedAt;
   }
@@ -5926,6 +6005,7 @@ app.patch('/api/live/rooms/:id/lock', (req, res) => {
     res.status(403).json({ error: 'Only the live host can change lock' });
     return;
   }
+  if (!requireUserMatch(req, res, hostId)) return;
   const entryLocked = Boolean(req.body?.entryLocked);
   const entryFee = entryLocked
     ? Math.max(10, Math.min(9999, Math.floor(Number(req.body?.entryFee) || 50)))

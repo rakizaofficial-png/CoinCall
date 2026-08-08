@@ -182,8 +182,10 @@ export async function endBridgeCall(callId: string) {
   return (await res.json()) as { call: BridgeCall };
 }
 
-export async function fetchCallToken(callId: string, role: 'host' | 'user') {
-  const res = await fetch(`${base()}/calls/${callId}/token?role=${role}`);
+export async function fetchCallToken(callId: string, role: 'host' | 'user', userId: string) {
+  const res = await fetch(`${base()}/calls/${callId}/token?role=${role}`, {
+    headers: { 'X-User-Id': userId },
+  });
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as {
     token: string;
@@ -192,6 +194,16 @@ export async function fetchCallToken(callId: string, role: 'host' | 'user') {
     channel: string;
     call: BridgeCall;
   };
+}
+
+export async function reportBridgeRtcConnected(callId: string, role: 'host' | 'user', userId: string) {
+  const res = await fetch(`${base()}/calls/${callId}/rtc-connected`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-User-Id': userId },
+    body: JSON.stringify({ userId, role }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return (await res.json()) as { ok: boolean; connectedAt: number | null };
 }
 
 /**

@@ -34,7 +34,7 @@ import {
   stopAgoraCall,
   switchAgoraCamera,
 } from '../../services/agoraService';
-import { endBridgeCall, fetchCallToken, watchBridgeCallEnd } from '../../services/callBridge';
+import { endBridgeCall, fetchCallToken, reportBridgeRtcConnected, watchBridgeCallEnd } from '../../services/callBridge';
 import { setHostCallBusy } from '../../services/hostCallBusy';
 import { pushLiveCallHistory } from '../../services/liveCallHistory';
 import { useLiveStudio } from '../../context/LiveStudioContext';
@@ -345,7 +345,7 @@ export function CallScreen({ navigation, route }: Props) {
         setVideoStatus('Joining secure room…');
 
         if (isBridge && bridgeCallId) {
-          const tokenPayload = await fetchCallToken(bridgeCallId, 'host');
+          const tokenPayload = await fetchCallToken(bridgeCallId, 'host', user.id);
           if (!active) return;
           await startAgoraCall({
             channel: tokenPayload.channel || channel,
@@ -356,6 +356,9 @@ export function CallScreen({ navigation, route }: Props) {
             appId: tokenPayload.appId,
             beauty: beautyPreset,
           });
+          if (isBridge && bridgeCallId) {
+            await reportBridgeRtcConnected(bridgeCallId, 'host', user.id);
+          }
         } else {
           await startAgoraCall({
             channel,

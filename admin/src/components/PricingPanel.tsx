@@ -16,6 +16,7 @@ type VipPlan = {
   period: string;
   coins: number;
 };
+type CallBilling = { rateUnitCoins: number; formula?: string };
 
 function headers() {
   return {
@@ -27,6 +28,7 @@ function headers() {
 export function PricingPanel() {
   const [coinPackages, setCoinPackages] = useState<CoinPackage[]>([]);
   const [vipPlans, setVipPlans] = useState<VipPlan[]>([]);
+  const [callBilling, setCallBilling] = useState<CallBilling>({ rateUnitCoins: 10 });
   const [msg, setMsg] = useState('');
 
   useEffect(() => {
@@ -35,6 +37,7 @@ export function PricingPanel() {
       .then((data) => {
         setCoinPackages(data.coinPackages || []);
         setVipPlans(data.vipPlans || []);
+        setCallBilling(data.callBilling || { rateUnitCoins: 10 });
       })
       .catch(() => setMsg('Could not load pricing'));
   }, []);
@@ -44,7 +47,7 @@ export function PricingPanel() {
     const res = await fetch(`${apiBaseUrl}/admin/config/pricing`, {
       method: 'POST',
       headers: headers(),
-      body: JSON.stringify({ coinPackages, vipPlans }),
+      body: JSON.stringify({ coinPackages, vipPlans, callBilling }),
     });
     const data = await res.json().catch(() => ({}));
     setMsg(res.ok ? 'Pricing published to the user app' : data.error || 'Save failed');
@@ -62,6 +65,12 @@ export function PricingPanel() {
         </button>
       </div>
       {msg ? <div className="hm-toast desk-toast">{msg}</div> : null}
+      <h3 className="section-title">Private call billing</h3>
+      <div className="desk-table-wrap"><table className="desk-table"><thead><tr><th>Host rate unit</th><th>Coins per rate unit</th><th>Formula</th></tr></thead><tbody><tr>
+        <td>Host rate</td>
+        <td><input type="number" min="1" max="10000" value={callBilling.rateUnitCoins} onChange={(e) => setCallBilling({ rateUnitCoins: Math.max(1, Math.floor(Number(e.target.value) || 1)) })} /></td>
+        <td>Host rate × {callBilling.rateUnitCoins} = coins/minute</td>
+      </tr></tbody></table></div>
       <h3 className="section-title">Coin packages</h3>
       <div className="desk-table-wrap">
         <table className="desk-table">

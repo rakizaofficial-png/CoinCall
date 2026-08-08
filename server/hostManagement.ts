@@ -18,6 +18,13 @@ import {
   pruneHosts,
 } from './presenceStore.ts';
 import { dumpCoinTxns } from './coinLedger.ts';
+import {
+  DEFAULT_HOST_RATE,
+  MAX_HOST_RATE,
+  MIN_HOST_RATE,
+  normalizeHostRate,
+  normalizePersistedHostRate,
+} from './callPricing.ts';
 
 export type HostLifecycleStatus =
   | 'pending'
@@ -128,23 +135,20 @@ const auditLogs: AuditLogEntry[] = [];
 const notifications = new Map<string, HostNotification[]>();
 
 const DEFAULT_COMMISSION = 0.3;
-export const MIN_HOST_CALL_PRICE = 30;
-export const MAX_HOST_CALL_PRICE = 40;
-export const DEFAULT_HOST_CALL_PRICE = 40;
+/** @deprecated Use host rate + chargePerMinute from callPricing.ts. */
+export const MIN_HOST_CALL_PRICE = MIN_HOST_RATE;
+/** @deprecated Use host rate + chargePerMinute from callPricing.ts. */
+export const MAX_HOST_CALL_PRICE = MAX_HOST_RATE;
+/** Default stored host rate: 3 × 10 = 30 coins/minute. */
+export const DEFAULT_HOST_CALL_PRICE = DEFAULT_HOST_RATE;
 
 export function normalizeHostCallPrice(value: unknown): number {
-  const price = Math.round(Number(value));
-  if (!Number.isFinite(price)) return DEFAULT_HOST_CALL_PRICE;
-  return Math.min(MAX_HOST_CALL_PRICE, Math.max(MIN_HOST_CALL_PRICE, price));
+  return normalizePersistedHostRate(value);
 }
 
 function isValidHostCallPrice(value: unknown): boolean {
   const price = Number(value);
-  return (
-    Number.isInteger(price) &&
-    price >= MIN_HOST_CALL_PRICE &&
-    price <= MAX_HOST_CALL_PRICE
-  );
+  return Number.isInteger(price) && price >= MIN_HOST_RATE && price <= MAX_HOST_RATE;
 }
 
 function now() {

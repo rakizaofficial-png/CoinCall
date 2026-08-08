@@ -5,6 +5,7 @@ import {
   createCall,
   endCall as endBridgeCall,
   fetchCallToken,
+  reportRtcConnected,
   getCall,
   waitForAccept,
   type BridgeCall,
@@ -179,7 +180,7 @@ export function useCallSessionEngine(opts: {
           setBridgeCall(accepted);
 
           setStatusText("Host accepted · joining video…");
-          const token = await fetchCallToken(accepted.id);
+          const token = await fetchCallToken(accepted.id, userId);
           if (cancelledRef.current) return;
 
           for (let i = 0; i < 40; i++) {
@@ -200,6 +201,7 @@ export function useCallSessionEngine(opts: {
             localVideoEl: localRef.current,
             remoteVideoEl: remoteRef.current,
           });
+          await reportRtcConnected(accepted.id, userId);
           if (cancelledRef.current) return;
           setStatusText(`Connected with ${host.name}`);
           onConnected?.({ transport: "agora_live", name: host.name });
