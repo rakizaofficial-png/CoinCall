@@ -5,10 +5,12 @@ import { hashProviderToken } from './paymentStore.ts';
 import { verifyStripeWebhook } from './stripePayments.ts';
 
 test('authoritative catalog contains unique provider ids and never publishes a hard-coded price', () => {
-  assert.equal(PAYMENT_PRODUCTS.length, 11);
+  assert.equal(PAYMENT_PRODUCTS.length, 14);
   assert.equal(new Set(PAYMENT_PRODUCTS.map((p) => p.id)).size, PAYMENT_PRODUCTS.length);
-  assert.equal(getPaymentProduct('luma_coins_1000')?.coins, 1000);
-  assert.equal(getPaymentProduct('luma_coins_1000')?.bonusCoins, 120);
+  assert.equal(getPaymentProduct('zuko_coins_90')?.coins, 90);
+  assert.equal(getPaymentProduct('zuko_coins_600')?.coins, 600);
+  assert.equal(getPaymentProduct('zuko_coins_1300')?.coins, 1300);
+  assert.equal(publicPaymentCatalog('google').filter((p) => p.type === 'coins').length, 3);
   for (const row of publicPaymentCatalog('google')) assert.equal(row.price, null);
 });
 
